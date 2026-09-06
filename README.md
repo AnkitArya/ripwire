@@ -50,6 +50,20 @@ the tests that reach them. Run on this repository (2026-08-30), that second line
 - **Its own confidence** — this answer says `confidence="high"` with the score margin attached; a
   flat ranking says `low`, so it reads as a starting point instead of masquerading as an answer.
 
+### If it works on your codebase, tell us what it got wrong
+
+Every number on this page is a measurement on a corpus we happen to have. **Yours is one we don't.**
+
+After you have actually used it on your own repository for a while, hand your agent
+[`prompts/improve-for-my-language.md`](prompts/improve-for-my-language.md). It harvests that
+session's own transcript — where ripwire answered, where it missed, where you fell back to grep —
+and every finding it produces has to cite the moment it came from: what you asked, which command
+ran, what came back. Open an issue with the result.
+
+That is worth more to this project than a bug report, because it arrives in the form the project
+already runs on: evidence with its provenance attached, not an impression. Several languages here
+are one contributor's corpus away from being measurably better, and we cannot see your code.
+
 <details>
 <summary>The actual wire format — what your agent reads (minified XML; trimmed and line-wrapped here)</summary>
 
