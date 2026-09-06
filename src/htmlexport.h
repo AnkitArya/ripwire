@@ -57,6 +57,95 @@ inline std::string jsonEscape( std::string_view s )
     return jsonesc::escapeHtml( s );
 }
 
+// R-R/PRIV: drop the HOME PAIR from a corpus root, so the emitted page never carries the operator's
+// home directory. `/Users/jane.doe/src/app` → `src/app`; `C:\\Users\\Bob\\code` → `code`; `/home/jane`
+// → `~`. This is the SECURITY half of the pair described at the `const ROOT` emit site — the JS
+// `rootShort()` is the presentation half, and is a no-op on what this returns.
+//
+// Two properties this is written for, both learned from the JS version's first cut:
+//   • Structure, not tail. Taking the last two segments looks equivalent and is not: for `~/myproject`
+//     — plausibly the most common layout anywhere — the home directory IS one of the last two, so a
+//     tail-taker republishes the username. The leaking segment's POSITION is knowable; use it.
+//   • Separators are plural. Splitting on '/' alone passes `C:\\Users\\Bob\\code` through whole.
+// A root with no home pair is returned VERBATIM rather than rebuilt, so `/opt/src` keeps its leading
+// separator and only the leaking shape is rewritten.
+inline std::string stripHomePair( std::string_view root )
+{
+    if( root.empty() )
+    {
+        return std::string();                       // multi-root: each path carries its own label
+    }
+
+    std::vector<std::string_view> parts;
+    for( std::size_t begin = 0; begin < root.size(); )
+    {
+        const std::size_t end = root.find_first_of( "/\\", begin );
+        const std::string_view seg = root.substr( begin, end == std::string_view::npos ? std::string_view::npos : end - begin );
+        if( !seg.empty() && seg != "." )
+        {
+            parts.push_back( seg );
+        }
+        if( end == std::string_view::npos )
+        {
+            break;
+        }
+        begin = end + 1;
+    }
+
+    std::size_t first = 0;
+    if( first < parts.size() && parts[ first ].size() == 2 && parts[ first ][ 1 ] == ':' )
+    {
+        ++first;                                    // a Windows drive letter is not the home root
+    }
+
+    const auto equalsFolded = []( std::string_view a, std::string_view b )
+    {
+        if( a.size() != b.size() )
+        {
+            return false;
+        }
+        for( std::size_t i = 0; i < a.size(); ++i )
+        {
+            const char ca = ( a[i] >= 'A' && a[i] <= 'Z' ) ? char( a[i] - 'A' + 'a' ) : a[i];
+            if( ca != b[i] )
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    std::size_t dropCount = 0;
+    if( first < parts.size() )
+    {
+        const std::string_view lead = parts[ first ];
+        if( ( equalsFolded( lead, "users" ) || equalsFolded( lead, "home" ) ) && parts.size() - first >= 2 )
+        {
+            dropCount = 2;                          // the root segment AND the user name below it
+        }
+        else if( equalsFolded( lead, "root" ) )
+        {
+            dropCount = 1;                          // /root IS the home directory; there is no name below it
+        }
+    }
+
+    if( dropCount == 0 )
+    {
+        return std::string( root );                 // nothing to hide — keep the spelling as typed
+    }
+
+    std::string out;
+    for( std::size_t i = first + dropCount; i < parts.size(); ++i )
+    {
+        if( !out.empty() )
+        {
+            out += '/';
+        }
+        out.append( parts[i] );
+    }
+    return out.empty() ? std::string( "~" ) : out;  // the root WAS the home directory, and nothing else
+}
+
 // Short lang label for the graph JSON (matches the terse XML convention) — model.h::langTag is the
 // canonical switch; this file used to keep a private copy.
 
@@ -1461,14 +1550,19 @@ static const char kScriptRouter[] = R"JS(
 
     // ---- CAPTION FACTS. stampProvenance burns THIS half, and only this half, into the exported PNG.
     var factLines = [];
-    // R-R/PRIV: the caption shows the TAIL of the root, not the whole path. const ROOT keeps the full
-    // string because the FILES[] entries below are relative to it and the page must still resolve them
-    // -- but the caption is what stampProvenance burns into every exported PNG, and a PNG is the thing
-    // people share. Shipping the absolute path there published the operator's filesystem layout, and
-    // their home directory often carries their real name. Verified on this repo's own README figures,
-    // which went to a public branch stamped with the operator's own absolute home path; `strings` finds
-    // nothing, because it is rendered as pixels, so no secret scanner would ever have flagged it.
-    // Drop the HOME PAIR before taking the tail. Taking the last two segments alone is not enough:
+    // R-R/PRIV: the caption shows the TAIL of the root, not the whole path -- and by the time it runs,
+    // the home pair is already gone, stripped in C++ by stripHomePair() before `const ROOT` was written
+    // (see the emit site for why the file, not just the pixels, is the boundary). This function is the
+    // PRESENTATION half: it shortens a long root to '…/a/b' so the caption fits. It re-applies the same
+    // structural strip anyway, because it is cheap, it is a no-op on stripped input, and it keeps this
+    // half correct on its own terms rather than correct-because-of-something-upstream.
+    //
+    // The caption matters because stampProvenance burns it into every exported PNG, and a PNG is the
+    // thing people share. Shipping the absolute path there published the operator's filesystem layout,
+    // and their home directory often carries their real name. Verified on this repo's own README
+    // figures, which went to a public branch stamped with the operator's own absolute home path;
+    // `strings` finds nothing, because it is rendered as pixels, so no secret scanner would ever have
+    // flagged it. Taking the last two segments alone is not enough:
     // for `~/myproject` -- probably the most common layout there is -- the home directory IS one of
     // those two, so the caption published the username anyway. Measured on the first version (written
     // here in the Linux spelling; the macOS one differs only in the leading segment, which is why the
@@ -2457,7 +2551,25 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // the relative FILES[] entries below back to a checkout. Empty on a multi-root run, where each path
     // already carries its own root label.
     const std::string htmlRootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
-    std::fprintf( out, "const ROOT = \"%s\";\n", jsonEscape( htmlRootPrefix ).c_str() );
+
+    // R-R/PRIV: the prefix above is used STRUCTURALLY, to make each FILES[] entry relative — but what
+    // reaches the page is the home-pair-stripped label, never the absolute path. The JS `rootShort()`
+    // that formats the caption already strips this pair, and that was believed to be the whole fix; it
+    // is not. It only protects the PIXELS. `const ROOT` sat in the emitted file carrying the operator's
+    // absolute home path, and --html's whole purpose is to hand someone a self-contained page — so the
+    // leak simply moved from the screenshot to View Source, where it is greppable rather than merely
+    // legible. The comment above this block used to justify keeping the full string by claiming the page
+    // resolves FILES[] against it. Checked against a real emitted page: `ROOT` appears three times, and
+    // the only USE is `rootShort(ROOT)` in the caption. Nothing resolved anything. Strip it at the
+    // source, so no surface downstream can leak what was never written.
+    //
+    // Two implementations of one rule is how a rule drifts, so they are split by ROLE rather than
+    // duplicated: this is the SECURITY boundary (the pair never enters the file) and `rootShort()` is a
+    // PRESENTATION formatter (the '…/a/b' tail). Running the JS over an already-stripped label is a
+    // no-op — its own guard is on a leading `users`/`home`/`root` segment, which is exactly what is
+    // gone by then. test/htmlrendercheck.sh (P1) greps the emitted page; (P2) is its mutation control.
+    const std::string htmlRootLabel = stripHomePair( htmlRootPrefix );
+    std::fprintf( out, "const ROOT = \"%s\";\n", jsonEscape( htmlRootLabel ).c_str() );
 
     // emit FILES array — one path string per distinct selected-symbol file, first-seen order (R-R: each
     // relative to ROOT above, so the page no longer repeats the checkout prefix once per file)

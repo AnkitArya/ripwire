@@ -69,6 +69,9 @@
 #   (W) CAPTION SPLIT  the bitmap carries PROVENANCE and the methodology travels beside it in a
 #               companion .txt the same export writes — with the pointer that says so, and the control
 #               pair proving the clauses left one half and landed in the other rather than being deleted
+#   (Y) ROOT LABEL  the operator's home directory reaches neither the exported pixels nor the emitted
+#               FILE — stripped by position (both segments, not a tail), with the mutation control that
+#               proves the grep can see a leak and the counter-control that a non-home root survives intact
 #
 # Usage:
 #   test/htmlrendercheck.sh                          # uses build/ripwire on test/fixture
@@ -1218,6 +1221,86 @@ if [ -n "$wmax" ] && [ "$wfacts" -gt 0 ] && [ "$wfacts" -le "$wmax" ]; then
 else
     no "(W10) the stamped half is ${wfacts:-0} lines against a ${wmax:-unset}-line ceiling — a line would be dropped from the bitmap with nothing to say so"
 fi
+
+# ── (Y) THE ROOT LABEL — the operator's home directory reaches neither the pixels nor the file ───────
+# The first cut of this fix stripped the home pair in the JS that renders the CAPTION, and stopped
+# there, on the reasoning that the caption is what stampProvenance burns into an exported PNG and a PNG
+# is the thing people share. Both halves of that are true and the conclusion still did not hold: --html
+# writes a SELF-CONTAINED page whose entire purpose is to be handed to someone, and `const ROOT` sat in
+# it carrying the absolute path. So the leak did not close, it changed medium — from something legible
+# in a screenshot to something greppable in View Source, which is worse. Checked against a real emitted
+# page before writing this: `ROOT` appears three times and the only USE is `rootShort(ROOT)`; the
+# comment justifying the full string ("the FILES[] entries are relative to it and the page must still
+# resolve them") described code that did not exist. The strip moved into C++, ahead of the write.
+#
+# These arms exist because that fix shipped with NO gate at all — the property was asserted in a
+# comment. A privacy property defended by a comment is defended until the next refactor.
+#
+# The corpus is placed at $HOME/<one segment> on purpose. That is not an arbitrary absolute path, it is
+# the exact shape the JS version got wrong: with only two segments before the project, the home
+# directory IS one of the last two, so a tail-taker republishes the username while looking like it
+# stripped something. `~/myproject` is plausibly the most common layout there is.
+PRIVDIR="$HOME/.ripwire-privcheck-$$"
+trap 'rm -rf "$TMP" "$PRIVDIR"' EXIT
+mkdir -p "$PRIVDIR"
+cp "$CORPUS"/* "$PRIVDIR"/ 2>/dev/null || true
+PRIVPAGE="$TMP/priv.html"
+"$BIN" "$PRIVDIR" --html --no-cache >"$PRIVPAGE" 2>/dev/null
+
+if [ ! -s "$PRIVPAGE" ]; then
+    no "(Y1) --html produced no page for a corpus under \$HOME — the arm has nothing to inspect"
+elif [ "${PRIVDIR#$HOME/}" = "$PRIVDIR" ]; then
+    no "(Y1) \$HOME is not a prefix of the corpus path — this arm cannot observe a home-path leak and must not report clean"
+else
+    privHits="$( grep -c -- "$HOME" "$PRIVPAGE" || true )"
+    if [ "$privHits" -eq 0 ]; then
+        ok "(Y1) the emitted page contains no occurrence of \$HOME — the leak is closed in the FILE, not only in the pixels"
+    else
+        no "(Y1) the emitted page states \$HOME $privHits time(s) — --html is a page people share, and it is carrying the operator's home directory"
+    fi
+fi
+
+# (Y2) MUTATION CONTROL for (Y1). A grep that finds nothing proves nothing until it has been shown to
+# find the thing. Put the absolute path back into the ROOT line of a COPY and re-run the identical
+# test; if it still reports clean, the arm above is measuring the absence of a grep, not of a leak.
+if [ -s "$PRIVPAGE" ]; then
+    mutants=$(( mutants + 1 ))
+    sed "s|^const ROOT = \".*\";|const ROOT = \"$PRIVDIR\";|" "$PRIVPAGE" >"$TMP/priv-mutant.html"
+    if ! grep -q -- "$PRIVDIR" "$TMP/priv-mutant.html"; then
+        no "(Y2) the mutation control did not take — the injected path is not in the mutant, so (Y1) was never exercised"
+    elif [ "$( grep -c -- "$HOME" "$TMP/priv-mutant.html" || true )" -gt 0 ]; then
+        ok "(Y2) mutation control: re-injecting the absolute path into const ROOT turns (Y1) red"
+    else
+        no "(Y2) mutation control FAILED OPEN — the page carries the absolute path and (Y1)'s test still reports clean"
+    fi
+fi
+
+# (Y3) STRUCTURE, NOT TAIL. (Y1) would also pass if the label were the empty string, or the last segment
+# by luck. State what the label must BE: both home segments gone and nothing else, which for a
+# `$HOME/<one segment>` root is that one segment alone. This is the assertion that separates a
+# positional strip from a `slice(-2)` that happens to look right on a deeper path.
+if [ -s "$PRIVPAGE" ]; then
+    privRoot="$( grep -m1 '^const ROOT = ' "$PRIVPAGE" | sed -E 's/^const ROOT = "(.*)";$/\1/' )"
+    privBase="$( basename "$PRIVDIR" )"
+    if [ "$privRoot" = "$privBase" ]; then
+        ok "(Y3) the label is '$privRoot' — the home root AND the user segment below it were both dropped, by position"
+    else
+        no "(Y3) the label is '$privRoot', expected '$privBase' — the strip is not dropping the home PAIR"
+    fi
+fi
+
+# (Y4) AND IT DOES NOT OVER-REACH. The counterpart control: a root with no home pair must survive
+# VERBATIM, leading separator and all. Without this, "strip the home pair" and "mangle every absolute
+# path" pass the same three arms, and the page would lose the one piece of context the label is for.
+NOHOME="$TMP/proj"
+mkdir -p "$NOHOME"
+cp "$CORPUS"/* "$NOHOME"/ 2>/dev/null || true
+"$BIN" "$NOHOME" --html --no-cache >"$TMP/nohome.html" 2>/dev/null
+nohomeRoot="$( grep -m1 '^const ROOT = ' "$TMP/nohome.html" 2>/dev/null | sed -E 's/^const ROOT = "(.*)";$/\1/' )"
+case "$nohomeRoot" in
+    */proj) ok "(Y4) a root with no home pair is emitted verbatim ('…${nohomeRoot#${nohomeRoot%/*/*}}') — the strip is scoped to the leaking shape" ;;
+    *)      no "(Y4) a root with no home pair came back as '$nohomeRoot' — the strip is rewriting paths it was not meant to touch" ;;
+esac
 
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"
