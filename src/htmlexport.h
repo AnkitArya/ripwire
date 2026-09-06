@@ -29,6 +29,7 @@
 #include "serialize.h"   // for escapeXml (not reused here; we write jsonEscape instead)
 #include "infra/jsonesc.h"     // A4-F27: canonical escape core; jsonEscape below is a thin wrapper
 #include "cli.h"         // for ColorBy — the --color-by=MODE enum baked into COLOR_MODE (no cycle: cli.h pulls ingest.h/version.h only)
+#include "infra/Diagnostics.h"  // VERIFY — writeEdgePayload asserts the emitted LINKS order, which the layout depends on
 
 #include <algorithm>
 #include <cmath>
@@ -193,6 +194,11 @@ static const char kScriptColour[] = R"JS(
     return langColor[n.lang] || langColor['?'];
   }
 
+  // C1 — how many LINKS carry the per-edge split-arm flag. Counted ONCE: it is a property of the
+  // baked payload, not of the current view, and the legend clause below must not claim a per-view number.
+  var AMB_LINKS = 0;
+  for (var _k = 0; _k < LINKS.length; _k++) if (LINKS[_k].a) { AMB_LINKS++; }
+
   // legend for the CURRENT mode, rendered into the #legend span.
   //
   // Every mode now NAMES ITS METRIC AND ITS UNITS. It used to emit a bare `0 1-4 5-9 10-19 20+` — five
@@ -232,6 +238,17 @@ static const char kScriptColour[] = R"JS(
       html = name('language:');
       for (var k in langColor) { if (Object.prototype.hasOwnProperty.call(langColor, k)) { html += sw(langColor[k]) + (k === '?' ? 'unknown' : k) + ' '; } }
     }
+    // C1 EDGE-CONFIDENCE clause. The node swatches above colour the node legend; this names the one thing
+    // that is true of the LINES. Emitted only when the payload actually has such an edge — a corpus that
+    // resolved cleanly gets no clause, because a legend for a stroke nobody can see is noise, not honesty.
+    // The count is of the SELECTED MAP (the top-K subgraph this document baked), not of the whole graph
+    // and not of the current view: renderProv's clause is the per-view number, and the two are labelled
+    // apart because an ego view draws a handful of these and the map holds all of them.
+    if (AMB_LINKS > 0) {
+      html += '<span class="ec"> \u2014 dashed edge: the resolver could not choose between same-name'
+            + ' definitions and split the call over all of them (' + AMB_LINKS + ' of ' + LINKS.length
+            + ' in this map); read the source before trusting one.</span>';
+    }
     el.innerHTML = html;
   }
 
@@ -255,30 +272,6 @@ static const char kScriptColour[] = R"JS(
   // crosses both directions, because a symbol's neighbourhood genuinely is its callers AND its callees;
   // what it no longer does is forget which was which, so the node view can state the split.
   var GN = NODES.length, GL = LINKS.length;
-
-  // ---- per-edge RESOLVER CONFIDENCE, folded into the LINKS records once.
-  //
-  // LCONF is emitted parallel to LINKS (Graph::outVals in hundredths — see writeHtml for what the
-  // number is made of). It is folded in here rather than carried as a parallel array because every view
-  // hands loadSubset either LINKS itself or copies of its records, and a positional array would have to
-  // be re-indexed correctly at each of those seams — three chances to get an off-by-one wrong in a
-  // channel whose whole job is to be trustworthy.
-  //
-  // THE THRESHOLD, and why this one. 0.20 is the weakest confidence graph.h assigns to a call it DID
-  // pin to a single target (its widest resolution tier). Below it, the confidence was either divided
-  // among several candidate definitions the resolver could not choose between, or deboosted for an
-  // overcommon or leading-underscore name. So "dashed" means "this edge is a guess", derived from the
-  // resolver's own tier constants rather than from a percentile of whatever this corpus happens to
-  // contain — the same reason the cx/churn ramp uses fixed thresholds.
-  //
-  // It errs toward NOT dashing, and that is worth naming: an edge resolved at the 0.2 tier with one
-  // candidate draws solid, and a 0.5-tier call split two ways lands at 0.25 and also draws solid. The
-  // dash is a floor on doubt, not a census of it. Measured share dashed: 16.9% of 243 edges on this
-  // repository's default page, 21.9% of 183 on the README hero, 28.2% of 4712 at --top-k=2000.
-  var LOW_CONF = 20;
-  for (var ci = 0; ci < GL; ci++) {
-    LINKS[ci].c = ( typeof LCONF !== 'undefined' && ci < LCONF.length ) ? LCONF[ci] : 100;
-  }
 
   var gout = [], gin = [];
   for (var i = 0; i < GN; i++) { gout.push([]); gin.push([]); }
@@ -311,9 +304,9 @@ static const char kScriptColour[] = R"JS(
     var idSet = seen;
     var edges = [];
     for (var k = 0; k < GL; k++) {
-      // the RECORD, not a fresh {s,t}: a rebuilt pair drops the confidence this edge was emitted with,
-      // and an edge that silently loses its own doubt draws solid — a false statement, in the one view
-      // where a reader is looking closely at a handful of edges
+      // the RECORD, not a fresh {s,t}: a rebuilt pair drops the split-arm bit this edge was emitted
+      // with, and an edge that silently loses its own doubt draws solid — a false statement, in the one
+      // view where a reader is looking closely at a handful of edges
       if (idSet.has(LINKS[k].s) && idSet.has(LINKS[k].t)) edges.push(LINKS[k]);
     }
     return { ids: ids, edges: edges, callees: callees, callers: callers };
@@ -373,7 +366,7 @@ static const char kScriptSim[] = R"JS(
   // Self-calls the sim cannot draw, counted per load (see loadSubset's edge loop) so the caption can
   // state them. A subset view's L was never expected to equal EDGE_TOTAL; the whole-map view's is.
   var selfEdgesDropped = 0;
-  var lowConfEdges = 0;          // in-view edges below LOW_CONF — the caption states the count with the threshold
+  var ambEdges = 0;              // in-view edges the resolver could not pin — the caption states the count
   var labelSet = new Set();      // local indices that get a persistent text label (see loadSubset's rule)
   // ---- module HULLS: the groups draw() outlines, rebuilt per load (see loadSubset's hull block).
   var hullGroups = [];           // [{ comm, name, idx: [local indices] }], largest first
@@ -524,7 +517,7 @@ static const char kScriptSim[] = R"JS(
     N = nodes.length;
     links = [];
     selfEdgesDropped = 0;
-    lowConfEdges = 0;
+    ambEdges = 0;
     for (var k = 0; k < edges.length; k++) {
       var s = gidToLocal.get(edges[k].s), t = gidToLocal.get(edges[k].t);
       if (s === undefined || t === undefined) continue;
@@ -535,9 +528,13 @@ static const char kScriptSim[] = R"JS(
       // against each other, so the difference is counted here and stated by renderProv rather than left
       // as an unexplained gap between two numbers on the same screen.
       if (s === t) { selfEdgesDropped++; continue; }
-      var ec = ( edges[k].c === undefined ) ? 100 : edges[k].c;
-      if (ec < LOW_CONF) { lowConfEdges++; }
-      links.push({ s: s, t: t, c: ec });
+      // C1: the per-edge SPLIT-ARM bit rides through into the sim record. NORMALISED to 0/1 here rather
+      // than passed on as undefined-or-1, because two consumers compare against it — draw()'s pass
+      // selector and the caption's count — and a record that never carried the key would otherwise make
+      // each of them handle the absent case separately.
+      var amb = edges[k].a ? 1 : 0;
+      if (amb) { ambEdges++; }
+      links.push({ s: s, t: t, a: amb });
     }
     L = links.length;
     nbr = [];
@@ -970,10 +967,14 @@ static const char kScriptDraw[] = R"JS(
     //
     // Both passes are ONE path each rather than a beginPath/stroke per edge. Same pixels, and it is what
     // makes a second pass over up to 13819 edges affordable at all.
-    // A LOW-CONFIDENCE SHAFT IS DASHED. See LOW_CONF for what the number behind it is, where the
-    // threshold comes from, and which direction it errs in. Two passes because a dash pattern is canvas
-    // STATE and cannot vary inside one path; the alternative is a beginPath/stroke per edge, which is
-    // what this loop was before and what makes 13819 edges unaffordable.
+    // A SPLIT-ARM SHAFT IS DASHED. `a` is the per-edge bit writeHtml reads straight off Graph::outProv
+    // (3 = one arm of a k-way split the resolver could not choose between — the same fact the XML map
+    // spells prov="split"), so the picture and the data say the same thing about the same edge. It is
+    // drawn as a different KIND of line and not as a shade, because a faded solid line is
+    // indistinguishable from a distant one and a dashed line is not. Two passes because a dash pattern
+    // is canvas STATE and cannot vary inside one path; the alternative is a beginPath/stroke per edge,
+    // which is what this loop was before and what makes 13819 edges unaffordable. The pass order is
+    // fixed, so the picture is stable.
     var ARROW_LEN_PX = 7.0, ARROW_HALF_PX = 3.2, MIN_ARROW_SHAFT_PX = 13.0;
     var DASH_ON_PX = 4.0, DASH_OFF_PX = 3.5;
     ctx.strokeStyle = '#8a8f98';
@@ -985,7 +986,7 @@ static const char kScriptDraw[] = R"JS(
       for (var k = 0; k < L; k++) {
         var s = links[k].s, t = links[k].t;
         if (hl && !hl.has(s) && !hl.has(t)) continue;
-        if ((links[k].c < LOW_CONF) !== (pass === 1)) continue;
+        if ((links[k].a === 1) !== (pass === 1)) continue;
         ctx.moveTo(nodes[s].x, nodes[s].y);
         ctx.lineTo(nodes[t].x, nodes[t].y);
       }
@@ -1421,17 +1422,19 @@ static const char kScriptRouter[] = R"JS(
     // -- but the caption is what stampProvenance burns into every exported PNG, and a PNG is the thing
     // people share. Shipping the absolute path there published the operator's filesystem layout, and
     // their home directory often carries their real name. Verified on this repo's own README figures,
-    // which went to a public branch reading "root /Users/<name>/...": `strings` finds nothing, because
-    // it is rendered as pixels, so no secret scanner would ever have flagged it.
+    // which went to a public branch stamped with the operator's own absolute home path; `strings` finds
+    // nothing, because it is rendered as pixels, so no secret scanner would ever have flagged it.
     // Drop the HOME PAIR before taking the tail. Taking the last two segments alone is not enough:
     // for `~/myproject` -- probably the most common layout there is -- the home directory IS one of
-    // those two, so the caption published the username anyway. Measured on the first version:
-    //     /Users/jane.doe/src/myproject  -> …/src/myproject   clean
-    //     /Users/jane.doe/myproject      -> …/jane.doe/…      LEAKED
-    //     /Users/jane.doe                -> whole path        LEAKED  (the <=2 guard passed it through)
+    // those two, so the caption published the username anyway. Measured on the first version (written
+    // here in the Linux spelling; the macOS one differs only in the leading segment, which is why the
+    // check below is on `users` OR `home` and is case-folded first):
+    //     /home/jane.doe/src/myproject  -> …/src/myproject   clean
+    //     /home/jane.doe/myproject      -> …/jane.doe/…      LEAKED
+    //     /home/jane.doe                -> whole path        LEAKED  (the <=2 guard passed it through)
     //     C:\Users\Bob.Jones\code       -> whole path        LEAKED  (split was on '/' only)
-    // The leaking segment is always the one after Users/home, and its position is knowable, so remove
-    // it by structure rather than hoping the tail misses it.
+    // The leaking segment is always the one after that home root, and its position is knowable, so
+    // remove it by structure rather than hoping the tail misses it.
     var rootShort = function(r) {
       if (!r) { return '.'; }
       var parts = r.replace(/[\/\\]+$/, '').split(/[\/\\]+/).filter(function(x){ return x.length && x !== '.'; });
@@ -1467,11 +1470,17 @@ static const char kScriptRouter[] = R"JS(
       // "caller → callee" is stated for the same reason every other clause here is: the picture draws a
       // direction, and a reader must not have to guess which end of an arrow is the one doing the calling.
       methodClauses.push( 'arrow points caller → callee' );
-      // The dashed shafts need a key, and it has to name the THRESHOLD and not just the word "low":
-      // "some of these edges are uncertain" is not a disclosure, it is a mood. Stated as a count so a
-      // reader can weigh it, and as a number so it means the same thing on every page — and stated at
-      // zero too, because a zero here means "the resolver was sure of all of them", which is a result.
-      methodClauses.push( '<b>' + lowConfEdges + '</b> of ' + L + ' shafts dashed = resolver confidence below ' + (LOW_CONF/100).toFixed(2) );
+      // The dashed shafts need a key, and it has to name WHAT the resolver could not do: "some of these
+      // edges are uncertain" is not a disclosure, it is a mood. Stated as a count so a reader can weigh
+      // it — and stated at zero too, because a zero here means the resolver pinned every drawn call to
+      // exactly one definition, which is a result.
+      //
+      // THIS COUNT IS THE VIEW'S, and the legend's AMB_LINKS is the MAP'S. They are two scopes of the
+      // same fact and they differ in every ego and module view, so each says which set it is counting;
+      // one number reported twice under two scopes would be the silent inconsistency this block exists
+      // to prevent.
+      methodClauses.push( '<b>' + ambEdges + '</b> of ' + L + ' shafts dashed in this view = the resolver could not choose'
+                          + ' between same-name definitions and split the call over all of them' );
       // rule 2 of loadSubset deliberately shows one label per name; a reader must not infer that from the picture
       methodClauses.push( 'labels top ' + MAX_LABELS + ' by in-view degree, one per name' );
       // The shape key is built from SYM_SHAPES, the identical lookup draw() marks a node with, so it
@@ -1804,21 +1813,26 @@ static const char kScriptRouter[] = R"JS(
 })();
 )JS";
 
-// One drawn call edge: selected-array indices plus the resolver's own confidence in THIS pair.
+// One drawn call edge: selected-array indices plus what the resolver was able to say about THIS pair.
 //
-// `w` is Graph::outVals[e] — the per-out-edge weight, parallel to outTargets, computed and stored by the
-// resolver and until recently exported nowhere at all (outProv is a different quantity and IS exported,
-// but only under --scip). It is the tier the call resolved at (1.0 same-file, 0.5 and 0.2 wider), times a
-// 0.1 deboost for an overcommon or leading-underscore name, DIVIDED BY the number of candidate targets
-// when the call could not be pinned to one, times sqrt(number of references), capped at 8.
+// `amb` is Graph::outProv[e] == 3 — one arm of a k-way split, i.e. the resolver could not choose between
+// several same-name definitions and divided the call over all of them. It is the SAME fact the XML map
+// spells prov="split" and the MCP surface carries, which is the whole reason it is this quantity and not
+// another: the picture and the data now make one claim about one edge, so a reader who checks the map
+// against the page cannot find them disagreeing.
 //
-// THE GRANULARITY IS THE POINT. The XML's `amb="K"` is a PER-SYMBOL count — "K of this symbol's calls hit
-// a name with several definitions" — and 35.4% of emitted call edges carry it. Marking all of a symbol's
-// edges uncertain because one of its calls was would be a false statement about every one of the others.
+// It is deliberately NOT a confidence SCORE. Graph::outVals holds a float per out-edge and thresholding
+// it conflates two different facts — "the resolver could not choose between k targets" and "a lone match
+// was reached through a wide resolution tier on an overcommon name" — which a single dashed stroke would
+// then draw identically. Naming the first one exactly is worth more than shading both.
+//
+// THE GRANULARITY IS STILL THE POINT. The XML's `amb="K"` is a PER-SYMBOL count — "K of this symbol's
+// calls hit a name with several definitions" — and 35.4% of emitted call edges carry it. Marking all of a
+// symbol's edges uncertain because one of its calls was would be a false statement about all the others.
 struct HtmlEdge
 {
     std::uint32_t s = 0, t = 0;
-    float         w = 0.f;
+    std::uint8_t  amb = 0;
 };
 
 // A module CARD (one Louvain community, restricted to the selected node set): the Overview view's
@@ -2015,32 +2029,36 @@ inline void writeAppearancePayload( std::FILE* out, const std::vector<std::uint3
     std::fprintf( out, "};\n" );
 }
 
-// The EDGE payload: the LINKS records and the LCONF confidences that are parallel to them. Its own
-// function for the reason writeAppearancePayload and writeDocumentShell are theirs — writeHtml is a
-// 400-line emitter and this is one nameable concept, so the caller grows by a call instead of by two
-// more loops.
+// The EDGE payload: the LINKS records. Its own function for the reason writeAppearancePayload and
+// writeDocumentShell are theirs — writeHtml is a 400-line emitter and this is one nameable concept, so
+// the caller grows by a call instead of by a loop.
 //
-// LCONF is a PARALLEL ARRAY in hundredths rather than a `"w":` key inside each LINKS record, on the same
-// argument that keys FCHURN by file index instead of copying churn into every node: at the 5000-node
-// ceiling this map carries 13819 edges, where the key text alone would be ~85 KB of a page that has to
-// load with no network. Integers because the consumer is a threshold comparison and not arithmetic — two
-// decimal places is far finer than the decision needs, and a fixed-point integer cannot print differently
-// on a different libc.
+// `"a":1` is the per-edge split-arm flag (HtmlEdge says what it is). It is OMITTED at confident rather
+// than written as `"a":0`, so a cleanly-resolving corpus emits the identical bytes it emitted before the
+// axis existed, and the key costs nothing on the 5000-node ceiling's 13819 edges except where it is true.
 inline void writeEdgePayload( std::FILE* out, const std::vector<HtmlEdge>& edges )
 {
+    // THE EMITTED ORDER IS A FUNCTION OF THE EDGE SET, and this is what pins it. `s` and `t` print as %u
+    // integers, so a STRICTLY increasing (s,t) sequence is a TOTAL ORDER WITH NO TIES: a given edge set
+    // has exactly one strictly-increasing arrangement, therefore the same edges always emit in the same
+    // order and always settle to the same layout. writeHtml's sort note has the measurements showing why
+    // that matters — permuting these records moves every drawn node above ~500 of them.
+    //
+    // THE STRICTNESS IS THE PROPERTY, not a tidier way to say sorted. Relax `<` to `<=` to let duplicate
+    // edges through and ties come back; ties admit more than one arrangement; every failure that note
+    // describes returns with this check still green. It is assertable at all only because writeHtml
+    // dedups AFTER sorting. Verified on this tree at both ends of the range — top-k=200 → 245 edges,
+    // top-k=1500 → 3032 edges, strictly increasing, zero duplicates. htmlrendercheck.sh arm (X) re-derives
+    // both from the emitted page, with a control that permutes real LINKS and re-runs the same check.
+    //
+    // It cannot catch a change to which edges are SELECTED, and it should not: that is meant to change
+    // the picture. It catches every REORDERING of the same set, which is not.
     std::fprintf( out, "const LINKS = [\n" );
     for( std::size_t k = 0; k < edges.size(); ++k )
     {
-        std::fprintf( out, "  {\"s\":%u,\"t\":%u}%s\n", unsigned( edges[k].s ), unsigned( edges[k].t ), ( k + 1 < edges.size() ) ? "," : "" );
-    }
-    std::fprintf( out, "];\n" );
-
-    std::fprintf( out, "const LCONF = [" );
-    for( std::size_t k = 0; k < edges.size(); ++k )
-    {
-        const long hundredths = std::lround( double( edges[k].w ) * 100.0 );
-        const long clamped    = hundredths < 0 ? 0L : ( hundredths > 800L ? 800L : hundredths );
-        std::fprintf( out, "%s%ld", k ? "," : "", clamped );
+        VERIFY( k == 0 || edges[k - 1].s < edges[k].s || ( edges[k - 1].s == edges[k].s && edges[k - 1].t < edges[k].t ) );
+        std::fprintf( out, "  {\"s\":%u,\"t\":%u%s%s\n", unsigned( edges[k].s ), unsigned( edges[k].t ),
+                      edges[k].amb ? ",\"a\":1}" : "}", ( k + 1 < edges.size() ) ? "," : "" );
     }
     std::fprintf( out, "];\n" );
 }
@@ -2076,6 +2094,8 @@ inline void writeDocumentShell( std::FILE* out )
         "#legend span { display:inline-block; width:10px; height:10px; border-radius:50%%; margin-right:3px; }\n"
         // the metric NAME inside the legend is text, not a swatch — it must escape the circle rule above
         "#legend span.lg { width:auto; height:auto; border-radius:0; color:#c8ccd2; margin-right:5px; }\n"
+        // C1: and the edge-confidence clause is a SENTENCE, for the same reason and with the same escape.
+        "#legend span.ec { display:inline; width:auto; height:auto; border-radius:0; margin:0; color:#7a7f88; }\n"
         "#colorMode { background:#222; border:1px solid #444; color:#eee; padding:3px 6px;\n"
         "             border-radius:4px; font-size:12px; }\n"
         "#depth { font-size:11px; color:#999; display:flex; align-items:center; gap:4px; white-space:nowrap; }\n"
@@ -2194,8 +2214,9 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     }
 
     // build LINKS: edges among selected nodes, sorted (s asc, t asc) for determinism. HtmlEdge's own
-    // declaration says what `w` is and why it has to be per-EDGE and not the per-symbol amb= count.
+    // declaration says what `amb` is and why it has to be per-EDGE and not the per-symbol amb= count.
     std::vector<HtmlEdge> edges;
+    const std::vector<std::uint8_t>& outProv = g.outProv;
     for( NodeId k = 0; k < cap; ++k )
     {
         const NodeId  id  = order[k];
@@ -2205,20 +2226,51 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
             const NodeId tgt = outTargets[e];
             if( tgt < S && idxOf[tgt] != kNoNode )
             {
-                // outVals is sized to outTargets by buildGraph; the guard covers a Graph assembled by a
-                // harness that filled only the topology (degrade to "no confidence stated", never a
-                // read past the end)
-                const float w = ( e < g.outVals.size() ) ? g.outVals[e] : 0.f;
-                edges.push_back( { si, idxOf[tgt], w } );
+                // outProv is allocated only when the resolver had something to record — an SCIP
+                // overlay, an FFI binding edge, or a split — so an EMPTY one means "nothing here was
+                // ambiguous", not "the array is missing". The bound check degrades to that answer
+                // rather than reading past the end of a Graph a harness filled with topology alone.
+                const std::uint8_t amb = ( e < outProv.size() && outProv[e] == 3u ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
+                edges.push_back( { si, idxOf[tgt], amb } );
             }
         }
     }
-    // sort (s, t) for determinism — the weight rides along and never orders anything
+    // Sort (s, t). `amb` is deliberately NOT a sort key, so the confidence bit cannot reorder anything.
+    //
+    // THIS ORDER IS LOAD-BEARING FOR THE LAYOUT, not only for the byte-determinism gate. The page runs
+    // its own force sim over these records and float addition is not associative, so permuting LINKS and
+    // re-running the identical sim to full MAX_SIM accumulates the same forces in a different order and
+    // settles into a DIFFERENT local minimum after 300 steps. Measured max coordinate delta over every
+    // drawn node, permuted vs not:
+    //
+    //     top-k=400     2.85e-6   rounding
+    //     top-k=800     1.58e+3   A DIFFERENT LAYOUT
+    //     top-k=1500    7.36e+3   A DIFFERENT LAYOUT
+    //
+    // So above roughly 500 nodes any change to edge EMIT ORDER silently changes every picture this tool
+    // has published — and every change that would do it reads as cosmetic: adding a field to the record
+    // and sorting on it, grouping edges by module, emitting the low-confidence ones in a separate pass,
+    // dedup'ing in a different order. writeEdgePayload's VERIFY is the fence; its note says why STRICT
+    // increase is the property that makes the emitted order a function of the edge SET alone.
     std::sort( edges.begin(), edges.end(), [ ]( const HtmlEdge& a, const HtmlEdge& b )
     { return a.s != b.s ? a.s < b.s : a.t < b.t; } );
-    // deduplicate (same symbol can appear via different resolve paths)
-    edges.erase( std::unique( edges.begin(), edges.end(), [ ]( const HtmlEdge& a, const HtmlEdge& b )
-    { return a.s == b.s && a.t == b.t; } ), edges.end() );
+    // Deduplicate (the same pair can arrive via different resolve paths). The flag is OR-FOLDED into the
+    // survivor rather than inherited from whichever row sorted first: an edge one of whose resolutions
+    // was a guess IS a guess, and std::unique's keep-the-first rule would make that answer depend on
+    // sort order — the one thing the note above says must not decide anything.
+    {
+        std::size_t writeIndex = 0;
+        for( std::size_t readIndex = 0; readIndex < edges.size(); ++readIndex )
+        {
+            if( writeIndex > 0 && edges[writeIndex - 1].s == edges[readIndex].s && edges[writeIndex - 1].t == edges[readIndex].t )
+            {
+                edges[writeIndex - 1].amb = std::uint8_t( edges[writeIndex - 1].amb | edges[readIndex].amb );
+                continue;
+            }
+            edges[writeIndex++] = edges[readIndex];
+        }
+        edges.resize( writeIndex );
+    }
 
     // ---- module (community) grouping over the FULL graph, restricted to the selected node set ----
     // communities() is deterministic (id-order local-moving, ties → lower id) so this is byte-stable.

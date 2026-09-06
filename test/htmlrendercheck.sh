@@ -60,9 +60,12 @@
 #               drawn behind the graph, independent of --color-by, purity- AND shape-tested (three
 #               points can be collinear, and node count cannot tell you whether a hull is a region),
 #               with all three truncations — the cap, the purity drop, the shape drop — in the caption
-#   (V) EDGE CONFIDENCE  Graph::outVals — computed, stored and never exported anywhere — reaches the
-#               page PER EDGE (not the per-symbol amb= that was already on hand and would be a lie on
-#               two edges in three) and dashes a low-confidence shaft, with count and threshold stated
+#   (V) EDGE PROVENANCE  the resolver's per-EDGE prov="split" — not the per-symbol amb= that was
+#               already on hand and would be a lie on two edges in three — reaches the page and dashes
+#               that shaft, over a corpus built to carry both kinds, and the picture's flagged edges
+#               are exactly the map's prov="split" ones
+#   (X) EDGE ORDER  the emitted LINKS are STRICTLY increasing in (s,t) — a total order with no ties, so
+#               the same edge set always emits in the same order and always settles to the same layout
 #   (W) CAPTION SPLIT  the bitmap carries PROVENANCE and the methodology travels beside it in a
 #               companion .txt the same export writes — with the pointer that says so, and the control
 #               pair proving the clauses left one half and landed in the other rather than being deleted
@@ -927,46 +930,192 @@ else
     no "(U19) shape=$uShape purity=$uPure — the O(N) scan runs for groups the cheap test would have dropped"
 fi
 
-# ── (V) PER-EDGE RESOLVER CONFIDENCE, drawn as a dashed shaft ─────────────────────────────────────────
+# ── shared extractions for (V) and (X) — defined HERE, above both, because a helper called from above
+#    its own definition expands to nothing and the arm silently takes the other branch.
+#    linksblock scopes everything below to the emitted LINKS array: an `"a":1` somewhere else on a 70 KB
+#    page must not be able to stand in for one on an edge.
+linksblock(){ awk '/^const LINKS = \[/{on=1;next} on&&/^\];/{on=0} on' "$1"; }
+nflagged(){ linksblock "$1" | grep -c '"a":1'; }
+nedges(){ linksblock "$1" | grep -c '"s":'; }
+
+# ── (V) PER-EDGE RESOLVER PROVENANCE, drawn as a dashed shaft ─────────────────────────────────────────
 #
-#     Graph::outVals holds a float per out-edge — the confidence the resolver had in that specific
-#     (caller, callee) pair — and it was computed, stored, and exported NOWHERE: not to XML, not to
-#     JSON, not to this page. (outProv is a different quantity and is exported, but only under --scip.)
-#     Meanwhile 35.4% of emitted call edges carry the symbol-level `amb=`, which is the WRONG number for
-#     this: it counts how many of a SYMBOL's calls were ambiguous, so dashing all of that symbol's edges
-#     would be a false statement about every one of them that was not. These arms hold the granularity,
-#     not just the feature.
-lconf="$( grep -m1 'const LCONF' "$PAGE" )"
-if [ -z "$lconf" ]; then
-    no "(V1) the page carries no per-edge confidence array"
+#     THE FACT IS prov="split": this edge is one arm of a k-way split the resolver could not choose
+#     between. It is read per EDGE off Graph::outProv, which is the quantity the XML map and the MCP
+#     surface already carry — so the picture and the data make ONE claim about one edge. It is
+#     deliberately not a threshold on Graph::outVals: that float folds "could not choose between k
+#     targets" together with "a lone match reached through a wide tier on an overcommon name", and a
+#     single dashed stroke drawn for both says neither. The per-symbol amb= is the wrong granularity for
+#     the same reason in the other direction — it counts a SYMBOL's ambiguous calls, so dashing all of
+#     that symbol's edges would be a false statement about every one of them that was not.
+#
+#     THE SHARED FIXTURE CANNOT TEST THIS. test/fixture resolves cleanly — 5 edges, zero splits — so
+#     every arm below would pass over a page that has no such edge on it at all. This corpus is the
+#     collision shape resolverhonestycheck.sh's F1 case uses (two defs of foo() in one directory, caller
+#     alongside them), plus one unambiguous call in a subdirectory, so the page carries BOTH kinds and
+#     "per edge" is a claim these arms can actually falsify.
+SPLITC="$TMP/splitcorpus"
+mkdir -p "$SPLITC/sub"
+printf 'int foo() { return 1; }\n'                             > "$SPLITC/a.cpp"
+printf 'int foo() { return 2; }\n'                             > "$SPLITC/b.cpp"
+printf 'int bar() { return foo(); }\n'                         > "$SPLITC/caller.cpp"
+printf 'int baz() { return 7; }\nint qux() { return baz(); }\n' > "$SPLITC/sub/c.cpp"
+SPAGE="$TMP/split.html"
+"$BIN" "$SPLITC" --html --no-cache >"$SPAGE" 2>/dev/null
+# the XML's own count, taken BEFORE the control below mutates the corpus out from under it
+xSplit="$( "$BIN" "$SPLITC" --no-cache 2>/dev/null | grep -o 'prov="split"' | wc -l | tr -d ' ' )"
+
+if [ ! -s "$SPAGE" ]; then
+    no "(V1) the split corpus produced no page"
 else
-    nconf="$( printf '%s' "$lconf" | grep -oE '[0-9]+' | wc -l | tr -d ' ' )"
-    nlink="$( grep -cE '^  \{"s":[0-9]+,"t":[0-9]+\}' "$PAGE" | tr -d ' ' )"
-    # THE GRANULARITY ARM. One value per EDGE, positionally parallel to LINKS — not one per symbol,
-    # which is the number that was already on hand and would have been a lie on 2 edges in 3.
-    [ "$nconf" = "$nlink" ] && ok "(V1) one confidence value per EDGE, parallel to LINKS ($nconf of $nlink)" \
-                            || no "(V1) LCONF holds $nconf values for $nlink edges — not a per-edge quantity"
-    # (V2) control: the array must actually VARY. A constant would satisfy (V1) exactly, draw a picture
-    #      with no dashes in it, and pass every other arm here.
-    ndistinct="$( printf '%s' "$lconf" | grep -oE '[0-9]+' | sort -u | wc -l | tr -d ' ' )"
-    [ "$ndistinct" -ge 3 ] && ok "(V2) control: it carries real per-edge values, not a constant ($ndistinct distinct)" \
-                           || no "(V2) control: LCONF has only $ndistinct distinct values — it is not carrying the resolver's weights"
+    sTot="$( nedges "$SPAGE" )"; sFlag="$( nflagged "$SPAGE" )"
+    # (V1) THE GRANULARITY ARM. Some records carry the flag and some do not. A page that marked every
+    #      edge would satisfy "the flag exists" exactly and be a page-wide claim, not a per-edge one.
+    if [ "$sFlag" -gt 0 ] && [ "$sFlag" -lt "$sTot" ]; then
+        ok "(V1) the flag is PER EDGE — $sFlag of $sTot LINKS carry it and the rest do not"
+    else
+        no "(V1) $sFlag of $sTot LINKS carry the flag — not a per-edge quantity (0 = never marked, all = a page-wide claim)"
+    fi
+    # (V2) ONE FACT, TWO SURFACES. The dashed edges must be exactly the ones the XML spells prov="split"
+    #      over the same corpus. This is the whole argument for reading outProv instead of inventing a
+    #      second derivation of "uncertain" for the renderer alone: a reader who checks the map against
+    #      the picture must not find them disagreeing.
+    if [ "$sFlag" = "$xSplit" ] && [ "$xSplit" -gt 0 ]; then
+        ok "(V2) the picture and the XML map agree edge for edge — $sFlag dashed, $xSplit prov=\"split\""
+    else
+        no "(V2) $sFlag dashed shafts against $xSplit prov=\"split\" edges — the picture and the map are two derivations of one fact"
+    fi
 fi
-# (V3)-(V5) the threshold is NAMED, is what selects the dash, and the dash is a screen quantity like
-#      every other measurement on this canvas (a world-space dash disappears at the auto-fit zoom).
-pin 'var LOW_CONF' 'var LOW_CONF' "(V3) the confidence threshold is a named constant, not a number buried in a branch"
-inbody draw 'links\[k\]\.c < LOW_CONF' 'LOW_CONF' "(V4) a shaft is dashed by ITS OWN edge's confidence against that threshold"
-inbody draw 'DASH_ON_PX/scale' 'DASH_ON_PX/scale' "(V5) the dash pattern is a screen size, so it survives the auto-fit zoom"
-# (V6)/(V7) DISCLOSURE. "Some of these edges are uncertain" is a mood, not a disclosure: the caption has
-#      to give the COUNT and the THRESHOLD, so the picture means the same thing on every page and a
-#      reader can weigh it rather than guess at it.
-inbody renderProv 'lowConfEdges' 'lowConfEdges' "(V6) the caption states how many shafts are dashed"
-inbody renderProv 'LOW_CONF' 'LOW_CONF' "(V7) and the numeric threshold that made them dashed"
-# (V8)/(V9) the ego view must hand loadSubset the LINKS RECORDS, not rebuilt {s,t} pairs: a rebuilt pair
-#      drops the confidence and the edge draws solid — an edge silently losing its own doubt, in the one
-#      view where a reader is looking closely at a handful of edges.
-inbody egoGraph 'edges\.push\(LINKS\[k\]\)' 'edges.push(LINKS[k])' "(V8) the ego view passes the edge records through, so an edge cannot lose its confidence on the way"
-absent 'edges\.push\(\{ s: s, t: t \}\)' "(V9) the rebuilt {s,t} pair that dropped it is gone"
+# (V3) CONTROL — mutate REAL INPUT and re-run the identical extraction. Deleting b.cpp removes the rival
+#      definition, so foo() has exactly one candidate and the same call is no longer a split. The
+#      mutation is asserted to have TAKEN (the page moved) before its outcome is believed: a control
+#      whose input never changed proves nothing about what the check above is reading.
+rm -f "$SPLITC/b.cpp"
+MPAGE="$TMP/splitmut.html"
+"$BIN" "$SPLITC" --html --no-cache >"$MPAGE" 2>/dev/null
+mTot="$( nedges "$MPAGE" )"; mFlag="$( nflagged "$MPAGE" )"
+if cmp -s "$SPAGE" "$MPAGE"; then
+    no "(V3) control: removing the rival definition did not change the page — the mutation never took, so (V1)/(V2) are unproven"
+elif [ "$mTot" -gt 0 ] && [ "$mFlag" -eq 0 ]; then
+    mutants=$(( mutants + 1 ))
+    ok "(V3) control: with the rival gone the same corpus emits $mTot edges and 0 flags — the bit tracks the resolver, not the page"
+else
+    no "(V3) control: $mFlag of $mTot edges still flagged with nothing left to be ambiguous about — the flag is not the resolver's"
+fi
+# (V4)-(V6) the RENDERER's wiring, on the shared page: the map-wide count is derived from the payload
+#      rather than baked, the dash is selected by the edge's OWN bit, and the dash pattern is a screen
+#      quantity like every other measurement on this canvas (a world-space dash vanishes at auto-fit).
+pin 'for \(var _k = 0; _k < LINKS\.length; _k\+\+\) if \(LINKS\[_k\]\.a\)' 'LINKS[_k].a' "(V4) the map-wide count is derived by walking LINKS, not baked into the page"
+inbody draw 'links\[k\]\.a === 1' 'links[k].a === 1' "(V5) a shaft is dashed by ITS OWN edge's bit"
+inbody draw 'DASH_ON_PX/scale' 'DASH_ON_PX/scale' "(V6) the dash pattern is a screen size, so it survives the auto-fit zoom"
+# (V7)-(V9) DISCLOSURE, AT TWO SCOPES. "Some of these edges are uncertain" is a mood, not a disclosure:
+#      the caption gives the count for THIS VIEW and the legend gives it for the whole baked map. They
+#      differ in every ego and module view, so each has to say which set it is counting — one number
+#      reported twice under two scopes would be the silent inconsistency (W) exists to prevent.
+inbody renderProv 'ambEdges' 'ambEdges' "(V7) the caption states how many shafts are dashed in the current view"
+pin "AMB_LINKS \+ ' of ' \+ LINKS\.length" 'AMB_LINKS' "(V8) and the legend states it for the whole map"
+pin "in this map" 'in this map' "(V9) with the two labelled apart by scope, so they cannot read as one number stated twice"
+# (V10)/(V11) the ego view must hand loadSubset the LINKS RECORDS, not rebuilt {s,t} pairs: a rebuilt pair
+#      drops the bit and the edge draws solid — an edge silently losing its own doubt, in the one view
+#      where a reader is looking closely at a handful of edges.
+inbody egoGraph 'edges\.push\(LINKS\[k\]\)' 'edges.push(LINKS[k])' "(V10) the ego view passes the edge records through, so an edge cannot lose its provenance on the way"
+absent 'edges\.push\(\{ s: s, t: t \}\)' "(V11) the rebuilt {s,t} pair that dropped it is gone"
+# (V12) ONE DERIVATION, NOT TWO. An earlier lane shipped a parallel LCONF array and a LOW_CONF threshold
+#       over Graph::outVals. Both are superseded by the axis above; leaving them in the tree would give
+#       the page two quantities that both mean "this edge is a guess" and disagree about which edges.
+absent 'LCONF|LOW_CONF' "(V12) the superseded LCONF/LOW_CONF derivation is gone from the page"
+
+# ── (X) THE EMITTED EDGE ORDER IS A TOTAL ORDER, because the LAYOUT depends on it ─────────────────────
+#
+#     LINKS is sorted (s asc, t asc), and that was recorded as a byte-determinism measure. It is more
+#     than that. The page runs its own force sim over these records and float addition is not
+#     associative, so permuting LINKS and re-running the identical sim to full MAX_SIM accumulates the
+#     same forces in a different order and settles into a DIFFERENT local minimum after 300 steps.
+#     Measured max coordinate delta over every drawn node, permuted vs not:
+#
+#         top-k=400     2.85e-6   rounding
+#         top-k=800     1.58e+3   A DIFFERENT LAYOUT
+#         top-k=1500    7.36e+3   A DIFFERENT LAYOUT
+#
+#     So above roughly 500 nodes any change to edge emit order silently changes every picture this tool
+#     has published — and every change that would do it reads as cosmetic: adding a field to the record
+#     and sorting on it, grouping edges by module, emitting the low-confidence ones in a separate pass,
+#     dedup'ing in a different order.
+#
+#     STRICT increase is the property, not "sorted". s and t print as %u integers, so a strictly
+#     increasing (s,t) sequence is a TOTAL ORDER WITH NO TIES: a given edge set has exactly one
+#     strictly-increasing arrangement, therefore the same edges always emit in the same order and always
+#     settle to the same layout. Relax it to allow duplicates and the ties come back, and every failure
+#     above returns with the check still green. src/htmlexport.h::writeEdgePayload carries the same fence
+#     as a VERIFY; these arms hold it on the emitted BYTES, at a scale where the sensitivity is real and
+#     in a build where NDEBUG has compiled the assert away.
+#
+#     It cannot catch a change to which edges are SELECTED, and must not: that is meant to move the
+#     picture.
+
+# strictorder FILE — "<edges> <non-strict pairs> <duplicate pairs>" over the emitted LINKS block. THE ONE
+# extraction the arms and the control below all run.
+strictorder()
+{
+    linksblock "$1" | awk 'match($0,/"s":[0-9]+,"t":[0-9]+/){
+            split(substr($0,RSTART,RLENGTH),f,/[^0-9]+/); s=f[2]+0; t=f[3]+0; n++;
+            if (n>1 && (s<ps || (s==ps && t<=pt))) { bad++ }
+            if (n>1 && s==ps && t==pt) { dup++ }
+            ps=s; pt=t }
+        END { printf "%d %d %d\n", n+0, bad+0, dup+0 }'
+}
+
+# (X1)/(X2) at BOTH ends of the range the tool is used over. The fixture page is the small end; src/ at
+#      --top-k=1500 is past the ~500-node knee above, where a permutation moves every node in the picture.
+XPAGE="$TMP/order_big.html"
+"$BIN" "$ROOT/src" --top-k=1500 --html --no-cache >"$XPAGE" 2>/dev/null
+xi=0
+for xf in "$PAGE" "$XPAGE"; do
+    xi=$(( xi + 1 ))
+    set -- $( strictorder "$xf" )
+    if [ "${1:-0}" -eq 0 ]; then
+        no "(X$xi) the LINKS block of $( basename "$xf" ) has no edges — the extraction read nothing and the arm asserts nothing"
+    elif [ "$2" -eq 0 ] && [ "$3" -eq 0 ]; then
+        ok "(X$xi) $1 emitted edges are STRICTLY increasing in (s,t), 0 duplicates ($( basename "$xf" ))"
+    else
+        no "(X$xi) $( basename "$xf" ): $2 of $1 emitted edges are not strictly after their predecessor ($3 exact duplicates) — the emit order is no longer a function of the edge set, and every drawn node moves"
+    fi
+done
+# (X3) CONTROL — permute REAL emitted LINKS and re-run the identical extraction. Reversing the block is
+#      the cheapest permutation of the same edge SET, which is exactly the class of change these arms
+#      exist to catch (the selection is untouched). The mutation is asserted to have taken first.
+XMUT="$TMP/order_mut.html"
+awk '/^const LINKS = \[/{print; on=1; next}
+     on && /^\];/{ for (i=n; i>=1; i--) print b[i]; print; on=0; next }
+     on { b[++n]=$0; next }
+     { print }' "$XPAGE" > "$XMUT"
+if cmp -s "$XPAGE" "$XMUT"; then
+    no "(X3) control: reversing the LINKS block did not change the page — the mutation never took, so (X1)/(X2) are unproven"
+else
+    set -- $( strictorder "$XMUT" )
+    if [ "$2" -gt 0 ]; then
+        mutants=$(( mutants + 1 ))
+        ok "(X3) control: the same extraction reports $2 of $1 out of order once the records are permuted"
+    else
+        no "(X3) control VACUOUS: a permuted LINKS block still reads as strictly increasing — the extraction is not testing the order"
+    fi
+fi
+# (X4) THE FENCE'S STRICTNESS, pinned in the source, because relaxing `<` to `<=` is the one edit that
+#      removes the whole property while leaving every arm above green on today's corpus. Controlled by
+#      running the identical two-sided check over a copy in which exactly that relaxation was made.
+strictfence(){ grep -q 'edges\[k - 1\]\.t < edges\[k\]\.t' "$1" && ! grep -q 'edges\[k - 1\]\.t <= edges\[k\]\.t' "$1"; }
+XSRC="$ROOT/src/htmlexport.h"
+sed 's/edges\[k - 1\]\.t < edges\[k\]\.t/edges[k - 1].t <= edges[k].t/' "$XSRC" > "$TMP/fence_mut.h"
+if ! strictfence "$XSRC"; then
+    no "(X4) writeEdgePayload's (s,t) fence is missing or not strict — with <= a duplicate edge passes and the emitted order stops being a function of the edge set"
+elif cmp -s "$XSRC" "$TMP/fence_mut.h"; then
+    no "(X4) control: the <= relaxation did not change the source — the check is not reading the fence"
+elif strictfence "$TMP/fence_mut.h"; then
+    no "(X4) control VACUOUS: the relaxed copy still passes the strictness check"
+else
+    mutants=$(( mutants + 1 ))
+    ok "(X4) writeEdgePayload asserts STRICT increase, and the check goes red on a <= relaxation of it"
+fi
 
 # ── (W) THE CAPTION SPLIT — the bitmap carries PROVENANCE, the sidecar carries METHOD ─────────────────
 #
@@ -1038,12 +1187,12 @@ insegment provfacts 'module-outline' 'module-outline' "(W7b) and enumerates the 
 #      over one that never trimmed the bitmap at all.
 notinsegment provfacts 'shapeKey\(\)'         "(W8a) the shape key is no longer burned into the bitmap"
 notinsegment provfacts 'arrow points caller'  "(W8b) nor is the arrow semantics"
-notinsegment provfacts 'LOW_CONF'             "(W8c) nor the dash threshold"
+notinsegment provfacts 'shafts dashed'        "(W8c) nor the dash key"
 notinsegment provfacts 'MAX_LABELS'           "(W8d) nor the label rule"
 notinsegment provfacts 'MAX_HULLS'            "(W8e) nor the hull rule"
 insegment provmethod 'shapeKey\(\)' 'shapeKey()' "(W9a) control: the shape key landed in the methodology half rather than being deleted"
 insegment provmethod 'arrow points caller' 'arrow points caller' "(W9b) control: and the arrow semantics"
-insegment provmethod 'LOW_CONF' 'LOW_CONF' "(W9c) control: and the dash threshold"
+insegment provmethod 'shafts dashed' 'shafts dashed' "(W9c) control: and the dash key"
 insegment provmethod 'MAX_LABELS' 'MAX_LABELS' "(W9d) control: and the label rule"
 insegment provmethod 'MAX_HULLS' 'MAX_HULLS' "(W9e) control: and the hull rule, with both of its drop counts"
 # (W10) the stamped half stays inside the strip's line ceiling. STAMP_MAX_LINES slices, so a fourth
