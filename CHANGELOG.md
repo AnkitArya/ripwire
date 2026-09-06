@@ -15,6 +15,13 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-06
+
+**This section spans everything since 0.2.2, not since the last tag.** v0.3.0 through v0.3.8 were cut
+and published as release binaries without changelog sections of their own; rather than reconstruct nine
+retrospective entries from the log, the work they carried is recorded here, in the release that first
+documents it. The tags remain valid — they are what `scripts/install.sh` served while they were latest.
+
 ### Added — `--plan-lanes` now recommends a Codex model and reasoning effort per lane
 
 Every lane carries an advisory `execution` object with a current Codex model, reasoning effort, the
