@@ -65,7 +65,7 @@ inline std::string jsonEscape( std::string_view s )
 // the emitted bytes, which are pure C++ output above this script — the seeded `rng()` below is for
 // deterministic-per-load initial layout, not for anything persisted).
 //
-// It is emitted as FIVE adjacent string literals, concatenated back to back into one <script> in
+// It is emitted as SIX adjacent string literals, concatenated back to back into one <script> in
 // declaration order. That is an editing split and nothing else — the same move src/main.cpp and
 // src/ingest.cpp made into verbs_*.h / ingest_*.h sections, for the same reason: one 850-line literal is
 // not a surface anyone can navigate, and --quality-delta reads a literal's length exactly the way it
@@ -689,14 +689,25 @@ static const char kScriptSim[] = R"JS(
   // -- end of section 2 --
 )JS";
 
-// SECTION 3 of the renderer: the PICTURE — node size, the backdrop, draw() and its label declutter, and
-// the hit test that has to agree with what was drawn. Split from section 2 at the boundary section 2's
-// own header already named ("the graph state AND the picture"), for the reason the first split states:
-// the translation unit is unchanged (adjacent literals are emitted back to back, in order, into one
-// <script>) and only the editing surface moved. It is also what --quality-delta reported when this lane's
-// fixes pushed section 2 past 450 lines, which is the metric working as intended rather than a number to
-// dodge — the seam is where a reader would put one.
-static const char kScriptDraw[] = R"JS(
+// SECTION 3 of the renderer: the VOCABULARY OF A MARK — how big a node is, what shape it is, and the
+// geometry a module outline is made of. Pure functions of their arguments: nothing here reads the camera,
+// touches canvas state, or paints. Section 3b is what uses them.
+//
+// This is the third split, made for the reason the first two were and reported by the same instrument:
+// --quality-delta measured section 3 growing 191 -> 393 lines as the shape, hull and confidence channels
+// landed in it, which is the metric working as intended rather than a number to dodge. The seam is where
+// a reader would put one — "what a mark IS" and "how a frame is painted" are two things, and the first
+// half has no dependency on the second at all. The translation unit is unchanged: adjacent literals are
+// emitted back to back, in order, into one <script>.
+static const char kScriptMarks[] = R"JS(
+  // ---- node SIZE. Radius reads IN-VIEW DEGREE, with rank as a tiebreak. The old `4 + 60*sqrt(rank)`
+  // spanned 4.60-11.78 px with a MEAN of 5.10 on the README cut — every node a ~5 px dot — while in-view
+  // degree over the same nodes spanned 1 to 111. The picture carried a hub/leaf distinction it never
+  // drew, so a hairball was the honest rendering of it. sqrt keeps the growth sub-linear so a degree-111
+  // hub is ~4x a degree-2 leaf and not 55x; the small rank term separates equal-degree nodes without ever
+  // reordering different-degree ones.
+  function nodeRadiusPx(n) { return Math.max(MIN_NODE_PX, Math.min(MAX_NODE_PX, 3 + 1.5*Math.sqrt(n.deg || 0) + 5*Math.sqrt(n.rank))); }
+
   // ---- node SHAPE, one table, two readers.
   //
   // SYM_SHAPES (emitted above — htmlexport.h::kSymShapes, one entry per model.h SymKind enumerator,
@@ -765,14 +776,13 @@ static const char kScriptDraw[] = R"JS(
     return 'rgba(' + ((v >> 16) & 255) + ',' + ((v >> 8) & 255) + ',' + (v & 255) + ',' + a + ')';
   }
 
-  // --- draw ---
-  // Radius reads IN-VIEW DEGREE, with rank as a tiebreak. The old `4 + 60*sqrt(rank)` spanned 4.60-11.78 px
-  // with a MEAN of 5.10 on the README cut — every node a ~5 px dot — while in-view degree over the same
-  // nodes spanned 1 to 111. The picture carried a hub/leaf distinction it never drew, so a hairball was the
-  // honest rendering of it. sqrt keeps the growth sub-linear so a degree-111 hub is ~4x a degree-2 leaf and
-  // not 55x; the small rank term separates equal-degree nodes without ever reordering different-degree ones.
-  function nodeRadiusPx(n) { return Math.max(MIN_NODE_PX, Math.min(MAX_NODE_PX, 3 + 1.5*Math.sqrt(n.deg || 0) + 5*Math.sqrt(n.rank))); }
+  // -- end of section 3a --
+)JS";
 
+// SECTION 3b of the renderer: the FRAME — the backdrop, draw() and its label declutter, and the hit test
+// that has to agree with what was drawn. Everything here reads the camera and paints; the marks it paints
+// come from section 3a above. Same split rationale as that section's header states.
+static const char kScriptDraw[] = R"JS(
   // The canvas's own background, painted as the FIRST op of every frame. clearRect leaves transparent
   // pixels; on screen the body's #111 shows through and it looks fine, but every export path (toDataURL,
   // the PNG button, a browser "save image") composites transparency onto white, where this page's light
@@ -1087,7 +1097,7 @@ static const char kScriptDraw[] = R"JS(
     return -1;
   }
 
-  // -- end of section 3 --
+  // -- end of section 3b --
 )JS";
 
 // SECTION 4 of the renderer: everything that responds to a person — resize, mouse, wheel, the search
@@ -1593,6 +1603,23 @@ static const char kScriptRouter[] = R"JS(
 })();
 )JS";
 
+// One drawn call edge: selected-array indices plus the resolver's own confidence in THIS pair.
+//
+// `w` is Graph::outVals[e] — the per-out-edge weight, parallel to outTargets, computed and stored by the
+// resolver and until recently exported nowhere at all (outProv is a different quantity and IS exported,
+// but only under --scip). It is the tier the call resolved at (1.0 same-file, 0.5 and 0.2 wider), times a
+// 0.1 deboost for an overcommon or leading-underscore name, DIVIDED BY the number of candidate targets
+// when the call could not be pinned to one, times sqrt(number of references), capped at 8.
+//
+// THE GRANULARITY IS THE POINT. The XML's `amb="K"` is a PER-SYMBOL count — "K of this symbol's calls hit
+// a name with several definitions" — and 35.4% of emitted call edges carry it. Marking all of a symbol's
+// edges uncertain because one of its calls was would be a false statement about every one of the others.
+struct HtmlEdge
+{
+    std::uint32_t s = 0, t = 0;
+    float         w = 0.f;
+};
+
 // A module CARD (one Louvain community, restricted to the selected node set): the Overview view's
 // unit. `top` holds up to 5 selected-array indices (rank desc, id asc). `inCross`/`outCross` count
 // LINKS edges crossing the module boundary (from/to a DIFFERENT module), among selected nodes only —
@@ -1787,6 +1814,36 @@ inline void writeAppearancePayload( std::FILE* out, const std::vector<std::uint3
     std::fprintf( out, "};\n" );
 }
 
+// The EDGE payload: the LINKS records and the LCONF confidences that are parallel to them. Its own
+// function for the reason writeAppearancePayload and writeDocumentShell are theirs — writeHtml is a
+// 400-line emitter and this is one nameable concept, so the caller grows by a call instead of by two
+// more loops.
+//
+// LCONF is a PARALLEL ARRAY in hundredths rather than a `"w":` key inside each LINKS record, on the same
+// argument that keys FCHURN by file index instead of copying churn into every node: at the 5000-node
+// ceiling this map carries 13819 edges, where the key text alone would be ~85 KB of a page that has to
+// load with no network. Integers because the consumer is a threshold comparison and not arithmetic — two
+// decimal places is far finer than the decision needs, and a fixed-point integer cannot print differently
+// on a different libc.
+inline void writeEdgePayload( std::FILE* out, const std::vector<HtmlEdge>& edges )
+{
+    std::fprintf( out, "const LINKS = [\n" );
+    for( std::size_t k = 0; k < edges.size(); ++k )
+    {
+        std::fprintf( out, "  {\"s\":%u,\"t\":%u}%s\n", unsigned( edges[k].s ), unsigned( edges[k].t ), ( k + 1 < edges.size() ) ? "," : "" );
+    }
+    std::fprintf( out, "];\n" );
+
+    std::fprintf( out, "const LCONF = [" );
+    for( std::size_t k = 0; k < edges.size(); ++k )
+    {
+        const long hundredths = std::lround( double( edges[k].w ) * 100.0 );
+        const long clamped    = hundredths < 0 ? 0L : ( hundredths > 800L ? 800L : hundredths );
+        std::fprintf( out, "%s%ld", k ? "," : "", clamped );
+    }
+    std::fprintf( out, "];\n" );
+}
+
 // The document SHELL — <head>, the whole stylesheet, and the chrome (#bar, #prov, #hits, #crumb,
 // #cards, the canvas) — up to the opening <script>. Lifted out of writeHtml for the reason
 // writeAppearancePayload states at its own head: writeHtml is a 400-line emitter and this is a nameable,
@@ -1930,23 +1987,9 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         idxOf[order[k]] = k;
     }
 
-    // build LINKS: edges among selected nodes, sorted (s asc, t asc) for determinism.
-    //
-    // `w` is Graph::outVals[e] — the resolver's OWN per-edge weight, parallel to outTargets, and until
-    // now computed, stored, and never exported anywhere: not to XML, not to JSON, not here. (outProv is
-    // a different quantity and IS exported, but only under --scip; this is not that.) It is what the
-    // resolver believed about this specific (caller, callee) pair: the tier confidence it resolved at
-    // (1.0 same-file, 0.5 and 0.2 for the wider tiers), times a 0.1 deboost for an overcommon or
-    // leading-underscore name, DIVIDED BY the number of candidate targets when the call could not be
-    // pinned to one, times sqrt(number of references) for repeat evidence, capped at 8.
-    //
-    // THE GRANULARITY IS THE POINT. The XML's `amb="K"` is a PER-SYMBOL count — "K of this symbol's
-    // calls hit a name with several definitions" — and 35.4% of emitted call edges carry it. Dashing
-    // all of a symbol's edges because one of its calls was ambiguous would be a false statement about
-    // every other edge it has, which is why the honest signal had to come from the per-edge array and
-    // not from the symbol-level number that was already on hand.
-    struct Edge { std::uint32_t s, t; float w; };
-    std::vector<Edge> edges;
+    // build LINKS: edges among selected nodes, sorted (s asc, t asc) for determinism. HtmlEdge's own
+    // declaration says what `w` is and why it has to be per-EDGE and not the per-symbol amb= count.
+    std::vector<HtmlEdge> edges;
     for( NodeId k = 0; k < cap; ++k )
     {
         const NodeId  id  = order[k];
@@ -1965,10 +2008,10 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         }
     }
     // sort (s, t) for determinism — the weight rides along and never orders anything
-    std::sort( edges.begin(), edges.end(), [ ]( const Edge& a, const Edge& b )
+    std::sort( edges.begin(), edges.end(), [ ]( const HtmlEdge& a, const HtmlEdge& b )
     { return a.s != b.s ? a.s < b.s : a.t < b.t; } );
     // deduplicate (same symbol can appear via different resolve paths)
-    edges.erase( std::unique( edges.begin(), edges.end(), [ ]( const Edge& a, const Edge& b )
+    edges.erase( std::unique( edges.begin(), edges.end(), [ ]( const HtmlEdge& a, const HtmlEdge& b )
     { return a.s == b.s && a.t == b.t; } ), edges.end() );
 
     // ---- module (community) grouping over the FULL graph, restricted to the selected node set ----
@@ -2040,7 +2083,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     }
 
     // cross-module edge counts (in/out), counted over the selected LINKS only
-    for( const Edge& e : edges )
+    for( const HtmlEdge& e : edges )
     {
         const NodeId ms = moduleOf[e.s], mt = moduleOf[e.t];
         if( ms == kNoNode || mt == kNoNode || ms == mt )
@@ -2134,32 +2177,8 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // the language palette, and the SymKind→shape roster
     writeAppearancePayload( out, fileList, color );
 
-    // emit LINKS array — sorted (s, t) pairs
-    std::fprintf( out, "const LINKS = [\n" );
-    for( std::size_t k = 0; k < edges.size(); ++k )
-    {
-        std::fprintf( out, "  {\"s\":%u,\"t\":%u}", unsigned( edges[k].s ), unsigned( edges[k].t ) );
-        if( k + 1 < edges.size() )
-        {
-            std::fprintf( out, "," );
-        }
-        std::fprintf( out, "\n" );
-    }
-    std::fprintf( out, "];\n" );
-
-    // ...and the per-edge resolver confidence, as a PARALLEL array in hundredths rather than a `"w":`
-    // key inside each LINKS record. Same reason FCHURN is keyed by file index instead of copied into
-    // every node: at the 5000-node ceiling this map carries 13819 edges, where the key text alone would
-    // be ~85 KB of a page that has to load with no network. Integers because the consumer is a
-    // threshold comparison, not arithmetic — two decimal places is far finer than the decision needs,
-    // and a fixed-point integer cannot print differently on a different libc.
-    std::fprintf( out, "const LCONF = [" );
-    for( std::size_t k = 0; k < edges.size(); ++k )
-    {
-        const long hundredths = std::lround( double( edges[k].w ) * 100.0 );
-        std::fprintf( out, "%s%ld", k ? "," : "", hundredths < 0 ? 0L : ( hundredths > 800L ? 800L : hundredths ) );
-    }
-    std::fprintf( out, "];\n" );
+    // the edge payload: LINKS, and the per-edge resolver confidences parallel to it
+    writeEdgePayload( out, edges );
 
     // The remaining provenance facts for the caption. NODE_TOTAL/EDGE_TOTAL are the whole selected map;
     // the caption states them beside the CURRENT view's counts, because "221 nodes in view" out of 200 and
@@ -2177,7 +2196,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         const ModuleCard& m = modules[ modOrder[disp] ];
         std::vector<std::uint32_t> neigh;
-        for( const Edge& e : edges )
+        for( const HtmlEdge& e : edges )
         {
             const NodeId ms = moduleOf[e.s], mt = moduleOf[e.t];
             if( ms == kNoNode || mt == kNoNode )
@@ -2243,7 +2262,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     std::fprintf( out, "];\n" );
 
     // inline the JS sim + wiki router
-    std::fprintf( out, "%s%s%s%s%s", kScriptColour, kScriptSim, kScriptDraw, kScriptViews, kScriptRouter );
+    std::fprintf( out, "%s%s%s%s%s%s", kScriptColour, kScriptSim, kScriptMarks, kScriptDraw, kScriptViews, kScriptRouter );
 
     std::fprintf( out,
         "</script>\n"
