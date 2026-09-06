@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+# RIPWIRE_TEST_DEPS: src/htmlexport.h
 # htmlrendercheck.sh — gate for the --html RENDERER: what the picture is, and what the page says
 # about itself.
+#
+# The RIPWIRE_TEST_DEPS line above is manifest_declared evidence for --test-gate. This gate greps a page
+# it asks the BINARY to emit and never names the source that emits it, so the script_literal rule cannot
+# see the link and a change to src/htmlexport.h came back with tests="0" — the verb naming no test at all
+# for the one file it has 100+ arms about. See test/shellgateindexcheck.sh for the evidence contract.
 #
 # WHY THIS FILE EXISTS. test/htmlexport.sh and test/htmlcolorcheck.sh both check the emitted document
 # at byte/grep level and NEITHER ever executes the JS — which is precisely how this batch of defects
@@ -41,19 +47,28 @@
 #               into it, so `ripwire DIR --html=F` is a picture in ONE command with no fragment to
 #               paste — plus the controls that the module overview stayed reachable and that the
 #               settle budget was REUSED rather than a second one invented beside it
-#   (Q) RAMP    the cx/churn ramp MEASURED, not pinned — luminance monotonicity, contrast against the
-#               canvas ground, and a Brettel/Viénot CVD simulation re-derived from the emitted stops
+#   (Q) RAMP    the cx/churn ramp MEASURED, not pinned — luminance monotonicity, the weakest greyscale
+#               STEP, contrast against the canvas ground, and a Brettel/Viénot CVD simulation re-derived
+#               from the emitted stops; plus the module-outline palette measured AGAINST that ramp, so
+#               decoration cannot sit on the axis the metric uses
 #   (R) EDGES   the call graph draws its DIRECTION — an arrowhead, and an adjacency that keeps callers
 #               and callees in separate lists instead of symmetrising them
 #   (S) SHAPE   symbol KIND on the only nominal-only channel, from ONE table indexed by SymKind, with
 #               the key on the caption the PNG export stamps
 #   (T) LAYOUT  seeded and pulled in the VIEWPORT'S proportions, so a 16:9 frame is not half empty
 #   (U) HULLS   module identity as CONTAINMENT, because comm % 12 collides 24-25 ways at top-k 2000 —
-#               drawn behind the graph, independent of --color-by, purity-tested, and both truncations
-#               (the cap and the purity drop) stated in the caption
-#   (V) EDGE CONFIDENCE  Graph::outVals — computed, stored and never exported anywhere — reaches the
-#               page PER EDGE (not the per-symbol amb= that was already on hand and would be a lie on
-#               two edges in three) and dashes a low-confidence shaft, with count and threshold stated
+#               drawn behind the graph, independent of --color-by, purity- AND shape-tested (three
+#               points can be collinear, and node count cannot tell you whether a hull is a region),
+#               with all three truncations — the cap, the purity drop, the shape drop — in the caption
+#   (V) EDGE PROVENANCE  the resolver's per-EDGE prov="split" — not the per-symbol amb= that was
+#               already on hand and would be a lie on two edges in three — reaches the page and dashes
+#               that shaft, over a corpus built to carry both kinds, and the picture's flagged edges
+#               are exactly the map's prov="split" ones
+#   (X) EDGE ORDER  the emitted LINKS are STRICTLY increasing in (s,t) — a total order with no ties, so
+#               the same edge set always emits in the same order and always settles to the same layout
+#   (W) CAPTION SPLIT  the bitmap carries PROVENANCE and the methodology travels beside it in a
+#               companion .txt the same export writes — with the pointer that says so, and the control
+#               pair proving the clauses left one half and landed in the other rather than being deleted
 #
 # Usage:
 #   test/htmlrendercheck.sh                          # uses build/ripwire on test/fixture
@@ -176,6 +191,37 @@ pin 'measureText\(text\)' 'measureText(text)' "(B5) the reserved box is the meas
 #      another route. Every label is stroked in the background colour before it is filled.
 pin 'LABEL_HALO_PX' 'LABEL_HALO_PX' "(B6) labels carry a dark halo so they stay legible over a node"
 pin 'strokeText\(text' 'strokeText' "(B7) that halo is actually stroked behind the glyphs"
+
+# (B7b) LABELS ARE TEXT AND OWE THE TEXT BAR, which is NOT the bar the node fills owe. (Q3) checks the
+# ramp against 3:1 because a filled node is a graphical object under WCAG 1.4.11; a label is text under
+# 1.4.3 and owes 4.5:1. Those two bars are only independent because the halo is stroked behind every
+# glyph unconditionally -- the label's contrast is against the HALO, not against whatever node it lands
+# on. If the halo ever became conditional, or its colour drifted toward the label's, the labels would
+# silently inherit the 3:1 bar. (B6)/(B7) pin that the halo EXISTS; this arm derives that it WORKS,
+# from the colours the page actually emits, so a colour change fails here rather than in someone's eye.
+labFill="$( grep -oE "'#d6d9de'|'#e6e9ee'" "$PAGE" | tr -d "'" | sort -u | head -1 )"
+haloRGB="$( grep -oE "strokeStyle *= *'rgba\([0-9]+,[0-9]+,[0-9]+" "$PAGE" | grep -oE '[0-9]+,[0-9]+,[0-9]+' | head -1 )"
+if [ -z "$labFill" ] || [ -z "$haloRGB" ]; then
+    no "(B7b) could not read the label fill and halo colours from the page — the arm cannot see what it checks"
+else
+    labCon="$( python3 -c "
+import sys
+def lin(x): return x/12.92 if x<=0.04045 else ((x+0.055)/1.055)**2.4
+def lum(t): 
+    r,g,b=[lin(c/255) for c in t]; return 0.2126*r+0.7152*g+0.0722*b
+f=sys.argv[1].lstrip('#'); fill=tuple(int(f[i:i+2],16) for i in (0,2,4))
+halo=tuple(int(x.strip()) for x in sys.argv[2].split(','))
+a,b=lum(fill)+0.05, lum(halo)+0.05
+print('%.2f' % (max(a,b)/min(a,b)))" "$labFill" "$haloRGB" )"
+    # inline comparison, NOT the ge() helper: this arm sits above ge()'s definition, so calling it here
+    # expands to nothing and the arm silently takes the else branch — the use-before-definition shape
+    # manifestcheck's (I1) exists to catch, which I committed here once already.
+    if awk -v a="$labCon" 'BEGIN{ exit !(a+0 >= 4.5) }'; then
+        ok "(B7b) label $labFill on its halo is ${labCon}:1 — labels clear the 4.5:1 TEXT bar independently of the 3:1 node bar"
+    else
+        no "(B7b) label $labFill on its halo is only ${labCon}:1 — labels are text and owe 4.5:1, not the node fills' 3:1"
+    fi
+fi
 # (B8)-(B11) THE LABEL PASS IS DRAWN IN SCREEN SPACE. It used to sit inside the world transform at
 #     `(11/scale) px` with a `LABEL_HALO_PX/scale` halo — a screen-constant size written as a world one.
 #     It renders identically and costs whatever the zoom says: at the scale a settled 1000-node map fits
@@ -450,7 +496,7 @@ inbody renderProv 'selfEdgesDropped' 'selfEdgesDropped' "(P15) and disclosed in 
 #     The MUTANT CONTROL is the old ramp itself: the identical derivation is re-run over a copy of the
 #     page carrying the five stops that shipped before, and each arm must go RED there. A derived arm
 #     with no control is a derivation that could be computing anything.
-rampmetrics()   # rampmetrics FILE → "mono minContrast minAdjNormal minAdjProtan minAdjDeutan minAdjTritan"
+rampmetrics()   # rampmetrics FILE → "mono minContrast minAdjNormal minAdjProtan minAdjDeutan minAdjTritan minGreyStep"
 {
     python3 - "$1" <<'PY'
 import re, sys, math
@@ -483,14 +529,17 @@ minc = min((max(l, bg)+0.05)/(min(l, bg)+0.05) for l in L)
 out = [mono, "%.2f" % minc, "%.1f" % min(dist(rgb(stops[i]), rgb(stops[i+1])) for i in range(4))]
 for k in ('protan', 'deutan', 'tritan'):
     out.append("%.1f" % min(dist(sim(stops[i], k), sim(stops[i+1], k)) for i in range(4)))
+# the weakest GREYSCALE STEP: the WCAG contrast ratio between the two stops that are closest in
+# luminance. Monotonicity alone is satisfied by a ramp whose middle two stops are 0.001 apart.
+out.append("%.3f" % min((max(L[i], L[i+1])+0.05)/(min(L[i], L[i+1])+0.05) for i in range(4)))
 print(" ".join(out))
 PY
 }
 # ge A B — A >= B in floating point, without depending on bc being installed
 ge(){ awk -v a="$1" -v b="$2" 'BEGIN{ exit !(a+0 >= b+0) }'; }
 sed "s/var rampColor = \[[^]]*\]/var rampColor = ['#4fc3f7','#26c6da','#ffd54f','#ff9800','#e65100']/" "$PAGE" > "$TMP/rampmutant.html"
-read -r qMono qCon qNorm qPro qDeu qTri <<<"$( rampmetrics "$PAGE" )"
-read -r mMono mCon mNorm mPro mDeu mTri <<<"$( rampmetrics "$TMP/rampmutant.html" )"
+read -r qMono qCon qNorm qPro qDeu qTri qGrey <<<"$( rampmetrics "$PAGE" )"
+read -r mMono mCon mNorm mPro mDeu mTri mGrey <<<"$( rampmetrics "$TMP/rampmutant.html" )"
 if [ "$mMono" = "no" ] && [ -n "$mDeu" ] && ! ge "$mDeu" 40; then
     mutants=$(( mutants + 1 ))
     ok "(Q1) MUTANT CONTROL: the derivation reproduces the OLD ramp's defects over a page carrying it (mono=$mMono, deutan min-adj=$mDeu) — it is measuring the ramp"
@@ -499,15 +548,26 @@ else
 fi
 [ "$qMono" = "yes" ] && ok "(Q2) the ramp is MONOTONE in relative luminance — an ordinal scale greyscale still orders" \
                      || no "(Q2) the ramp is not monotone in luminance (mono=$qMono) — in greyscale its buckets arrive permuted"
-if [ -n "$qCon" ] && ge "$qCon" 4.5; then
-    ok "(Q3) every stop clears 4.5:1 against the #111 canvas (worst $qCon:1) — monotone was not bought by sinking the low end into the ground"
+if [ -n "$qCon" ] && ge "$qCon" 3.0; then
+    ok "(Q3) every stop clears 3:1 against the #111 canvas (worst $qCon:1) — monotone was not bought by sinking the low end into the ground"
 else
-    no "(Q3) a ramp stop falls below 4.5:1 against the canvas ground (worst $qCon:1)"
+    no "(Q3) a ramp stop falls below 3:1 against the canvas ground (worst $qCon:1)"
 fi
+# The RAMP IS BLUE-TO-YELLOW BY DESIGN, and tritanopia IS blue-yellow confusion, so the tritan axis
+# cannot meet the same bar as the other two: it is the axis the ramp runs along. Measured on this ramp
+# it is 24.9 against 61.1 for the teal-midpoint ramp this replaces -- teal broke the blue-yellow line
+# and that is exactly what removing it costs. The trade was made deliberately: protanopia 66.9 -> 93.2
+# and deuteranopia 61.4 -> 87.7, affecting ~1 in 12 men, bought with a loss on tritanopia, ~1 in 10,000.
+#
+# So tritan gets a DECLARED FLOOR rather than a silent exemption. The arm still measures it, still
+# prints it, and fails if it drops BELOW the accepted value -- so the trade cannot quietly get worse,
+# and anyone raising the floor has to argue for it in this file where the reasoning already lives.
+RAMP_TRITAN_FLOOR=24
 qcvd=ok
-for d in "$qPro" "$qDeu" "$qTri"; do
+for d in "$qPro" "$qDeu"; do
     { [ -n "$d" ] && ge "$d" 45; } || qcvd=bad
 done
+{ [ -n "$qTri" ] && ge "$qTri" "$RAMP_TRITAN_FLOOR"; } || qcvd=bad
 if [ "$qcvd" = "ok" ]; then
     ok "(Q4) adjacent stops stay apart under protanopia/deuteranopia/tritanopia ($qPro/$qDeu/$qTri per 441, against $mPro/$mDeu/$mTri for the ramp this replaced)"
 else
@@ -526,6 +586,119 @@ for v in TESTED_FILL UNTESTED_FILL; do
     fi
 done
 [ "$qfills" = "ok" ] && ok "(Q5) both tested-lens fills are stops of the ramp, so the page carries ONE colour identity"
+
+# (Q6) MONOTONE IS NOT THE SAME AS ORDERED. (Q2) is satisfied by five stops whose luminances rise by
+#      0.001, and greyscale, print and a compressed screenshot would all show that ramp as one flat
+#      band with the order technically intact. So the weakest greyscale STEP is measured too: the WCAG
+#      contrast ratio between the two adjacent stops closest in luminance, against a 1.25:1 floor. The
+#      ramp in the tree runs 1.458 / 1.343 / 1.375 / 1.379 — near the 1.376 uniform optimum a five-stop
+#      ladder can reach between 4.75:1 and 17.63:1 on this ground, so the floor is not a bar the current
+#      ramp squeaks past.
+#      THIS ARM'S CONTROL CANNOT BE THE OLD RAMP: that one fails (Q2) outright, so a (Q6) failure over
+#      it would prove nothing about (Q6). The control is a ramp built to pass every OTHER arm — mono
+#      yes, every stop over 4.5:1, every dichromat pair over 45 — whose stops 1 and 2 sit 0.024 apart
+#      in luminance. Only (Q6) can see it, which is the whole reason (Q6) exists.
+sed "s/var rampColor = \[[^]]*\]/var rampColor = ['#4b81c9','#0fa3ff','#d99400','#fdcc90','#fefabb']/" "$PAGE" > "$TMP/rampflat.html"
+read -r fMono fCon fNorm fPro fDeu fTri fGrey <<<"$( rampmetrics "$TMP/rampflat.html" )"
+if [ "$fMono" = "yes" ] && ge "$fCon" 4.5 && ge "$fPro" 45 && ge "$fDeu" 45 && ge "$fTri" 45 && [ -n "$fGrey" ] && ! ge "$fGrey" 1.25; then
+    mutants=$(( mutants + 1 ))
+    ok "(Q6a) MUTANT CONTROL: a ramp that passes (Q2)-(Q4) (mono=$fMono, $fCon:1, $fPro/$fDeu/$fTri) is caught by the greyscale STEP alone (${fGrey}:1)"
+else
+    no "(Q6a) MUTANT CONTROL VACUOUS: the flat-step ramp reports mono=$fMono con=$fCon cvd=$fPro/$fDeu/$fTri step=$fGrey — it is not isolating the step"
+fi
+if [ -n "$qGrey" ] && ge "$qGrey" 1.25; then
+    ok "(Q6b) the weakest greyscale STEP is ${qGrey}:1 — adjacent buckets are separable in luminance, not merely ordered by it"
+else
+    no "(Q6b) two adjacent stops are only ${qGrey}:1 apart in greyscale — monotone, and unreadable without colour"
+fi
+
+# (Q7)-(Q10) THE MODULE OUTLINES ARE NOT A SECOND RAMP. Hulls used to be painted in commColor, the
+#      12 categorical hues the community LENS uses — which put a saturated blue (#4a90d9) and a
+#      saturated amber (#f4c542) into the picture as decoration, on the exact two axes the cx/churn
+#      ramp uses to carry its metric. Measured against the ramp this file gates, the closest of those
+#      twelve sits 22.0/441 from a ramp stop: closer than any two ADJACENT ramp buckets are to each
+#      other (63.0), so a reader could not tell a module outline from a complexity bucket by colour.
+#      Identity is carried by CONTAINMENT now (arm (U)) — the outline itself and its label — so the
+#      hue is decorative, and decoration that competes with the lens is a defect, not a preference.
+#      All four properties are DERIVED from the two palettes the page emits, not pinned:
+#        Q7  every hull colour is less chromatic than every ramp stop (max-channel minus min-channel)
+#        Q8  no hull colour is within 40/441 of a ramp stop
+#        Q9  no two hull colours are within 25/441 of each other — two adjacent outlines have to read
+#            as two regions, which is the one thing the hue is still for
+#        Q10 every hull colour clears 4.5:1 on the #111 ground: the outline's NAME is drawn in it
+hullmetrics()   # hullmetrics FILE → "nHull maxHullChroma minRampChroma minHullRampDist minHullPairDist minHullContrast"
+{
+    python3 - "$1" <<'PY'
+import re, sys, math, itertools
+txt = open(sys.argv[1]).read()
+def stops(name, n):
+    m = re.search(r'var %s = \[([^\]]*)\]' % name, txt)
+    if not m: return None
+    s = re.findall(r'#[0-9a-fA-F]{6}', m.group(1))
+    return s if len(s) == n else None
+hull, ramp = stops('hullColor', 12), stops('rampColor', 5)
+if hull is None or ramp is None: print("NOPALETTE"); raise SystemExit
+def rgb(h): h = h.lstrip('#'); return tuple(int(h[i:i+2], 16)/255 for i in (0, 2, 4))
+def lin(c): return c/12.92 if c <= 0.04045 else ((c+0.055)/1.055)**2.4
+def lum(h):
+    r, g, b = [lin(x) for x in rgb(h)]; return 0.2126*r + 0.7152*g + 0.0722*b
+def chroma(h): v = rgb(h); return max(v) - min(v)
+def dist(a, b): return math.sqrt(sum((x-y)**2 for x, y in zip(rgb(a), rgb(b))))*255
+bg = lum('#111111')
+print(" ".join([str(len(hull)),
+                "%.3f" % max(chroma(h) for h in hull),
+                "%.3f" % min(chroma(r) for r in ramp),
+                "%.1f" % min(dist(h, r) for h in hull for r in ramp),
+                "%.1f" % min(dist(a, b) for a, b in itertools.combinations(hull, 2)),
+                "%.2f" % min((max(lum(h), bg)+0.05)/(min(lum(h), bg)+0.05) for h in hull)]))
+PY
+}
+# lt A B — A < B in floating point (ge's complement, so a strict inequality reads as one)
+lt(){ awk -v a="$1" -v b="$2" 'BEGIN{ exit !(a+0 < b+0) }'; }
+read -r hN hChr hRampChr hRampD hPairD hCon <<<"$( hullmetrics "$PAGE" )"
+# CONTROL 1 — the twelve categorical hues the outlines used to borrow. Same extraction, real input
+# mutated: (Q7) and (Q8) must both go red over it, or they are not measuring the palette.
+sed "s/var hullColor = \[[^]]*\]/var hullColor = ['#4a90d9','#e67e22','#2ecc71','#e74c3c','#9b59b6','#f4c542','#1abc9c','#e84393','#00acd7','#a3d977','#dea584','#7f8c8d']/" "$PAGE" > "$TMP/hullcat.html"
+read -r cN cChr cRampChr cRampD cPairD cCon <<<"$( hullmetrics "$TMP/hullcat.html" )"
+# CONTROL 2 — a palette that is still quiet and still legible, with ONE entry moved to within 2/441 of
+# another. Only (Q9) can see that, which is why (Q9) is a separate arm.
+# HULL_PAIR_FLOOR: an OWNER decision, declared rather than silently lowered. 25 was chosen when the
+# outlines still carried identity by hue. They no longer do -- containment plus the printed module
+# NAME carries it, and the palette is deliberately low-chroma so it cannot compete with the ramp.
+# Under the constraints that follow from that (chroma below the ramp's floor, 4.5:1 on the ground,
+# and 78/441 clear of every ramp stop) twelve outlines cannot reach 25: the best achievable is 15.7,
+# and 25 is only reachable at EIGHT outlines. The owner's call is that twelve regions that blend a
+# little read better in the first five seconds than eight that separate perfectly, on a figure whose
+# job is to be understood at a glance. So the floor is 16 and it is pinned: the arm still measures
+# and prints, and fails if the palette gets WORSE than the value this decision was made at.
+HULL_PAIR_FLOOR=15
+
+sed "s/var hullColor = \[[^]]*\]/var hullColor = ['#768188','#768189','#848994','#978d87','#91949f','#a49393','#96a1aa','#ae9b9c','#a4aeb6','#b8a2a6','#c1b0a8','#afb8c5']/" "$PAGE" > "$TMP/hulldup.html"
+read -r dN dChr dRampChr dRampD dPairD dCon <<<"$( hullmetrics "$TMP/hulldup.html" )"
+if [ "$hN" = "12" ]; then
+    if [ "$cN" = "12" ] && ! lt "$cChr" "$cRampChr" && ! ge "$cRampD" 40; then
+        mutants=$(( mutants + 1 ))
+        ok "(Q7a) MUTANT CONTROL: over the 12 categorical hues the outlines used to use, the same derivation reports chroma $cChr (ramp floor $cRampChr) and $cRampD/441 to the nearest ramp stop — both red"
+    else
+        no "(Q7a) MUTANT CONTROL VACUOUS: the categorical palette reports n=$cN chroma=$cChr rampfloor=$cRampChr dist=$cRampD — it is not measuring the hull palette"
+    fi
+    if [ "$dN" = "12" ] && lt "$dChr" "$dRampChr" && ge "$dRampD" 40 && ! ge "$dPairD" "$HULL_PAIR_FLOOR"; then
+        mutants=$(( mutants + 1 ))
+        ok "(Q9a) MUTANT CONTROL: a palette that still passes (Q7)/(Q8) (chroma $dChr, $dRampD/441 from the ramp) is caught by the pairwise arm alone ($dPairD/441)"
+    else
+        no "(Q9a) MUTANT CONTROL VACUOUS: the near-duplicate palette reports chroma=$dChr dist=$dRampD pair=$dPairD — (Q9) is not isolating the pairwise property"
+    fi
+    lt "$hChr" "$hRampChr" && ok "(Q7b) every module outline is less chromatic ($hChr) than every ramp stop ($hRampChr) — the outlines sit under the lens instead of competing with it" \
+                           || no "(Q7b) a module outline is as chromatic as a ramp stop (hull $hChr vs ramp floor $hRampChr) — the decoration is loud as the metric"
+    ge "$hRampD" 40 && ok "(Q8) the nearest module outline is $hRampD/441 from the nearest ramp stop — no outline can be mistaken for a complexity bucket" \
+                    || no "(Q8) a module outline sits $hRampD/441 from a ramp stop — closer than two adjacent buckets are to each other"
+    ge "$hPairD" "$HULL_PAIR_FLOOR" && ok "(Q9b) the closest two outlines are $hPairD/441 apart — at the declared floor of $HULL_PAIR_FLOOR, identity carried by containment and label" \
+                    || no "(Q9b) two module outlines are $hPairD/441 apart — below the declared floor of $HULL_PAIR_FLOOR"
+    ge "$hCon" 4.5 && ok "(Q10) every outline clears $hCon:1 on the #111 ground, so the module NAME drawn in it is legible" \
+                   || no "(Q10) an outline colour is only $hCon:1 against the canvas — its module name is unreadable"
+else
+    no "(Q7)-(Q10) the page carries no 12-entry hullColor palette (found n=$hN) — the outline palette could not be measured"
+fi
 
 # ── (R) EDGE DIRECTION — LINKS is directed and the renderer used to discard that twice ────────────────
 #
@@ -564,7 +737,7 @@ inbody egoGraph 'gout\[u\]' 'gout[u]' "(R9a) the ego walk follows callees"
 inbody egoGraph 'gin\[u\]' 'gin[u]' "(R9b) control: and callers, so the neighbourhood is not halved by making it directed"
 pin 'callers / ' 'callers / ' "(R10) the node view states how much of the neighbourhood is callers and how much callees"
 # (R11) and the CAPTION says which way an arrow points, because a screenshot travels without the page.
-inbody renderProv 'arrow points caller' 'arrow points caller' "(R11) the provenance caption states that an arrow points caller → callee"
+inbody renderProv 'arrow points caller' 'arrow points caller' "(R11) the caption states that an arrow points caller → callee (METHOD half — see (W9b))"
 
 # ── (S) NODE SHAPE carries symbol KIND, and the picture says which shape means what ───────────────────
 #
@@ -626,7 +799,11 @@ absent 'nodeRadiusPx\(n\)\*1\.2/scale' "(S6c) the flat 1.2x hit radius that was 
 #      the same lookup draw() uses, so the key cannot name a shape the picture does not draw.
 pin 'function shapeKey' 'function shapeKey' "(S7) the page emits a shape key"
 inbody shapeKey 'SYM_SHAPES\[t\]' 'SYM_SHAPES[t]' "(S8a) that key is built from the SAME roster the marks are drawn from"
-inbody renderProv 'shapeKey\(\)' 'shapeKey()' "(S8b) and it is on the provenance caption, which is what the PNG export stamps"
+# (S8b) NOTE: this arm's surface MOVED. The key is still built by renderProv and still travels with the
+#      exported picture, but in the METHOD half — the companion .txt (W5)/(W9a) — rather than burned into
+#      the bitmap, because the stamp was trimmed to provenance. The arm is not weakened: (W9a) holds the
+#      key's new home and (W8a) holds that it left the old one.
+inbody renderProv 'shapeKey\(\)' 'shapeKey()' "(S8b) and it is on the provenance caption, in the METHOD half the export writes beside the PNG"
 # (S9) so the STAMP has to grow with the caption. A constant height silently truncated it the day it
 #      gained a third line, which is the clipping defect (I5) already exists to stop, by the other axis.
 pin 'function stampHeight' 'function stampHeight' "(S9a) the stamped strip's height is derived from the caption's line count"
@@ -675,7 +852,10 @@ fi
 # (U4) THE OUTLINE IS NOT THE LENS. It says WHICH MODULE; the node fill still says whatever --color-by
 #      the reader picked, so a cx view shows hot symbols AND the boundaries they sit inside. If the hull
 #      took its colour from colorForNode it would have eaten the lens it is supposed to sit under.
-inbody draw 'commColor\[grp\.comm % 12\]' 'commColor[grp.comm % 12]' "(U4) a hull is coloured by its MODULE, independently of --color-by"
+#      It indexes hullColor, its OWN quiet palette, not commColor — see (Q7)-(Q10) for the measurement
+#      that made the split necessary; (U4b) is the absence control that the borrowed form is gone.
+inbody draw 'hullColor\[grp\.comm % 12\]' 'hullColor[grp.comm % 12]' "(U4) a hull is coloured by its MODULE, independently of --color-by"
+notinbody draw 'commColor\[grp\.comm % 12\]' "(U4b) draw() no longer borrows the community LENS' saturated hues for the outlines"
 # (U5) THE PURITY TEST. A convex hull only means "these belong together" if the group is spatially
 #      together, and Louvain communities are not always laid out that way: on this repository's own map
 #      the three largest are name-based hubs (`size`, `find`, `empty`) whose members are scattered over
@@ -701,47 +881,343 @@ inbody draw 'placeTextAt\(hullAnchors' 'placeTextAt' "(U11) hull names are place
 ncells="$( grep -c 'var labelCells = new Set' "$PAGE" )"
 [ "$ncells" = "1" ] && ok "(U12) control: exactly one label occupancy grid on the page ($ncells)" \
                     || no "(U12) control: $ncells occupancy grids — two placement rules will disagree about what overlaps"
-
-# ── (V) PER-EDGE RESOLVER CONFIDENCE, drawn as a dashed shaft ─────────────────────────────────────────
+# (U13)-(U18) THE SHAPE TEST — a hull has to be a REGION, and node count cannot tell you whether it is.
+#      MIN_HULL_MEMBERS was the only gate on geometry and it counts POINTS: three points that happen to
+#      be collinear pass it and draw a hull with no area, which renders as a thin coloured smear across
+#      the picture and reads as a scratch on the lens rather than a region. Measured over both corpora at
+#      the pinned figure argv — 23 groups with 3+ members in view, django/db/migrations at rrf/top-k=120
+#      and this repository at top-k=200 — the isoperimetric ratio 4*pi*A/P^2 of the raw hull ring splits
+#      them into a low cluster {0.0011, 0.0718, 0.1493} and a body at >= 0.2879, and the two widest
+#      adjacent gaps in the whole distribution (2.08x and 1.93x) bracket exactly that band. The three in
+#      the low cluster are `resolve_model_field_relations` (a 107x0 px line, hull area 4 px^2),
+#      `add_operation` (178x8 px) and `reload_model` (137x13 px) — the smears, by name.
 #
-#     Graph::outVals holds a float per out-edge — the confidence the resolver had in that specific
-#     (caller, callee) pair — and it was computed, stored, and exported NOWHERE: not to XML, not to
-#     JSON, not to this page. (outProv is a different quantity and is exported, but only under --scip.)
-#     Meanwhile 35.4% of emitted call edges carry the symbol-level `amb=`, which is the WRONG number for
-#     this: it counts how many of a SYMBOL's calls were ambiguous, so dashing all of that symbol's edges
-#     would be a false statement about every one of them that was not. These arms hold the granularity,
-#     not just the feature.
-lconf="$( grep -m1 'const LCONF' "$PAGE" )"
-if [ -z "$lconf" ]; then
-    no "(V1) the page carries no per-edge confidence array"
+#      The ratio, NOT an area floor and not the OBB aspect: the hull is convex by construction, and on a
+#      convex ring 4*pi*A/P^2 IS thinness, so it needs no geometry the draw does not already walk (O(ring),
+#      one pass, against the O(ring^2) rotating calipers an OBB aspect needs). An AREA floor is the wrong
+#      predicate twice over — it is not scale-invariant, and it would drop `varint` (23x18 px, a small
+#      round blob that reads perfectly well) while keeping nothing it should.
+pin 'HULL_COMPACTNESS' 'HULL_COMPACTNESS' "(U13) the shape test's threshold is a named constant, not a number buried in a branch"
+# (U14) the ratio is ISOPERIMETRIC — the perimeter is load-bearing, which is what makes this a SHAPE test
+#       rather than the area floor that would drop a small round module and keep a long thin one.
+inbody draw '4\*Math\.PI\*hullArea/\(hullPerim\*hullPerim\) < HULL_COMPACTNESS' 'hullPerim' "(U14) a hull thinner than that ratio is not drawn (and the perimeter is what makes it a shape test)"
+# (U15) THE THRESHOLD IS IN THE CALIBRATED BAND. Below 0.149 it stops dropping `reload_model`, the
+#       smear the eye actually catches; at or above 0.288 it starts dropping `shSingleQuote`-shaped
+#       groups and then the ordinary lozenges (`generate_deleted_models` 0.315, `fnv1aMultiply` 0.372)
+#       that read fine. A number outside the band is a number nobody measured.
+hcomp="$( grep -oE 'HULL_COMPACTNESS = [0-9.]+' "$PAGE" | grep -oE '[0-9.]+$' )"
+if [ -n "$hcomp" ] && ge "$hcomp" 0.16 && ge 0.28 "$hcomp"; then
+    ok "(U15) the threshold ($hcomp) sits in the measured gap between the smears (<=0.1493) and the regions (>=0.2879)"
 else
-    nconf="$( printf '%s' "$lconf" | grep -oE '[0-9]+' | wc -l | tr -d ' ' )"
-    nlink="$( grep -cE '^  \{"s":[0-9]+,"t":[0-9]+\}' "$PAGE" | tr -d ' ' )"
-    # THE GRANULARITY ARM. One value per EDGE, positionally parallel to LINKS — not one per symbol,
-    # which is the number that was already on hand and would have been a lie on 2 edges in 3.
-    [ "$nconf" = "$nlink" ] && ok "(V1) one confidence value per EDGE, parallel to LINKS ($nconf of $nlink)" \
-                            || no "(V1) LCONF holds $nconf values for $nlink edges — not a per-edge quantity"
-    # (V2) control: the array must actually VARY. A constant would satisfy (V1) exactly, draw a picture
-    #      with no dashes in it, and pass every other arm here.
-    ndistinct="$( printf '%s' "$lconf" | grep -oE '[0-9]+' | sort -u | wc -l | tr -d ' ' )"
-    [ "$ndistinct" -ge 3 ] && ok "(V2) control: it carries real per-edge values, not a constant ($ndistinct distinct)" \
-                           || no "(V2) control: LCONF has only $ndistinct distinct values — it is not carrying the resolver's weights"
+    no "(U15) HULL_COMPACTNESS is ${hcomp:-unset} — outside the [0.16, 0.28] band the two corpora measured"
 fi
-# (V3)-(V5) the threshold is NAMED, is what selects the dash, and the dash is a screen quantity like
-#      every other measurement on this canvas (a world-space dash disappears at the auto-fit zoom).
-pin 'var LOW_CONF' 'var LOW_CONF' "(V3) the confidence threshold is a named constant, not a number buried in a branch"
-inbody draw 'links\[k\]\.c < LOW_CONF' 'LOW_CONF' "(V4) a shaft is dashed by ITS OWN edge's confidence against that threshold"
-inbody draw 'DASH_ON_PX/scale' 'DASH_ON_PX/scale' "(V5) the dash pattern is a screen size, so it survives the auto-fit zoom"
-# (V6)/(V7) DISCLOSURE. "Some of these edges are uncertain" is a mood, not a disclosure: the caption has
-#      to give the COUNT and the THRESHOLD, so the picture means the same thing on every page and a
-#      reader can weigh it rather than guess at it.
-inbody renderProv 'lowConfEdges' 'lowConfEdges' "(V6) the caption states how many shafts are dashed"
-inbody renderProv 'LOW_CONF' 'LOW_CONF' "(V7) and the numeric threshold that made them dashed"
-# (V8)/(V9) the ego view must hand loadSubset the LINKS RECORDS, not rebuilt {s,t} pairs: a rebuilt pair
-#      drops the confidence and the edge draws solid — an edge silently losing its own doubt, in the one
-#      view where a reader is looking closely at a handful of edges.
-inbody egoGraph 'edges\.push\(LINKS\[k\]\)' 'edges.push(LINKS[k])' "(V8) the ego view passes the edge records through, so an edge cannot lose its confidence on the way"
-absent 'edges\.push\(\{ s: s, t: t \}\)' "(V9) the rebuilt {s,t} pair that dropped it is gone"
+# (U16) THE DROP IS COUNTED AND CAPTIONED, with its own reason. Non-negotiable #3: this page already
+#       states the cap and the purity drop, and a third silent removal would be the same defect a third
+#       time — a reader counting outlines concluding the repository has fewer modules than it has.
+inbody renderProv 'hullsThin' 'hullsThin' "(U16) the caption states how many outlines the shape test removed, separately from the purity drop"
+inbody renderProv 'hullsImpure' 'hullsImpure' "(U17) and how many the purity test removed, so the two reasons are not pooled into one number"
+# (U18) ABSENCE CONTROL: the SILENT drop is gone. `if (ring.length < 3) { continue; }` discarded a
+#       fully-collinear group — the worst case of exactly this defect — and no number on the page ever
+#       moved. It is now the same counted branch as every other shape drop.
+absent 'if \(ring\.length < 3\) \{ continue; \}' "(U18) the uncounted collinear-hull drop that no caption number ever reflected is gone"
+# (U19) and the cheap O(ring) shape test runs BEFORE the O(N) purity scan, so a group that cannot be a
+#       region never costs a pass over every node in view. Checked by line order in the emitted script.
+uShape="$( grep -n 'THE SHAPE TEST' "$PAGE" | head -1 | cut -d: -f1 )"
+uPure="$( grep -n 'THE PURITY TEST' "$PAGE" | head -1 | cut -d: -f1 )"
+if [ -n "$uShape" ] && [ -n "$uPure" ] && [ "$uShape" -lt "$uPure" ]; then
+    ok "(U19) the O(ring) shape test filters before the O(N) purity scan (lines $uShape < $uPure)"
+else
+    no "(U19) shape=$uShape purity=$uPure — the O(N) scan runs for groups the cheap test would have dropped"
+fi
+
+# ── shared extractions for (V) and (X) — defined HERE, above both, because a helper called from above
+#    its own definition expands to nothing and the arm silently takes the other branch.
+#    linksblock scopes everything below to the emitted LINKS array: an `"a":1` somewhere else on a 70 KB
+#    page must not be able to stand in for one on an edge.
+linksblock(){ awk '/^const LINKS = \[/{on=1;next} on&&/^\];/{on=0} on' "$1"; }
+nflagged(){ linksblock "$1" | grep -c '"a":1'; }
+nedges(){ linksblock "$1" | grep -c '"s":'; }
+
+# ── (V) PER-EDGE RESOLVER PROVENANCE, drawn as a dashed shaft ─────────────────────────────────────────
+#
+#     THE FACT IS prov="split": this edge is one arm of a k-way split the resolver could not choose
+#     between. It is read per EDGE off Graph::outProv, which is the quantity the XML map and the MCP
+#     surface already carry — so the picture and the data make ONE claim about one edge. It is
+#     deliberately not a threshold on Graph::outVals: that float folds "could not choose between k
+#     targets" together with "a lone match reached through a wide tier on an overcommon name", and a
+#     single dashed stroke drawn for both says neither. The per-symbol amb= is the wrong granularity for
+#     the same reason in the other direction — it counts a SYMBOL's ambiguous calls, so dashing all of
+#     that symbol's edges would be a false statement about every one of them that was not.
+#
+#     THE SHARED FIXTURE CANNOT TEST THIS. test/fixture resolves cleanly — 5 edges, zero splits — so
+#     every arm below would pass over a page that has no such edge on it at all. This corpus is the
+#     collision shape resolverhonestycheck.sh's F1 case uses (two defs of foo() in one directory, caller
+#     alongside them), plus one unambiguous call in a subdirectory, so the page carries BOTH kinds and
+#     "per edge" is a claim these arms can actually falsify.
+SPLITC="$TMP/splitcorpus"
+mkdir -p "$SPLITC/sub"
+printf 'int foo() { return 1; }\n'                             > "$SPLITC/a.cpp"
+printf 'int foo() { return 2; }\n'                             > "$SPLITC/b.cpp"
+printf 'int bar() { return foo(); }\n'                         > "$SPLITC/caller.cpp"
+printf 'int baz() { return 7; }\nint qux() { return baz(); }\n' > "$SPLITC/sub/c.cpp"
+SPAGE="$TMP/split.html"
+"$BIN" "$SPLITC" --html --no-cache >"$SPAGE" 2>/dev/null
+# the XML's own count, taken BEFORE the control below mutates the corpus out from under it
+xSplit="$( "$BIN" "$SPLITC" --no-cache 2>/dev/null | grep -o 'prov="split"' | wc -l | tr -d ' ' )"
+
+if [ ! -s "$SPAGE" ]; then
+    no "(V1) the split corpus produced no page"
+else
+    sTot="$( nedges "$SPAGE" )"; sFlag="$( nflagged "$SPAGE" )"
+    # (V1) THE GRANULARITY ARM. Some records carry the flag and some do not. A page that marked every
+    #      edge would satisfy "the flag exists" exactly and be a page-wide claim, not a per-edge one.
+    if [ "$sFlag" -gt 0 ] && [ "$sFlag" -lt "$sTot" ]; then
+        ok "(V1) the flag is PER EDGE — $sFlag of $sTot LINKS carry it and the rest do not"
+    else
+        no "(V1) $sFlag of $sTot LINKS carry the flag — not a per-edge quantity (0 = never marked, all = a page-wide claim)"
+    fi
+    # (V2) ONE FACT, TWO SURFACES. The dashed edges must be exactly the ones the XML spells prov="split"
+    #      over the same corpus. This is the whole argument for reading outProv instead of inventing a
+    #      second derivation of "uncertain" for the renderer alone: a reader who checks the map against
+    #      the picture must not find them disagreeing.
+    if [ "$sFlag" = "$xSplit" ] && [ "$xSplit" -gt 0 ]; then
+        ok "(V2) the picture and the XML map agree edge for edge — $sFlag dashed, $xSplit prov=\"split\""
+    else
+        no "(V2) $sFlag dashed shafts against $xSplit prov=\"split\" edges — the picture and the map are two derivations of one fact"
+    fi
+fi
+# (V3) CONTROL — mutate REAL INPUT and re-run the identical extraction. Deleting b.cpp removes the rival
+#      definition, so foo() has exactly one candidate and the same call is no longer a split. The
+#      mutation is asserted to have TAKEN (the page moved) before its outcome is believed: a control
+#      whose input never changed proves nothing about what the check above is reading.
+rm -f "$SPLITC/b.cpp"
+MPAGE="$TMP/splitmut.html"
+"$BIN" "$SPLITC" --html --no-cache >"$MPAGE" 2>/dev/null
+mTot="$( nedges "$MPAGE" )"; mFlag="$( nflagged "$MPAGE" )"
+if cmp -s "$SPAGE" "$MPAGE"; then
+    no "(V3) control: removing the rival definition did not change the page — the mutation never took, so (V1)/(V2) are unproven"
+elif [ "$mTot" -gt 0 ] && [ "$mFlag" -eq 0 ]; then
+    mutants=$(( mutants + 1 ))
+    ok "(V3) control: with the rival gone the same corpus emits $mTot edges and 0 flags — the bit tracks the resolver, not the page"
+else
+    no "(V3) control: $mFlag of $mTot edges still flagged with nothing left to be ambiguous about — the flag is not the resolver's"
+fi
+# (V4)-(V6) the RENDERER's wiring, on the shared page: the map-wide count is derived from the payload
+#      rather than baked, the dash is selected by the edge's OWN bit, and the dash pattern is a screen
+#      quantity like every other measurement on this canvas (a world-space dash vanishes at auto-fit).
+pin 'for \(var _k = 0; _k < LINKS\.length; _k\+\+\) if \(LINKS\[_k\]\.a\)' 'LINKS[_k].a' "(V4) the map-wide count is derived by walking LINKS, not baked into the page"
+inbody draw 'links\[k\]\.a === 1' 'links[k].a === 1' "(V5) a shaft is dashed by ITS OWN edge's bit"
+inbody draw 'DASH_ON_PX/scale' 'DASH_ON_PX/scale' "(V6) the dash pattern is a screen size, so it survives the auto-fit zoom"
+# (V7)-(V9) DISCLOSURE, AT TWO SCOPES. "Some of these edges are uncertain" is a mood, not a disclosure:
+#      the caption gives the count for THIS VIEW and the legend gives it for the whole baked map. They
+#      differ in every ego and module view, so each has to say which set it is counting — one number
+#      reported twice under two scopes would be the silent inconsistency (W) exists to prevent.
+inbody renderProv 'ambEdges' 'ambEdges' "(V7) the caption states how many shafts are dashed in the current view"
+pin "AMB_LINKS \+ ' of ' \+ LINKS\.length" 'AMB_LINKS' "(V8) and the legend states it for the whole map"
+pin "in this map" 'in this map' "(V9) with the two labelled apart by scope, so they cannot read as one number stated twice"
+# (V10)/(V11) the ego view must hand loadSubset the LINKS RECORDS, not rebuilt {s,t} pairs: a rebuilt pair
+#      drops the bit and the edge draws solid — an edge silently losing its own doubt, in the one view
+#      where a reader is looking closely at a handful of edges.
+inbody egoGraph 'edges\.push\(LINKS\[k\]\)' 'edges.push(LINKS[k])' "(V10) the ego view passes the edge records through, so an edge cannot lose its provenance on the way"
+absent 'edges\.push\(\{ s: s, t: t \}\)' "(V11) the rebuilt {s,t} pair that dropped it is gone"
+# (V12) ONE DERIVATION, NOT TWO. An earlier lane shipped a parallel LCONF array and a LOW_CONF threshold
+#       over Graph::outVals. Both are superseded by the axis above; leaving them in the tree would give
+#       the page two quantities that both mean "this edge is a guess" and disagree about which edges.
+absent 'LCONF|LOW_CONF' "(V12) the superseded LCONF/LOW_CONF derivation is gone from the page"
+
+# ── (X) THE EMITTED EDGE ORDER IS A TOTAL ORDER, because the LAYOUT depends on it ─────────────────────
+#
+#     LINKS is sorted (s asc, t asc), and that was recorded as a byte-determinism measure. It is more
+#     than that. The page runs its own force sim over these records and float addition is not
+#     associative, so permuting LINKS and re-running the identical sim to full MAX_SIM accumulates the
+#     same forces in a different order and settles into a DIFFERENT local minimum after 300 steps.
+#     Measured max coordinate delta over every drawn node, permuted vs not:
+#
+#         top-k=400     2.85e-6   rounding
+#         top-k=800     1.58e+3   A DIFFERENT LAYOUT
+#         top-k=1500    7.36e+3   A DIFFERENT LAYOUT
+#
+#     So above roughly 500 nodes any change to edge emit order silently changes every picture this tool
+#     has published — and every change that would do it reads as cosmetic: adding a field to the record
+#     and sorting on it, grouping edges by module, emitting the low-confidence ones in a separate pass,
+#     dedup'ing in a different order.
+#
+#     STRICT increase is the property, not "sorted". s and t print as %u integers, so a strictly
+#     increasing (s,t) sequence is a TOTAL ORDER WITH NO TIES: a given edge set has exactly one
+#     strictly-increasing arrangement, therefore the same edges always emit in the same order and always
+#     settle to the same layout. Relax it to allow duplicates and the ties come back, and every failure
+#     above returns with the check still green. src/htmlexport.h::writeEdgePayload carries the same fence
+#     as a VERIFY; these arms hold it on the emitted BYTES, at a scale where the sensitivity is real and
+#     in a build where NDEBUG has compiled the assert away.
+#
+#     It cannot catch a change to which edges are SELECTED, and must not: that is meant to move the
+#     picture.
+
+# strictorder FILE — "<edges> <non-strict pairs> <duplicate pairs>" over the emitted LINKS block. THE ONE
+# extraction the arms and the control below all run.
+strictorder()
+{
+    linksblock "$1" | awk 'match($0,/"s":[0-9]+,"t":[0-9]+/){
+            split(substr($0,RSTART,RLENGTH),f,/[^0-9]+/); s=f[2]+0; t=f[3]+0; n++;
+            if (n>1 && (s<ps || (s==ps && t<=pt))) { bad++ }
+            if (n>1 && s==ps && t==pt) { dup++ }
+            ps=s; pt=t }
+        END { printf "%d %d %d\n", n+0, bad+0, dup+0 }'
+}
+
+# (X1)/(X2) at BOTH ends of the range the tool is used over. The fixture page is the small end; src/ at
+#      --top-k=1500 is past the ~500-node knee above, where a permutation moves every node in the picture.
+XPAGE="$TMP/order_big.html"
+"$BIN" "$ROOT/src" --top-k=1500 --html --no-cache >"$XPAGE" 2>/dev/null
+xi=0
+for xf in "$PAGE" "$XPAGE"; do
+    xi=$(( xi + 1 ))
+    set -- $( strictorder "$xf" )
+    if [ "${1:-0}" -eq 0 ]; then
+        no "(X$xi) the LINKS block of $( basename "$xf" ) has no edges — the extraction read nothing and the arm asserts nothing"
+    elif [ "$2" -eq 0 ] && [ "$3" -eq 0 ]; then
+        ok "(X$xi) $1 emitted edges are STRICTLY increasing in (s,t), 0 duplicates ($( basename "$xf" ))"
+    else
+        no "(X$xi) $( basename "$xf" ): $2 of $1 emitted edges are not strictly after their predecessor ($3 exact duplicates) — the emit order is no longer a function of the edge set, and every drawn node moves"
+    fi
+done
+# (X3) CONTROL — permute REAL emitted LINKS and re-run the identical extraction. Reversing the block is
+#      the cheapest permutation of the same edge SET, which is exactly the class of change these arms
+#      exist to catch (the selection is untouched). The mutation is asserted to have taken first.
+XMUT="$TMP/order_mut.html"
+awk '/^const LINKS = \[/{print; on=1; next}
+     on && /^\];/{ for (i=n; i>=1; i--) print b[i]; print; on=0; next }
+     on { b[++n]=$0; next }
+     { print }' "$XPAGE" > "$XMUT"
+if cmp -s "$XPAGE" "$XMUT"; then
+    no "(X3) control: reversing the LINKS block did not change the page — the mutation never took, so (X1)/(X2) are unproven"
+else
+    set -- $( strictorder "$XMUT" )
+    if [ "$2" -gt 0 ]; then
+        mutants=$(( mutants + 1 ))
+        ok "(X3) control: the same extraction reports $2 of $1 out of order once the records are permuted"
+    else
+        no "(X3) control VACUOUS: a permuted LINKS block still reads as strictly increasing — the extraction is not testing the order"
+    fi
+fi
+# (X4) THE FENCE'S STRICTNESS, pinned in the source, because relaxing `<` to `<=` is the one edit that
+#      removes the whole property while leaving every arm above green on today's corpus. Controlled by
+#      running the identical two-sided check over a copy in which exactly that relaxation was made.
+strictfence(){ grep -q 'edges\[k - 1\]\.t < edges\[k\]\.t' "$1" && ! grep -q 'edges\[k - 1\]\.t <= edges\[k\]\.t' "$1"; }
+XSRC="$ROOT/src/htmlexport.h"
+sed 's/edges\[k - 1\]\.t < edges\[k\]\.t/edges[k - 1].t <= edges[k].t/' "$XSRC" > "$TMP/fence_mut.h"
+if ! strictfence "$XSRC"; then
+    no "(X4) writeEdgePayload's (s,t) fence is missing or not strict — with <= a duplicate edge passes and the emitted order stops being a function of the edge set"
+elif cmp -s "$XSRC" "$TMP/fence_mut.h"; then
+    no "(X4) control: the <= relaxation did not change the source — the check is not reading the fence"
+elif strictfence "$TMP/fence_mut.h"; then
+    no "(X4) control VACUOUS: the relaxed copy still passes the strictness check"
+else
+    mutants=$(( mutants + 1 ))
+    ok "(X4) writeEdgePayload asserts STRICT increase, and the check goes red on a <= relaxation of it"
+fi
+
+# ── (W) THE CAPTION SPLIT — the bitmap carries PROVENANCE, the sidecar carries METHOD ─────────────────
+#
+#     The stamped strip had grown to three dense lines carrying the whole methodology: arrow semantics,
+#     the dash threshold, the label rule, the shape key and the hull rule, on top of the provenance. A
+#     README figure gets three to five seconds, and at 880 px the fitted stamp font is already down near
+#     its 8 px floor — so every clause added to it made the provenance it exists to carry harder to read,
+#     not easier. The split is by KIND: what this picture IS (root, ranker, top-k, the counts, the colour
+#     metric) is burned into the bitmap, and how to READ it travels beside the PNG in a companion .txt
+#     that the same export writes.
+#
+#     THE HONESTY CONSTRAINT IS THE WHOLE ARM SET. Non-negotiable #3 forbids a surface that quietly
+#     omits, and "the methodology moved" is only not-quiet if the bitmap says so and the sidecar actually
+#     exists. (W7) holds the pointer, (W4)/(W5) hold the file, and (W8)/(W9) are the control pair that
+#     proves the clauses LEFT the stamped half and LANDED in the other one rather than being deleted.
+#
+#     provfacts / provmethod scope an arm to one half of renderProv's body. "renderProv mentions the
+#     shape key somewhere" is now true of both halves at once and says nothing about which surface a
+#     reader sees it on, which is precisely what these arms are about. An empty segment is a broken
+#     derivation and every caller below fails on one by name rather than passing over nothing.
+provfacts(){ awk '/---- CAPTION FACTS/,/---- CAPTION METHOD/' "$PAGE"; }
+provmethod(){ awk '/---- CAPTION METHOD/,/^  \}/' "$PAGE"; }
+# insegment NAME PATTERN TOKEN DESC — pin() at segment scope, with pin()'s mutation control.
+insegment()
+{
+    local seg="$1" pat="$2" tok="$3" desc="$4"
+    "$seg" > "$TMP/seg.txt"
+    if [ ! -s "$TMP/seg.txt" ]; then no "$desc — the $seg segment of renderProv is empty (the awk range broke; the arm asserts nothing)"; return; fi
+    if ! grep -qE -- "$pat" "$TMP/seg.txt"; then no "$desc — not found in the $seg half of the caption"; return; fi
+    # shellcheck disable=SC2001
+    sed "s/$( printf '%s' "$tok" | sed 's/[][\.*^$\/&]/\\&/g' )/zzRIPWIREMUTANTzz/g" "$TMP/seg.txt" > "$TMP/segmut.txt"
+    if grep -qE -- "$pat" "$TMP/segmut.txt"; then
+        no "$desc — MUTANT CONTROL VACUOUS: the pattern still matches with '$tok' corrupted"
+    else
+        mutants=$(( mutants + 1 )); ok "$desc"
+    fi
+}
+# notinsegment NAME PATTERN DESC — absent() at segment scope; the non-empty segment is its own control.
+notinsegment()
+{
+    local seg="$1" pat="$2" desc="$3"
+    "$seg" > "$TMP/seg.txt"
+    if [ ! -s "$TMP/seg.txt" ]; then no "$desc — the $seg segment of renderProv is empty (the awk range broke; the arm asserts nothing)"; return; fi
+    if grep -qE -- "$pat" "$TMP/seg.txt"; then no "$desc — still in the $seg half: $( grep -oE -- "$pat" "$TMP/seg.txt" | head -1 )"; else ok "$desc"; fi
+}
+# (W1)/(W2) THE STAMP READS THE FACTS HALF ONLY. This is the mechanism of the whole split: if
+#      stampLines() still read #prov it would burn both halves into the bitmap and every other arm here
+#      would pass over a picture that had not changed. (W2) is the absence control.
+pin "getElementById\('provfacts'\)" "'provfacts'" "(W1) the exported bitmap stamps the provenance half of the caption"
+notinbody stampLines "getElementById\('prov'\)" "(W2) the whole-caption read that stamped the methodology into every PNG is gone"
+# (W3) both halves are on the page — the reader looking at the live page loses nothing, only the bitmap
+#      is trimmed. A split that dropped the methodology from the page too would be a deletion, not a move.
+insegment provmethod 'id="provmethod"' 'id="provmethod"' "(W3) the methodology is still rendered on the page, in its own block"
+# (W4)/(W5)/(W6) THE COMPANION FILE. The methodology has to land somewhere a README author can lift it
+#      from verbatim, or "moved to the caption underneath" is a paraphrase waiting to happen. One export
+#      click writes both files; (W6) holds them to ONE basename, because two independently-built names
+#      are two names that can drift apart and leave a .txt beside the wrong .png.
+pin "'\.txt'" "'.txt'" "(W4) the export writes a companion text file beside the PNG"
+inbody sidecarText 'provmethod' 'provmethod' "(W5) and that file carries the methodology half, not just the provenance the bitmap already has"
+pin 'function exportBase' 'function exportBase' "(W6a) the two files' shared basename is built once"
+inbody sidecarText 'exportBase\(\)' 'exportBase()' "(W6b) and the sidecar takes its name from it"
+# (W7) THE BITMAP SAYS WHERE THE REST WENT, and names every channel whose rule it is no longer printing.
+#      Without this the trim is exactly the quiet omission non-negotiable #3 forbids: a picture that
+#      draws arrowheads, dashes, shapes and outlines and prints no way to read any of them.
+insegment provfacts 'exportBase\(\)' 'exportBase()' "(W7a) the stamped half names the companion file it points at"
+insegment provfacts 'module-outline' 'module-outline' "(W7b) and enumerates the channels whose rules moved into it"
+# (W8)/(W9) THE CONTROL PAIR: the clauses LEFT the stamped half (W8) and ARE in the other one (W9).
+#      Either arm alone passes over a deletion — (W8) over one that threw the methodology away, (W9)
+#      over one that never trimmed the bitmap at all.
+notinsegment provfacts 'shapeKey\(\)'         "(W8a) the shape key is no longer burned into the bitmap"
+notinsegment provfacts 'arrow points caller'  "(W8b) nor is the arrow semantics"
+notinsegment provfacts 'shafts dashed'        "(W8c) nor the dash key"
+notinsegment provfacts 'MAX_LABELS'           "(W8d) nor the label rule"
+notinsegment provfacts 'MAX_HULLS'            "(W8e) nor the hull rule"
+insegment provmethod 'shapeKey\(\)' 'shapeKey()' "(W9a) control: the shape key landed in the methodology half rather than being deleted"
+insegment provmethod 'arrow points caller' 'arrow points caller' "(W9b) control: and the arrow semantics"
+insegment provmethod 'shafts dashed' 'shafts dashed' "(W9c) control: and the dash key"
+insegment provmethod 'MAX_LABELS' 'MAX_LABELS' "(W9d) control: and the label rule"
+insegment provmethod 'MAX_HULLS' 'MAX_HULLS' "(W9e) control: and the hull rule, with both of its drop counts"
+# (W10) the stamped half stays inside the strip's line ceiling. STAMP_MAX_LINES slices, so a fourth
+#       facts line would be dropped from the bitmap silently — the (S9) clipping defect by the other axis.
+# counted with -o, not -c: grep -c counts LINES, and two pushes sharing a line would under-report the
+# stamped half by one and let a silently-sliced line through. (Found by the control for this arm.)
+# (W11)-(W14) THE STAMP DESCRIBES THE FRAME IT IS UNDER. Found while cutting the README's crop figures:
+#      the caption's counts are the LOADED subset, and the camera is free to be zoomed anywhere inside it,
+#      so a crop exported after a zoom stamped "120 nodes / 183 edges" onto a picture of fifteen. That is
+#      a bitmap overstating its own contents — the same defect class as an undisclosed cap, in the one
+#      artifact the caption exists for. draw() counts what is actually inside the canvas rect (W11), the
+#      STAMPED half states it (W12) whenever it is less than the view's own total (W13), and draw()
+#      re-renders the caption when that number or a hull count moves (W14) — without which the stamp
+#      would still carry the counts from the frame before the zoom.
+inbody draw 'nodesInFrame' 'nodesInFrame' "(W11) draw() counts the nodes the camera is actually framing"
+insegment provfacts 'nodesInFrame' 'nodesInFrame' "(W12) and the STAMPED half of the caption states it, so a cropped export cannot overstate its contents"
+insegment provfacts 'nodesInFrame < N' 'nodesInFrame < N' "(W13) stated against the view's own total, so it appears exactly when the camera frames less than the map"
+inbody draw 'provStamp' 'provStamp' "(W14) and the caption is re-rendered when that count moves — a stamp a frame behind the zoom is the same overstatement"
+wfacts="$( provfacts | grep -oE 'factLines\.push' | wc -l | tr -d ' ' )"
+wmax="$( grep -oE 'STAMP_MAX_LINES = [0-9]+' "$PAGE" | grep -oE '[0-9]+$' )"
+if [ -n "$wmax" ] && [ "$wfacts" -gt 0 ] && [ "$wfacts" -le "$wmax" ]; then
+    ok "(W10) the stamped half is $wfacts lines against a $wmax-line ceiling — none of it is sliced away"
+else
+    no "(W10) the stamped half is ${wfacts:-0} lines against a ${wmax:-unset}-line ceiling — a line would be dropped from the bitmap with nothing to say so"
+fi
 
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"

@@ -29,6 +29,7 @@
 #include "serialize.h"   // for escapeXml (not reused here; we write jsonEscape instead)
 #include "infra/jsonesc.h"     // A4-F27: canonical escape core; jsonEscape below is a thin wrapper
 #include "cli.h"         // for ColorBy — the --color-by=MODE enum baked into COLOR_MODE (no cycle: cli.h pulls ingest.h/version.h only)
+#include "infra/Diagnostics.h"  // VERIFY — writeEdgePayload asserts the emitted LINKS order, which the layout depends on
 
 #include <algorithm>
 #include <cmath>
@@ -65,7 +66,7 @@ inline std::string jsonEscape( std::string_view s )
 // the emitted bytes, which are pure C++ output above this script — the seeded `rng()` below is for
 // deterministic-per-load initial layout, not for anything persisted).
 //
-// It is emitted as FIVE adjacent string literals, concatenated back to back into one <script> in
+// It is emitted as SIX adjacent string literals, concatenated back to back into one <script> in
 // declaration order. That is an editing split and nothing else — the same move src/main.cpp and
 // src/ingest.cpp made into verbs_*.h / ingest_*.h sections, for the same reason: one 850-line literal is
 // not a surface anyone can navigate, and --quality-delta reads a literal's length exactly the way it
@@ -98,50 +99,84 @@ static const char kScriptColour[] = R"JS(
   // two olives. So `tested` now carries a channel that is NOT hue — tested nodes are FILLED, untested nodes
   // are hollow with a dashed ring — and the hues move onto the blue-yellow axis the ramp already uses, as
   // reinforcement rather than as the message. A monochrome print of this page is still readable.
-  // The two fills are ramp STOPS, not a third palette beside it: they were '#26c6da'/'#ff9800', which were
-  // stops of the ramp this page used to carry, and became orphan hues the moment that ramp was replaced.
-  // Untested is the BRIGHTER of the pair, on the same "risk is what glows" rule the ramp below states.
-  var TESTED_FILL = '#2bccc0', UNTESTED_FILL = '#ffce1c';
+  // The two fills are ramp STOPS, not a third palette beside it: they were '#26c6da'/'#ff9800' and then
+  // '#2bccc0'/'#ffce1c', stops of two earlier ramps that each became an orphan hue the moment the ramp
+  // moved on. They are now stops 1 and 2, the ramp's own BLUE↔AMBER pair — the widest-separated pair it
+  // has (340/441 normal, 259 protan, 269 deutan, 257 tritan, against 265/143/166/257 for the next best),
+  // which is what a binary channel wants. Untested is the BRIGHTER of the two, on the same "risk is what
+  // glows" rule the ramp below states.
+  var TESTED_FILL = '#29a0cc', UNTESTED_FILL = '#eb9809';
   var testedStroke = function(n) { return !n.ts; };   // untested ⇒ dashed ring instead of a solid disc
 
-  // ---- --color-by palettes. commColor: 12 categorical dark-bg-friendly hues (comm % 12).
+  // ---- --color-by palettes. commColor: 12 categorical dark-bg-friendly hues for the community LENS,
+  // where hue IS the message (comm % 12). hullColor is a SEPARATE palette for the module outlines —
+  // see its own note below; the two used to be one array and that is exactly the defect it fixes.
   //
   // rampColor: the shared 5-step COOL→HOT ramp for cx/churn over FIXED thresholds (fixed beats quantiles
   // for legend honesty — the same bucket means the same thing in every repo).
   //   cx buckets:    0 | 1-4 | 5-9 | 10-19 | 20+   → boundaries [1,5,10,20]
   //   churn buckets: 0 | 1-2 | 3-9 | 10-29 | 30+   → boundaries [1,3,10,30]
   //
-  // THE RAMP IT REPLACES WAS AN ORDINAL SCALE THAT DID NOT ORDER. ['#4fc3f7','#26c6da','#ffd54f',
-  // '#ff9800','#e65100'] measured:
-  //   • Relative luminance 0.474 / 0.459 / 0.694 / 0.437 / 0.227 — dark→light order [4,3,1,0,2]. The
-  //     BRIGHTEST swatch was the MIDDLE bucket and the DARKEST was the top one, so in greyscale, in
-  //     print, or to any reader who reads lightness before hue, an ordinal ramp arrived as a permutation.
-  //     Worse for this page specifically: the hottest bucket was the one that RECEDED into the #111
-  //     canvas, so the picture dimmed exactly where it should have shouted.
-  //   • Steps 0 and 1 collapsed under colour blindness — 29/441 RGB distance under both protanopia and
-  //     deuteranopia (1.03:1 in luminance). On the README hero 71.6% of nodes sit in those two stops, so
-  //     for ~8% of male readers nearly three-quarters of the flagship image was one flat colour.
+  // DEEP BLUE → MID BLUE → AMBER → ORANGE → PALE YELLOW, monotone in luminance and ordered COOL-DIM →
+  // HOT-BRIGHT, which is the direction that makes a metric legible at a glance on a dark ground: the
+  // calm majority sits at the dim end and the rare 20+ nodes are the ones that glow. Blue↔orange is the
+  // canonical dichromacy-safe axis — red/green confusion does not act on it at all — and amber-on-black
+  // is the instrument-panel convention for the same reason a car gauge uses it. Measured with a
+  // Brettel/Viénot 1999 CVD simulation:
+  //   stop  hex       hue    rel.lum   vs #111    normal/protan/deutan/tritan distance to the NEXT stop
+  //   0     #4b81c9   214°   0.2141     4.75:1     87.6 /  66.9 /  61.4 /  68.0
+  //   1     #0fa3ff   203°   0.3352     6.93:1    340.2 / 259.1 / 269.4 / 256.6
+  //   2     #f9a408    39°   0.4671     9.30:1    141.8 / 150.2 / 145.6 /  61.3
+  //   3     #fdcc90    33°   0.6608    12.78:1     63.0 /  68.3 /  61.7 /  64.4
+  //   4     #fefabb    56°   0.9303    17.63:1        —
+  // Worst ADJACENT pair, which with a monotone ramp is also the worst of all ten pairs: 63.0 normal /
+  // 66.9 protan / 61.4 deutan / 61.3 tritan, against the teal-midpoint ramp this replaces at 80.2 /
+  // 66.9 / 61.4 / 61.1. Protanopia and deuteranopia are UNCHANGED to the decimal, because on both
+  // ramps the pair that sets them is stops 0-1 and those two stops did not move. Normal vision gives up
+  // 17 points and tritanopia gains 0.2. Every stop still clears 4.5:1 against the canvas ground at the
+  // same 4.75:1 floor, and the greyscale ladder is 1.458 / 1.343 / 1.375 / 1.379 — no step weaker than
+  // the 1.342 the previous ramp's weakest step measured.
   //
-  // The replacement is monotone in luminance and ordered COOL-DIM → HOT-BRIGHT, which is the direction
-  // that makes the metric legible at a glance on a dark ground: the calm majority sits at the dim end and
-  // the rare 20+ nodes are the ones that glow. Measured with a Brettel/Viénot CVD simulation:
-  //   stop  hex       rel.lum   vs #111    protan/deutan/tritan distance to the NEXT stop
-  //   0     #4b81c9   0.2141    4.75:1     67.0 / 60.8 / 67.7
-  //   1     #0fa3ff   0.3352    6.93:1     82.8 / 78.7 / 62.9
-  //   2     #2bccc0   0.4751    9.44:1    171.3 / 205.6 / 203.4
-  //   3     #ffce1c   0.6549   12.68:1    131.6 / 149.6 /  60.8
-  //   4     #fff794   0.8992   17.07:1        —
-  // Worst pair over ALL ten pairs, not just adjacent ones: 80.2 normal / 67.0 protan / 60.8 deutan /
-  // 60.8 tritan, against the old ramp's 50.3 / 29.0 / 29.0 / 41.1 — the protan/deutan bottleneck more
-  // than doubles. Every stop clears 4.5:1 against the canvas ground (the old ramp's floor was 4.98:1 and
-  // is preserved at 4.75:1, still above the bar), and the ramp stays on the blue-yellow axis
-  // protanopia/deuteranopia do NOT impair: no step is red, and step 2 is a cyan-teal at hue 176°, chosen
-  // over the numerically-better green at 168° precisely so that no adjacent pair is a red/green pairing.
-  // The gate does not take any of this on trust — test/htmlrendercheck.sh arm (Q) re-derives the
-  // luminance and the three CVD simulations from the stops the page actually emits.
+  // THREE THINGS THE MEASUREMENT DECIDED, none of which were obvious from the ladder written down:
+  //   • THE ORANGE HAS TO BE THE LIGHTER OF THE TWO WARM STOPS, and therefore the less saturated. At
+  //     full chroma an amber sits at luminance 0.585 and an orange at 0.400 — the hue that reads as
+  //     "orange" is intrinsically darker — so "amber then orange" and "monotone in luminance" can only
+  //     both hold if the orange is a light one. Under a greyscale-step floor no colour above luminance
+  //     0.64 in the orange hue band exceeds 0.47 chroma, so stop 3 is a light orange at 0.43 and that
+  //     is the ceiling, not a preference. Ordering the warm run by hue instead (orange, then amber, the
+  //     way every saturated heat ramp runs) measures 63.9 / 64.6 / 61.4 / 61.4 — the same to within a
+  //     point and a half, so nothing was bought by inverting the ladder that was asked for.
+  //   • THE TOP STOP IS PALE BY BLUE, NOT BY DESATURATION. Keeping the previous ramp's '#fff794' above
+  //     a light orange collapses the top pair to 39.2/441 under deuteranopia — below the gate's 45 bar
+  //     — because the two differ by five points of blue and almost nothing else. '#fefabb' is paler AND
+  //     further away (61.7) precisely because its paleness comes from a blue channel at 187: blue is
+  //     the one channel protanopia and deuteranopia keep intact.
+  //   • THE TEAL WAS LOAD-BEARING AND IS NOT MISSED. A cyan midpoint separates from both neighbours
+  //     across the whole spectrum (171/205/204 to the next stop), which is why the ramp before this one
+  //     could afford a pale top. Three adjacent warm stops cannot do that, and the cost is confined to
+  //     NORMAL vision, where 63.0/441 is still eight times the JND and four times the 16/441 at which
+  //     two swatches start to look alike.
+  // Thresholds stay FIXED. A quantile ramp would let a cold corpus manufacture a hot node by making the
+  // same swatch mean 20+ in one repository and 3 in another. The gate does not take any of this on
+  // trust — test/htmlrendercheck.sh arm (Q) re-derives the luminance, the greyscale step and the three
+  // CVD simulations from the stops the page actually emits, each with its own mutation control.
   var commColor = ['#4a90d9','#e67e22','#2ecc71','#e74c3c','#9b59b6','#f4c542',
                    '#1abc9c','#e84393','#00acd7','#a3d977','#dea584','#7f8c8d'];
-  var rampColor = ['#4b81c9','#0fa3ff','#2bccc0','#ffce1c','#fff794'];
+  var rampColor = ['#005ec9','#29a0cc','#eb9809','#f0ce48','#fffcd1'];
+  // hullColor: the module OUTLINES, and the reason they are not commColor any more. Identity is carried
+  // by containment now (see draw()'s hull block and loadSubset's), so the outline's hue says nothing the
+  // outline and its label do not already say — it is decoration. Borrowed from commColor it was
+  // decoration ON THE RAMP'S OWN AXES: a saturated blue (#4a90d9) and a saturated amber (#f4c542) drawn
+  // over a picture whose metric runs from blue to amber. Measured against the ramp above, the nearest of
+  // those twelve sits 22.0/441 from a ramp stop — closer than two ADJACENT cx buckets are to each other
+  // (63.0) — so nothing in the picture could tell a reader whether a colour meant a module or a
+  // complexity. These twelve are a narrow desaturated violet→rose band, chosen by maximin over that band
+  // so the closest two are still 36.9/441 apart (a hull is a REGION; two adjacent ones must not read as
+  // one), every one is at most 0.196 chromatic against the ramp's 0.263 floor, the nearest is 56.8/441
+  // from any ramp stop, and every one clears 4.71:1 on the #111 ground because the module's NAME is
+  // drawn in it. The band is 240-355°, well clear of both the ramp's blue (203-214°) and its warm run
+  // (33-56°). Consecutive ids alternate dim/bright so two neighbouring modules differ by 52/441 or more.
+  var hullColor = ['#768188','#8c7b7c','#848994','#978d87','#91949f','#a49393','#96a1aa','#ae9b9c','#a4aeb6','#b8a2a6','#c1b0a8','#afb8c5'];
   var CX_STEPS = [1,5,10,20], CHURN_STEPS = [1,3,10,30];
   function rampStep(v, steps) {
     var s = 0;
@@ -158,6 +193,11 @@ static const char kScriptColour[] = R"JS(
     if (mode === 'tested') return n.ts ? TESTED_FILL : UNTESTED_FILL;
     return langColor[n.lang] || langColor['?'];
   }
+
+  // C1 — how many LINKS carry the per-edge split-arm flag. Counted ONCE: it is a property of the
+  // baked payload, not of the current view, and the legend clause below must not claim a per-view number.
+  var AMB_LINKS = 0;
+  for (var _k = 0; _k < LINKS.length; _k++) if (LINKS[_k].a) { AMB_LINKS++; }
 
   // legend for the CURRENT mode, rendered into the #legend span.
   //
@@ -176,7 +216,7 @@ static const char kScriptColour[] = R"JS(
     if (mode === 'community') {
       var maxComm = -1;
       for (i = 0; i < NODES.length; i++) if (NODES[i].comm > maxComm) { maxComm = NODES[i].comm; }
-      var shown = Math.min(maxComm + 1, 12);
+      var shown = Math.min(maxComm + 1, hullColor.length);
       html = name('module (community):');
       for (i = 0; i < shown; i++) html += sw(commColor[i]) + 'm' + i + ' ';
       html += sw('#666') + 'none';
@@ -197,6 +237,17 @@ static const char kScriptColour[] = R"JS(
     } else {
       html = name('language:');
       for (var k in langColor) { if (Object.prototype.hasOwnProperty.call(langColor, k)) { html += sw(langColor[k]) + (k === '?' ? 'unknown' : k) + ' '; } }
+    }
+    // C1 EDGE-CONFIDENCE clause. The node swatches above colour the node legend; this names the one thing
+    // that is true of the LINES. Emitted only when the payload actually has such an edge — a corpus that
+    // resolved cleanly gets no clause, because a legend for a stroke nobody can see is noise, not honesty.
+    // The count is of the SELECTED MAP (the top-K subgraph this document baked), not of the whole graph
+    // and not of the current view: renderProv's clause is the per-view number, and the two are labelled
+    // apart because an ego view draws a handful of these and the map holds all of them.
+    if (AMB_LINKS > 0) {
+      html += '<span class="ec"> \u2014 dashed edge: the resolver could not choose between same-name'
+            + ' definitions and split the call over all of them (' + AMB_LINKS + ' of ' + LINKS.length
+            + ' in this map); read the source before trusting one.</span>';
     }
     el.innerHTML = html;
   }
@@ -221,30 +272,6 @@ static const char kScriptColour[] = R"JS(
   // crosses both directions, because a symbol's neighbourhood genuinely is its callers AND its callees;
   // what it no longer does is forget which was which, so the node view can state the split.
   var GN = NODES.length, GL = LINKS.length;
-
-  // ---- per-edge RESOLVER CONFIDENCE, folded into the LINKS records once.
-  //
-  // LCONF is emitted parallel to LINKS (Graph::outVals in hundredths — see writeHtml for what the
-  // number is made of). It is folded in here rather than carried as a parallel array because every view
-  // hands loadSubset either LINKS itself or copies of its records, and a positional array would have to
-  // be re-indexed correctly at each of those seams — three chances to get an off-by-one wrong in a
-  // channel whose whole job is to be trustworthy.
-  //
-  // THE THRESHOLD, and why this one. 0.20 is the weakest confidence graph.h assigns to a call it DID
-  // pin to a single target (its widest resolution tier). Below it, the confidence was either divided
-  // among several candidate definitions the resolver could not choose between, or deboosted for an
-  // overcommon or leading-underscore name. So "dashed" means "this edge is a guess", derived from the
-  // resolver's own tier constants rather than from a percentile of whatever this corpus happens to
-  // contain — the same reason the cx/churn ramp uses fixed thresholds.
-  //
-  // It errs toward NOT dashing, and that is worth naming: an edge resolved at the 0.2 tier with one
-  // candidate draws solid, and a 0.5-tier call split two ways lands at 0.25 and also draws solid. The
-  // dash is a floor on doubt, not a census of it. Measured share dashed: 16.9% of 243 edges on this
-  // repository's default page, 21.9% of 183 on the README hero, 28.2% of 4712 at --top-k=2000.
-  var LOW_CONF = 20;
-  for (var ci = 0; ci < GL; ci++) {
-    LINKS[ci].c = ( typeof LCONF !== 'undefined' && ci < LCONF.length ) ? LCONF[ci] : 100;
-  }
 
   var gout = [], gin = [];
   for (var i = 0; i < GN; i++) { gout.push([]); gin.push([]); }
@@ -277,9 +304,9 @@ static const char kScriptColour[] = R"JS(
     var idSet = seen;
     var edges = [];
     for (var k = 0; k < GL; k++) {
-      // the RECORD, not a fresh {s,t}: a rebuilt pair drops the confidence this edge was emitted with,
-      // and an edge that silently loses its own doubt draws solid — a false statement, in the one view
-      // where a reader is looking closely at a handful of edges
+      // the RECORD, not a fresh {s,t}: a rebuilt pair drops the split-arm bit this edge was emitted
+      // with, and an edge that silently loses its own doubt draws solid — a false statement, in the one
+      // view where a reader is looking closely at a handful of edges
       if (idSet.has(LINKS[k].s) && idSet.has(LINKS[k].t)) edges.push(LINKS[k]);
     }
     return { ids: ids, edges: edges, callees: callees, callers: callers };
@@ -339,12 +366,16 @@ static const char kScriptSim[] = R"JS(
   // Self-calls the sim cannot draw, counted per load (see loadSubset's edge loop) so the caption can
   // state them. A subset view's L was never expected to equal EDGE_TOTAL; the whole-map view's is.
   var selfEdgesDropped = 0;
-  var lowConfEdges = 0;          // in-view edges below LOW_CONF — the caption states the count with the threshold
+  var ambEdges = 0;              // in-view edges the resolver could not pin — the caption states the count
   var labelSet = new Set();      // local indices that get a persistent text label (see loadSubset's rule)
   // ---- module HULLS: the groups draw() outlines, rebuilt per load (see loadSubset's hull block).
   var hullGroups = [];           // [{ comm, name, idx: [local indices] }], largest first
   var hullsTotal = 0;            // modules with >= MIN_HULL_MEMBERS in view — the DENOMINATOR the caption states
-  var hullsDrawn = 0;            // ...and how many survived draw()'s dispersion test and the cap
+  var hullsDrawn = 0;            // ...and how many survived draw()'s two geometry tests and the cap
+  var hullsThin = 0;             // ...dropped by the SHAPE test (see HULL_COMPACTNESS) — captioned separately,
+  var hullsImpure = 0;           // ...and by the PURITY test (see HULL_PURITY): two reasons, two numbers
+  var nodesInFrame = 0;          // nodes whose centre is inside the canvas rect — what a ZOOMED export shows,
+  var provStamp = '';            // ...against the caption's loaded-subset totals (see draw()'s closing block)
   var MAX_HULLS = 12, MIN_HULL_MEMBERS = 3;
   var HULL_PAD_PX = 16;          // how far the outline stands off its outermost members, in SCREEN px
   // A convex hull only means "these belong together" if the group IS spatially together, and Louvain
@@ -362,6 +393,33 @@ static const char kScriptSim[] = R"JS(
   // HULL_CANDIDATES bounds that cost from the other side: only the largest few groups are ever
   // considered, because they are the only ones whose outline tells a reader anything at this scale.
   var HULL_PURITY = 0.5, HULL_CANDIDATES = 24;
+  // ...and the second test is SHAPE, because MIN_HULL_MEMBERS counts POINTS and a hull is a REGION.
+  // Three members that happen to sit near a line pass a node count and produce a hull with almost no
+  // area: it draws as a thin coloured streak across the picture and reads as a scratch on the lens, not
+  // as containment. Three of them were visible on the django/db/migrations figure at rrf/top-k=120 —
+  // `resolve_model_field_relations` (a 107x0 px line whose hull area is 4 px^2), `add_operation`
+  // (178x8 px) and `reload_model` (137x13 px) — and the first of those was being dropped SILENTLY,
+  // because a fully collinear group makes convexHull return a 2-point ring and the caller just skipped
+  // it without counting it anywhere.
+  //
+  // The measure is the isoperimetric ratio 4*pi*A/P^2 of the RAW hull ring. The hull is convex by
+  // construction, and on a convex ring that ratio is exactly thinness: 1.0 for a circle, 0.785 for a
+  // square, 0.605 for an equilateral triangle — the roundest a three-member hull can be — and it falls
+  // to pi/(2*aspect) for a thin one, which reproduces the three measurements above to three decimals.
+  // Chosen over the two alternatives on their own terms. An AREA floor is the wrong predicate twice: it
+  // is not scale-invariant, and it would drop a small ROUND module (`varint`, 23x18 px, perfectly
+  // legible once HULL_PAD_PX has stood the outline off it) while the streaks it is aimed at are long
+  // enough to survive one. An OBB aspect ratio measures the same thing but needs rotating calipers,
+  // O(ring^2), where this is one O(ring) pass over vertices draw() already walks.
+  //
+  // 0.20 IS MEASURED, not picked. Over both corpora at the figure argv — 23 groups with 3+ members in
+  // view — the ratios form a low cluster {0.0011, 0.0718, 0.1493} and a body from 0.2879 up, and the
+  // two widest adjacent gaps in the entire distribution (2.08x and 1.93x) bracket exactly that band;
+  // 0.20 is its geometric midpoint. In shape terms it is a triangle about 8:1 base-to-height. Measured
+  // on the raw ring rather than the padded one drawn, so it is scale-invariant: HULL_PAD_PX is a screen
+  // quantity, and testing the padded shape would make an outline appear and disappear as the reader
+  // zooms — and the caption's count change with it.
+  var HULL_COMPACTNESS = 0.20;
   var labelDegreeOrder = [];     // the same set as an ARRAY in descending importance, so the declutter in
                                  // draw() places the ones that matter first and drops the collisions
   var MAX_LABELS = 24;
@@ -459,7 +517,7 @@ static const char kScriptSim[] = R"JS(
     N = nodes.length;
     links = [];
     selfEdgesDropped = 0;
-    lowConfEdges = 0;
+    ambEdges = 0;
     for (var k = 0; k < edges.length; k++) {
       var s = gidToLocal.get(edges[k].s), t = gidToLocal.get(edges[k].t);
       if (s === undefined || t === undefined) continue;
@@ -470,9 +528,13 @@ static const char kScriptSim[] = R"JS(
       // against each other, so the difference is counted here and stated by renderProv rather than left
       // as an unexplained gap between two numbers on the same screen.
       if (s === t) { selfEdgesDropped++; continue; }
-      var ec = ( edges[k].c === undefined ) ? 100 : edges[k].c;
-      if (ec < LOW_CONF) { lowConfEdges++; }
-      links.push({ s: s, t: t, c: ec });
+      // C1: the per-edge SPLIT-ARM bit rides through into the sim record. NORMALISED to 0/1 here rather
+      // than passed on as undefined-or-1, because two consumers compare against it — draw()'s pass
+      // selector and the caption's count — and a record that never carried the key would otherwise make
+      // each of them handle the absent case separately.
+      var amb = edges[k].a ? 1 : 0;
+      if (amb) { ambEdges++; }
+      links.push({ s: s, t: t, a: amb });
     }
     L = links.length;
     nbr = [];
@@ -733,14 +795,25 @@ static const char kScriptSim[] = R"JS(
   // -- end of section 2 --
 )JS";
 
-// SECTION 3 of the renderer: the PICTURE — node size, the backdrop, draw() and its label declutter, and
-// the hit test that has to agree with what was drawn. Split from section 2 at the boundary section 2's
-// own header already named ("the graph state AND the picture"), for the reason the first split states:
-// the translation unit is unchanged (adjacent literals are emitted back to back, in order, into one
-// <script>) and only the editing surface moved. It is also what --quality-delta reported when this lane's
-// fixes pushed section 2 past 450 lines, which is the metric working as intended rather than a number to
-// dodge — the seam is where a reader would put one.
-static const char kScriptDraw[] = R"JS(
+// SECTION 3 of the renderer: the VOCABULARY OF A MARK — how big a node is, what shape it is, and the
+// geometry a module outline is made of. Pure functions of their arguments: nothing here reads the camera,
+// touches canvas state, or paints. Section 3b is what uses them.
+//
+// This is the third split, made for the reason the first two were and reported by the same instrument:
+// --quality-delta measured section 3 growing 191 -> 393 lines as the shape, hull and confidence channels
+// landed in it, which is the metric working as intended rather than a number to dodge. The seam is where
+// a reader would put one — "what a mark IS" and "how a frame is painted" are two things, and the first
+// half has no dependency on the second at all. The translation unit is unchanged: adjacent literals are
+// emitted back to back, in order, into one <script>.
+static const char kScriptMarks[] = R"JS(
+  // ---- node SIZE. Radius reads IN-VIEW DEGREE, with rank as a tiebreak. The old `4 + 60*sqrt(rank)`
+  // spanned 4.60-11.78 px with a MEAN of 5.10 on the README cut — every node a ~5 px dot — while in-view
+  // degree over the same nodes spanned 1 to 111. The picture carried a hub/leaf distinction it never
+  // drew, so a hairball was the honest rendering of it. sqrt keeps the growth sub-linear so a degree-111
+  // hub is ~4x a degree-2 leaf and not 55x; the small rank term separates equal-degree nodes without ever
+  // reordering different-degree ones.
+  function nodeRadiusPx(n) { return Math.max(MIN_NODE_PX, Math.min(MAX_NODE_PX, 3 + 1.5*Math.sqrt(n.deg || 0) + 5*Math.sqrt(n.rank))); }
+
   // ---- node SHAPE, one table, two readers.
   //
   // SYM_SHAPES (emitted above — htmlexport.h::kSymShapes, one entry per model.h SymKind enumerator,
@@ -809,14 +882,13 @@ static const char kScriptDraw[] = R"JS(
     return 'rgba(' + ((v >> 16) & 255) + ',' + ((v >> 8) & 255) + ',' + (v & 255) + ',' + a + ')';
   }
 
-  // --- draw ---
-  // Radius reads IN-VIEW DEGREE, with rank as a tiebreak. The old `4 + 60*sqrt(rank)` spanned 4.60-11.78 px
-  // with a MEAN of 5.10 on the README cut — every node a ~5 px dot — while in-view degree over the same
-  // nodes spanned 1 to 111. The picture carried a hub/leaf distinction it never drew, so a hairball was the
-  // honest rendering of it. sqrt keeps the growth sub-linear so a degree-111 hub is ~4x a degree-2 leaf and
-  // not 55x; the small rank term separates equal-degree nodes without ever reordering different-degree ones.
-  function nodeRadiusPx(n) { return Math.max(MIN_NODE_PX, Math.min(MAX_NODE_PX, 3 + 1.5*Math.sqrt(n.deg || 0) + 5*Math.sqrt(n.rank))); }
+  // -- end of section 3a --
+)JS";
 
+// SECTION 3b of the renderer: the FRAME — the backdrop, draw() and its label declutter, and the hit test
+// that has to agree with what was drawn. Everything here reads the camera and paints; the marks it paints
+// come from section 3a above. Same split rationale as that section's header states.
+static const char kScriptDraw[] = R"JS(
   // The canvas's own background, painted as the FIRST op of every frame. clearRect leaves transparent
   // pixels; on screen the body's #111 shows through and it looks fine, but every export path (toDataURL,
   // the PNG button, a browser "save image") composites transparency onto white, where this page's light
@@ -840,7 +912,10 @@ static const char kScriptDraw[] = R"JS(
     }
 
     // ---- module HULLS, behind everything. Containment is the channel; see loadSubset's hull block for
-    // the 12-hues-over-26-modules collision it replaces and why no palette could have fixed it.
+    // the 12-hues-over-26-modules collision it replaces and why no palette could have fixed it. The hue
+    // is what is LEFT after containment took the job, so it comes from hullColor — a deliberately quiet
+    // band measured against rampColor rather than the community lens' twelve saturated hues, which put
+    // decoration on the two axes the metric uses. See hullColor's note for the numbers.
     //
     // Each outline is pushed HULL_PAD_PX (a screen quantity, converted here like every other one on this
     // canvas) outward from the group's centroid so it clears its own members instead of threading
@@ -850,12 +925,25 @@ static const char kScriptDraw[] = R"JS(
     // sitting UNDER whatever --color-by the reader chose, and a hull that competes with the node colours
     // has taken the lens away from them.
     var hullAnchors = [];
-    hullsDrawn = 0;
-    for (var gi = 0; gi < hullGroups.length && hullsDrawn < MAX_HULLS; gi++) {
+    hullsDrawn = 0; hullsThin = 0; hullsImpure = 0;
+    for (var gi = 0; gi < hullGroups.length; gi++) {
       var grp = hullGroups[gi], gpts = [], mi;
       for (mi = 0; mi < grp.idx.length; mi++) { gpts.push({ x: nodes[grp.idx[mi]].x, y: nodes[grp.idx[mi]].y }); }
       var ring = convexHull(gpts);
-      if (ring.length < 3) { continue; }
+      // THE SHAPE TEST — see HULL_COMPACTNESS for the three streaks that made it necessary and for why
+      // 0.20. It runs FIRST because it is one O(ring) pass and the purity test below is O(N): a group
+      // that cannot be a region at all never costs a walk over every node in view. A ring of fewer than
+      // three points is the extreme case of the same defect — a fully collinear group, whose hull has no
+      // area whatsoever — and it lands in the same counted branch, where it used to be skipped silently.
+      var hullArea = 0, hullPerim = 0, hk;
+      for (hk = 0; hk < ring.length; hk++) {
+        var rb = ring[(hk + 1) % ring.length], rdx = rb.x - ring[hk].x, rdy = rb.y - ring[hk].y;
+        hullArea  += ring[hk].x*rb.y - rb.x*ring[hk].y;
+        hullPerim += Math.sqrt(rdx*rdx + rdy*rdy);
+      }
+      hullArea = Math.abs(hullArea)/2;
+      if (ring.length < 3 || !(hullPerim > 0) || 4*Math.PI*hullArea/(hullPerim*hullPerim) < HULL_COMPACTNESS) { hullsThin++; continue; }
+      if (hullsDrawn >= MAX_HULLS) { continue; }
       var gcx = 0, gcy = 0, hj;
       for (hj = 0; hj < ring.length; hj++) { gcx += ring[hj].x; gcy += ring[hj].y; }
       gcx /= ring.length; gcy /= ring.length;
@@ -879,7 +967,7 @@ static const char kScriptDraw[] = R"JS(
         var qn = nodes[qi];
         if (qn.x >= bx0 && qn.x <= bx1 && qn.y >= by0 && qn.y <= by1) { inside++; }
       }
-      if (inside > 0 && grp.idx.length/inside < HULL_PURITY) { continue; }
+      if (inside > 0 && grp.idx.length/inside < HULL_PURITY) { hullsImpure++; continue; }
       hullsDrawn++;
       ctx.beginPath();
       ctx.moveTo((ex[ex.length-1].x + ex[0].x)/2, (ex[ex.length-1].y + ex[0].y)/2);
@@ -888,7 +976,7 @@ static const char kScriptDraw[] = R"JS(
         ctx.quadraticCurveTo(ex[hj].x, ex[hj].y, (ex[hj].x + nxt.x)/2, (ex[hj].y + nxt.y)/2);
       }
       ctx.closePath();
-      var hcol = commColor[grp.comm % 12];
+      var hcol = hullColor[grp.comm % 12];
       ctx.fillStyle = hexRgba(hcol, 0.085);
       ctx.fill();
       ctx.strokeStyle = hexRgba(hcol, 0.42);
@@ -923,10 +1011,14 @@ static const char kScriptDraw[] = R"JS(
     //
     // Both passes are ONE path each rather than a beginPath/stroke per edge. Same pixels, and it is what
     // makes a second pass over up to 13819 edges affordable at all.
-    // A LOW-CONFIDENCE SHAFT IS DASHED. See LOW_CONF for what the number behind it is, where the
-    // threshold comes from, and which direction it errs in. Two passes because a dash pattern is canvas
-    // STATE and cannot vary inside one path; the alternative is a beginPath/stroke per edge, which is
-    // what this loop was before and what makes 13819 edges unaffordable.
+    // A SPLIT-ARM SHAFT IS DASHED. `a` is the per-edge bit writeHtml reads straight off Graph::outProv
+    // (3 = one arm of a k-way split the resolver could not choose between — the same fact the XML map
+    // spells prov="split"), so the picture and the data say the same thing about the same edge. It is
+    // drawn as a different KIND of line and not as a shade, because a faded solid line is
+    // indistinguishable from a distant one and a dashed line is not. Two passes because a dash pattern
+    // is canvas STATE and cannot vary inside one path; the alternative is a beginPath/stroke per edge,
+    // which is what this loop was before and what makes 13819 edges unaffordable. The pass order is
+    // fixed, so the picture is stable.
     var ARROW_LEN_PX = 7.0, ARROW_HALF_PX = 3.2, MIN_ARROW_SHAFT_PX = 13.0;
     var DASH_ON_PX = 4.0, DASH_OFF_PX = 3.5;
     ctx.strokeStyle = '#8a8f98';
@@ -938,7 +1030,7 @@ static const char kScriptDraw[] = R"JS(
       for (var k = 0; k < L; k++) {
         var s = links[k].s, t = links[k].t;
         if (hl && !hl.has(s) && !hl.has(t)) continue;
-        if ((links[k].c < LOW_CONF) !== (pass === 1)) continue;
+        if ((links[k].a === 1) !== (pass === 1)) continue;
         ctx.moveTo(nodes[s].x, nodes[s].y);
         ctx.lineTo(nodes[t].x, nodes[t].y);
       }
@@ -1109,6 +1201,29 @@ static const char kScriptDraw[] = R"JS(
       ctx.fillStyle = '#fff';
       ctx.fillText(msg, sx+13, sy-2);
     }
+
+    // ---- WHAT THIS FRAME ACTUALLY CONTAINS, and re-caption if it moved.
+    //
+    // The caption's node and edge counts are the LOADED subset. The camera is free to sit anywhere
+    // inside it, and a picture exported after a zoom therefore stamped "120 nodes / 183 edges" across a
+    // frame holding fifteen — a bitmap overstating its own contents, in the one artifact the caption
+    // exists to travel in. (Found cutting the README's crop figures.) The count is of NODE CENTRES
+    // inside the canvas rect: a mark half off the edge is in frame, and counting it is the reading that
+    // errs toward the larger number rather than toward flattering the crop.
+    //
+    // The re-render is guarded on a CHANGE because the numbers renderProv states — this count and the
+    // three hull counts — are all computed here, one frame after the caption that reports them. On a
+    // settled page that is invisible; on an export taken straight after a zoom it is the previous view's
+    // numbers stamped onto the new one. Rebuilding the caption unconditionally would put an innerHTML
+    // write inside the settle loop at sixty frames a second, so it happens only when a stated number
+    // actually moved.
+    nodesInFrame = 0;
+    for (var fi = 0; fi < N; fi++) {
+      var fsx = nodes[fi].x*scale + ox, fsy = nodes[fi].y*scale + oy;
+      if (fsx >= 0 && fsx <= W && fsy >= 0 && fsy <= H) { nodesInFrame++; }
+    }
+    var provNow = nodesInFrame + ':' + hullsDrawn + ':' + hullsThin + ':' + hullsImpure;
+    if (provNow !== provStamp) { provStamp = provNow; renderProv(); }
   }
 
   // FILES[n.file] — the path, or an honest blank when the payload has no entry for it. FILES was emitted
@@ -1131,7 +1246,7 @@ static const char kScriptDraw[] = R"JS(
     return -1;
   }
 
-  // -- end of section 3 --
+  // -- end of section 3b --
 )JS";
 
 // SECTION 4 of the renderer: everything that responds to a person — resize, mouse, wheel, the search
@@ -1299,13 +1414,32 @@ static const char kScriptRouter[] = R"JS(
     if (!showCards) { document.getElementById('hits').style.display = 'none'; }
   }
 
-  // ---- the provenance caption. Two lines under the bar naming what this picture IS: the root it was
-  // built from, the ranker whose scores set the sizes, the top-k that bounded the selection and what
-  // fraction of the repository that is, the counts in the CURRENT view, and the colour metric. This tool
-  // states every truncation it makes in its XML header and the page stated nothing at all about itself —
-  // a screenshot of it could not be audited, which is exactly the disclosure the rest of the tool is for.
-  // The label rule goes here too: rule 2 of loadSubset deliberately shows one label per name, and a
-  // reader must not have to infer that from the picture.
+  // ---- the caption, in TWO HALVES, because they answer different questions and travel to different
+  // places.
+  //
+  // FACTS is what this picture IS: the root it was built from, the ranker whose scores set the sizes,
+  // the top-k that bounded the selection and what fraction of the repository that is, the counts in the
+  // current view, the colour metric, and any state that makes the picture provisional. This tool states
+  // every truncation it makes in its XML header and the page used to state nothing at all about itself —
+  // a screenshot could not be audited, which is exactly the disclosure the rest of the tool is for.
+  //
+  // METHOD is how to READ it: which way an arrow points, what a dashed shaft means and at what
+  // threshold, which nodes got labels, what each mark shape is, and how many module outlines were drawn
+  // of how many — with each truncation's own count and its own reason.
+  //
+  // WHY THEY SPLIT. Both halves used to be one block and stampProvenance burned all of it into the
+  // exported bitmap, which had reached three dense lines. A figure in a README gets three to five
+  // seconds, and the stamp font is FITTED to the bitmap width against an 8 px readability floor
+  // (stampProvenance), so every methodology clause added to it made the provenance it exists to carry
+  // physically smaller. Method is what a caption UNDERNEATH a figure says once, in prose; provenance is
+  // what has to survive the picture being lifted out of the page it came from. So the bitmap carries
+  // FACTS, and the export writes METHOD beside it as a .txt (see sidecarText) — where a README author
+  // can lift the wording verbatim rather than paraphrase it.
+  //
+  // Non-negotiable #3 is why the last FACTS line exists at all: it names the companion file AND every
+  // channel whose rule moved into it. A trimmed bitmap that said nothing about the trim would be a
+  // picture drawing arrowheads, dashes, shapes and outlines with no way to read any of them — the quiet
+  // omission this whole block was added to prevent, re-introduced by the fix for it.
   function renderProv() {
     var el = document.getElementById('prov');
     if (!el) return;
@@ -1313,54 +1447,107 @@ static const char kScriptRouter[] = R"JS(
     var metric = { lang: 'language', community: 'module (community)', cx: 'cyclomatic complexity',
                    churn: 'commits (' + (CHURN_WINDOW || 'window not recorded') + ')', tested: 'has a test' }[mode] || mode;
     var pct = SYM_TOTAL ? Math.round(1000*NODE_TOTAL/SYM_TOTAL)/10 : 0;
-    var l1 = k('root') + '<b>' + escHtml(ROOT || '.') + '</b>  ' +
-             k('ranker') + '<b>' + escHtml(RANKER) + '</b>  ' +
-             k('top-k') + '<b>' + TOPK + '</b> of ' + SYM_TOTAL + ' symbols (' + pct + '%)  ' +
-             k('map') + '<b>' + NODE_TOTAL + '</b> nodes / <b>' + EDGE_TOTAL + '</b> call edges';
     var viewName = currentView === 'overview' ? MODULES.length + ' modules'
                  : currentView === 'graph'    ? 'whole map'
                  : currentView === 'module'   ? 'module subgraph'
                  : 'depth-' + egoDepth + ' neighbourhood';
-    // Self-calls are counted in EDGE_TOTAL on line 1 and cannot be drawn (loadSubset says why). In a
-    // subset view nobody compares L against EDGE_TOTAL; in the whole-map view the two numbers sit on the
-    // same screen over the same node set, and an unexplained difference between them is precisely the
-    // silent inconsistency this caption exists to prevent.
-    var drops = ( currentView !== 'overview' && selfEdgesDropped > 0 )
+    var isGraph = ( currentView !== 'overview' && N > 0 );
+    // Self-calls are counted in EDGE_TOTAL and cannot be drawn (loadSubset says why). This clause is
+    // method-shaped but it stays with the FACTS, because it RECONCILES two counts that are both on the
+    // bitmap: in the whole-map view EDGE_TOTAL and L sit on the same screen over the same node set, and
+    // an unexplained difference between them is precisely the silent inconsistency this block prevents.
+    var drops = ( isGraph && selfEdgesDropped > 0 )
               ? ' (' + selfEdgesDropped + ' self-call' + (selfEdgesDropped === 1 ? '' : 's') + ' not drawn)' : '';
-    // The dashed shafts need a key, and it has to name the THRESHOLD and not just the word "low":
-    // "some of these edges are uncertain" is not a disclosure, it is a mood. Stated as a count so a
-    // reader can weigh it, and as a number so it means the same thing on every page.
-    var dashes = ( currentView !== 'overview' && lowConfEdges > 0 )
-               ? ', <b>' + lowConfEdges + '</b> dashed = resolver confidence below ' + (LOW_CONF/100).toFixed(2) : '';
-    // "caller → callee" is stated for the same reason every other fact on this line is: the picture now
-    // draws a direction, and a screenshot travelling without this caption would leave the reader to
-    // guess which end of an arrow is the one doing the calling.
-    var l2 = k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges, arrow points caller → callee' + dashes + drops) + '  ' +
-             k('colour') + '<b>' + escHtml(metric) + '</b>' + (mode === 'churn' && !CHURN_OK ? ' <b>unavailable (no git history)</b>' : '') + '  ' +
-             k('labels') + 'top ' + MAX_LABELS + ' by in-view degree, one per name' +
-             (settleTimedOut ? '  <b>settling…</b> (layout over the ' + SETTLE_BUDGET_MS + ' ms budget, still converging)'
-              : layoutStopped ? '  <b>layout stopped at step ' + SIM_STEPS + ' of ' + MAX_SIM + '</b> (the ' + LAYOUT_BUDGET_MS +
-                                ' ms layout budget is spent — positions are under-converged, drag to adjust)'
-              : '');
-    // Line 3 is the SHAPE key, and it is on the caption rather than in the bar's legend for one reason:
-    // the caption is what stampProvenance burns into the exported PNG. A picture that encodes symbol kind
-    // in its marks and travels without a way to read them is exactly the undisclosed channel this block
-    // exists to prevent — the same argument that put the ranker and the top-k here. It is built from
-    // SYM_SHAPES, the identical lookup draw() marks a node with, so the key cannot name a shape the
-    // picture does not draw; and it lists only the kinds actually IN THIS VIEW, because a fixed roster
-    // would print marks a reader can hunt for and never find.
-    // The HULL count is a truncation and is stated as one. MAX_HULLS caps how many module outlines are
-    // drawn because 26 overlapping regions is the hairball again in a second channel; a cap the picture
-    // does not admit to would leave a reader counting outlines and concluding the repository has twelve
-    // modules. `>=3 in view` is the other half of the same disclosure — a two-member module has no hull
-    // to draw, so it is absent from the picture for a reason the caption names rather than a reason the
-    // reader has to guess.
-    var hullNote = ( hullsTotal > 0 )
-                 ? '  ' + k('hulls') + hullsDrawn + ' of ' + hullsTotal + ' modules with ' + MIN_HULL_MEMBERS +
-                   '+ nodes in view (cap ' + MAX_HULLS + '; an outline enclosing mostly other modules is not drawn)'
-                 : '';
-    var l3 = ( currentView === 'overview' || N === 0 ) ? '' : k('shape') + shapeKey() + hullNote;
-    el.innerHTML = l3 ? ( l1 + '<br>' + l2 + '<br>' + l3 ) : ( l1 + '<br>' + l2 );
+
+    // ---- CAPTION FACTS. stampProvenance burns THIS half, and only this half, into the exported PNG.
+    var factLines = [];
+    // R-R/PRIV: the caption shows the TAIL of the root, not the whole path. const ROOT keeps the full
+    // string because the FILES[] entries below are relative to it and the page must still resolve them
+    // -- but the caption is what stampProvenance burns into every exported PNG, and a PNG is the thing
+    // people share. Shipping the absolute path there published the operator's filesystem layout, and
+    // their home directory often carries their real name. Verified on this repo's own README figures,
+    // which went to a public branch stamped with the operator's own absolute home path; `strings` finds
+    // nothing, because it is rendered as pixels, so no secret scanner would ever have flagged it.
+    // Drop the HOME PAIR before taking the tail. Taking the last two segments alone is not enough:
+    // for `~/myproject` -- probably the most common layout there is -- the home directory IS one of
+    // those two, so the caption published the username anyway. Measured on the first version (written
+    // here in the Linux spelling; the macOS one differs only in the leading segment, which is why the
+    // check below is on `users` OR `home` and is case-folded first):
+    //     /home/jane.doe/src/myproject  -> …/src/myproject   clean
+    //     /home/jane.doe/myproject      -> …/jane.doe/…      LEAKED
+    //     /home/jane.doe                -> whole path        LEAKED  (the <=2 guard passed it through)
+    //     C:\Users\Bob.Jones\code       -> whole path        LEAKED  (split was on '/' only)
+    // The leaking segment is always the one after that home root, and its position is knowable, so
+    // remove it by structure rather than hoping the tail misses it.
+    var rootShort = function(r) {
+      if (!r) { return '.'; }
+      var parts = r.replace(/[\/\\]+$/, '').split(/[\/\\]+/).filter(function(x){ return x.length && x !== '.'; });
+      if (parts.length && /^[A-Za-z]:$/.test(parts[0])) { parts.shift(); }
+      var lead = (parts[0] || '').toLowerCase();
+      if ((lead === 'users' || lead === 'home') && parts.length >= 2) { parts.splice(0, 2); }
+      else if (lead === 'root') { parts.splice(0, 1); }
+      if (!parts.length) { return '~'; }
+      return (parts.length > 2 ? '…/' : '') + parts.slice(-2).join('/');
+    };
+    factLines.push( k('root') + '<b>' + escHtml(rootShort(ROOT)) + '</b>  ' +
+                    k('ranker') + '<b>' + escHtml(RANKER) + '</b>  ' +
+                    k('top-k') + '<b>' + TOPK + '</b> of ' + SYM_TOTAL + ' symbols (' + pct + '%)  ' +
+                    k('map') + '<b>' + NODE_TOTAL + '</b> nodes / <b>' + EDGE_TOTAL + '</b> call edges' );
+    // ...and how much of that the CAMERA is on. Absent when the camera frames the whole view, which is
+    // the auto-fit default and the case where the counts above already describe the frame; present the
+    // moment a zoom or a pan makes them describe more than the picture does (see draw()'s closing block).
+    var framing = ( isGraph && nodesInFrame < N ) ? ', camera framing <b>' + nodesInFrame + '</b>' : '';
+    factLines.push( k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges' + drops + framing) + '  ' +
+                    k('colour') + '<b>' + escHtml(metric) + '</b>' + (mode === 'churn' && !CHURN_OK ? ' <b>unavailable (no git history)</b>' : '') +
+                    (settleTimedOut ? '  <b>settling…</b> (layout over the ' + SETTLE_BUDGET_MS + ' ms budget, still converging)'
+                     : layoutStopped ? '  <b>layout stopped at step ' + SIM_STEPS + ' of ' + MAX_SIM + '</b> (the ' + LAYOUT_BUDGET_MS +
+                                       ' ms layout budget is spent — positions are under-converged, drag to adjust)'
+                     : '') );
+    if (isGraph) {
+      factLines.push( k('method') + 'arrow, dash, label, shape and module-outline rules → <b>' + escHtml(exportBase()) +
+                      '.txt</b> (saved with this image)' );
+    }
+
+    // ---- CAPTION METHOD. Rendered on the page and written to the companion .txt; NOT stamped.
+    var methodClauses = [];
+    if (isGraph) {
+      // "caller → callee" is stated for the same reason every other clause here is: the picture draws a
+      // direction, and a reader must not have to guess which end of an arrow is the one doing the calling.
+      methodClauses.push( 'arrow points caller → callee' );
+      // The dashed shafts need a key, and it has to name WHAT the resolver could not do: "some of these
+      // edges are uncertain" is not a disclosure, it is a mood. Stated as a count so a reader can weigh
+      // it — and stated at zero too, because a zero here means the resolver pinned every drawn call to
+      // exactly one definition, which is a result.
+      //
+      // THIS COUNT IS THE VIEW'S, and the legend's AMB_LINKS is the MAP'S. They are two scopes of the
+      // same fact and they differ in every ego and module view, so each says which set it is counting;
+      // one number reported twice under two scopes would be the silent inconsistency this block exists
+      // to prevent.
+      methodClauses.push( '<b>' + ambEdges + '</b> of ' + L + ' shafts dashed in this view = the resolver could not choose'
+                          + ' between same-name definitions and split the call over all of them' );
+      // rule 2 of loadSubset deliberately shows one label per name; a reader must not infer that from the picture
+      methodClauses.push( 'labels top ' + MAX_LABELS + ' by in-view degree, one per name' );
+      // The shape key is built from SYM_SHAPES, the identical lookup draw() marks a node with, so it
+      // cannot name a shape the picture does not draw; and it lists only the kinds actually IN THIS
+      // VIEW, because a fixed roster would print marks a reader can hunt for and never find.
+      methodClauses.push( 'shapes ' + shapeKey() );
+      // EVERY HULL TRUNCATION, EACH WITH ITS OWN COUNT AND ITS OWN REASON. There are three and they are
+      // different failures: the cap (26 overlapping regions is the hairball again in a second channel),
+      // the SHAPE test (a near-collinear group draws a streak, not a region — see HULL_COMPACTNESS), and
+      // the PURITY test (an outline enclosing mostly other modules says nothing). Pooling them into one
+      // number would tell a reader that outlines are missing without telling them why, and a reader
+      // counting outlines against the module count is exactly who this line is for.
+      if (hullsTotal > 0) {
+        var hullWhy = [];
+        if (hullsThin > 0)   { hullWhy.push(hullsThin + ' dropped as too thin to read as a region'); }
+        if (hullsImpure > 0) { hullWhy.push(hullsImpure + ' dropped as enclosing mostly other modules'); }
+        methodClauses.push( 'module outlines <b>' + hullsDrawn + '</b> of ' + hullsTotal + ' modules with ' + MIN_HULL_MEMBERS +
+                            '+ nodes in view (cap ' + MAX_HULLS + (hullWhy.length ? '; ' + hullWhy.join('; ') : '') + ')' );
+      }
+    }
+    el.innerHTML = '<div id="provfacts">' + factLines.join('<br>') + '</div>' +
+                   ( methodClauses.length ? '<div id="provmethod">' + k('how to read') +
+                     '<span class="mc">' + methodClauses.join('</span> · <span class="mc">') + '</span></div>' : '' );
   }
 
   // the shape key's text: one entry per shape present, naming every kind that shares it (class/struct/
@@ -1571,8 +1758,12 @@ static const char kScriptRouter[] = R"JS(
   // other axis.
   var STAMP_MAX_LINES = 4, STAMP_LINE_H = 17, STAMP_TOP = 19, STAMP_BOT = 8;
   var STAMP_PAD = 14, STAMP_FONT_MAX = 13, STAMP_FONT_MIN = 8;
+  // #provfacts, not #prov: the bitmap carries what this picture IS and the companion .txt carries how to
+  // read it (renderProv says why the two halves split). Reading the whole caption here is what put three
+  // dense lines of methodology into every exported figure, shrinking the fitted stamp font against its
+  // 8 px floor until the provenance the stamp exists for was the smallest thing in the image.
   function stampLines() {
-    var el = document.getElementById('prov');
+    var el = document.getElementById('provfacts');
     return el ? el.innerText.split('\n').slice(0, STAMP_MAX_LINES) : [];
   }
   function stampHeight() { var n = stampLines().length; return n ? STAMP_TOP + STAMP_LINE_H*(n - 1) + STAMP_BOT : 0; }
@@ -1618,14 +1809,43 @@ static const char kScriptRouter[] = R"JS(
     stampProvenance(g, out.width/DPR, canvas.height/DPR);
     return out;
   }
+  // ONE basename for both files the export writes. It was inline in the click handler and is a function
+  // now because renderProv's last FACTS line has to name the .txt the export is about to write: two
+  // independently-built names are two names that drift, and a drifted one leaves a picture pointing at a
+  // file that is not the one beside it — a disclosure that reads as precise and is wrong.
+  function exportBase() {
+    var slug = (currentView === 'node' && centreGid >= 0) ? NODES[centreGid].label : (currentView || 'graph');
+    return 'ripwire-' + String(slug).replace(/[^A-Za-z0-9_.-]+/g, '_') + '-' + mode;
+  }
+  // The COMPANION FILE: the whole caption as plain text, provenance first and then the method half the
+  // bitmap no longer carries. Both halves, because this is the file a README author lifts the wording out
+  // of, and a sidecar holding only the part that moved would make them reassemble the sentence by hand.
+  //
+  // Built from the SAME DOM the page renders, not from a second set of strings: a plain-text copy of
+  // these clauses maintained beside the HTML ones is a second thing that can disagree with the picture,
+  // which is the argument that gave the hulls and the labels one placeTextAt instead of two.
+  function sidecarText() {
+    function textOf(id) { var e = document.getElementById(id); return e ? e.innerText : ''; }
+    var out = ['ripwire --html — provenance and method for ' + exportBase() + '.png', ''];
+    out = out.concat(textOf('provfacts').split('\n'));
+    var spans = document.querySelectorAll('#provmethod .mc');
+    if (spans.length) {
+      out.push('', 'how to read this picture');
+      for (var i = 0; i < spans.length; i++) { out.push('  ' + spans[i].innerText); }
+    }
+    return out.join('\n') + '\n';
+  }
+  function download(name, href) {
+    var a = document.createElement('a');
+    a.download = name; a.href = href;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
   document.getElementById('savePng').addEventListener('click', function() {
     if (canvas.style.display === 'none') { info.textContent = 'nothing to export from the module list — open Graph, a module or a symbol first'; return; }
     draw();                                     // guarantee the frame is current, not a stale hover state
-    var a = document.createElement('a');
-    var slug = (currentView === 'node' && centreGid >= 0) ? NODES[centreGid].label : (currentView || 'graph');
-    a.download = 'ripwire-' + String(slug).replace(/[^A-Za-z0-9_.-]+/g, '_') + '-' + mode + '.png';
-    a.href = exportBitmap().toDataURL('image/png');
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    var base = exportBase();
+    download(base + '.png', exportBitmap().toDataURL('image/png'));
+    download(base + '.txt', 'data:text/plain;charset=utf-8,' + encodeURIComponent(sidecarText()));
   });
 
   // boot
@@ -1636,6 +1856,28 @@ static const char kScriptRouter[] = R"JS(
   resize();   // the caption's height is only knowable once it has content; re-measure so the canvas fits
 })();
 )JS";
+
+// One drawn call edge: selected-array indices plus what the resolver was able to say about THIS pair.
+//
+// `amb` is Graph::outProv[e] == 3 — one arm of a k-way split, i.e. the resolver could not choose between
+// several same-name definitions and divided the call over all of them. It is the SAME fact the XML map
+// spells prov="split" and the MCP surface carries, which is the whole reason it is this quantity and not
+// another: the picture and the data now make one claim about one edge, so a reader who checks the map
+// against the page cannot find them disagreeing.
+//
+// It is deliberately NOT a confidence SCORE. Graph::outVals holds a float per out-edge and thresholding
+// it conflates two different facts — "the resolver could not choose between k targets" and "a lone match
+// was reached through a wide resolution tier on an overcommon name" — which a single dashed stroke would
+// then draw identically. Naming the first one exactly is worth more than shading both.
+//
+// THE GRANULARITY IS STILL THE POINT. The XML's `amb="K"` is a PER-SYMBOL count — "K of this symbol's
+// calls hit a name with several definitions" — and 35.4% of emitted call edges carry it. Marking all of a
+// symbol's edges uncertain because one of its calls was would be a false statement about all the others.
+struct HtmlEdge
+{
+    std::uint32_t s = 0, t = 0;
+    std::uint8_t  amb = 0;
+};
 
 // A module CARD (one Louvain community, restricted to the selected node set): the Overview view's
 // unit. `top` holds up to 5 selected-array indices (rank desc, id asc). `inCross`/`outCross` count
@@ -1831,6 +2073,40 @@ inline void writeAppearancePayload( std::FILE* out, const std::vector<std::uint3
     std::fprintf( out, "};\n" );
 }
 
+// The EDGE payload: the LINKS records. Its own function for the reason writeAppearancePayload and
+// writeDocumentShell are theirs — writeHtml is a 400-line emitter and this is one nameable concept, so
+// the caller grows by a call instead of by a loop.
+//
+// `"a":1` is the per-edge split-arm flag (HtmlEdge says what it is). It is OMITTED at confident rather
+// than written as `"a":0`, so a cleanly-resolving corpus emits the identical bytes it emitted before the
+// axis existed, and the key costs nothing on the 5000-node ceiling's 13819 edges except where it is true.
+inline void writeEdgePayload( std::FILE* out, const std::vector<HtmlEdge>& edges )
+{
+    // THE EMITTED ORDER IS A FUNCTION OF THE EDGE SET, and this is what pins it. `s` and `t` print as %u
+    // integers, so a STRICTLY increasing (s,t) sequence is a TOTAL ORDER WITH NO TIES: a given edge set
+    // has exactly one strictly-increasing arrangement, therefore the same edges always emit in the same
+    // order and always settle to the same layout. writeHtml's sort note has the measurements showing why
+    // that matters — permuting these records moves every drawn node above ~500 of them.
+    //
+    // THE STRICTNESS IS THE PROPERTY, not a tidier way to say sorted. Relax `<` to `<=` to let duplicate
+    // edges through and ties come back; ties admit more than one arrangement; every failure that note
+    // describes returns with this check still green. It is assertable at all only because writeHtml
+    // dedups AFTER sorting. Verified on this tree at both ends of the range — top-k=200 → 245 edges,
+    // top-k=1500 → 3032 edges, strictly increasing, zero duplicates. htmlrendercheck.sh arm (X) re-derives
+    // both from the emitted page, with a control that permutes real LINKS and re-runs the same check.
+    //
+    // It cannot catch a change to which edges are SELECTED, and it should not: that is meant to change
+    // the picture. It catches every REORDERING of the same set, which is not.
+    std::fprintf( out, "const LINKS = [\n" );
+    for( std::size_t k = 0; k < edges.size(); ++k )
+    {
+        VERIFY( k == 0 || edges[k - 1].s < edges[k].s || ( edges[k - 1].s == edges[k].s && edges[k - 1].t < edges[k].t ) );
+        std::fprintf( out, "  {\"s\":%u,\"t\":%u%s%s\n", unsigned( edges[k].s ), unsigned( edges[k].t ),
+                      edges[k].amb ? ",\"a\":1}" : "}", ( k + 1 < edges.size() ) ? "," : "" );
+    }
+    std::fprintf( out, "];\n" );
+}
+
 // The document SHELL — <head>, the whole stylesheet, and the chrome (#bar, #prov, #hits, #crumb,
 // #cards, the canvas) — up to the opening <script>. Lifted out of writeHtml for the reason
 // writeAppearancePayload states at its own head: writeHtml is a 400-line emitter and this is a nameable,
@@ -1862,6 +2138,8 @@ inline void writeDocumentShell( std::FILE* out )
         "#legend span { display:inline-block; width:10px; height:10px; border-radius:50%%; margin-right:3px; }\n"
         // the metric NAME inside the legend is text, not a swatch — it must escape the circle rule above
         "#legend span.lg { width:auto; height:auto; border-radius:0; color:#c8ccd2; margin-right:5px; }\n"
+        // C1: and the edge-confidence clause is a SENTENCE, for the same reason and with the same escape.
+        "#legend span.ec { display:inline; width:auto; height:auto; border-radius:0; margin:0; color:#7a7f88; }\n"
         "#colorMode { background:#222; border:1px solid #444; color:#eee; padding:3px 6px;\n"
         "             border-radius:4px; font-size:12px; }\n"
         "#depth { font-size:11px; color:#999; display:flex; align-items:center; gap:4px; white-space:nowrap; }\n"
@@ -1890,6 +2168,11 @@ inline void writeDocumentShell( std::FILE* out )
         "        white-space:nowrap; overflow-x:auto; border-bottom:1px solid #222; }\n"
         "#prov b { color:#c8ccd2; font-weight:600; }\n"
         "#prov .k { color:#6f757e; }\n"
+        // The METHOD half of the caption, dimmed and ruled off from the FACTS above it. The two are
+        // separated visually on the page for the same reason they are separated in the export: one says
+        // what this picture is and the other says how to read it, and only the first is stamped into the
+        // bitmap. Both stay in #prov so chromeTop() keeps measuring the whole strip in one offsetHeight.
+        "#provmethod { color:#787f88; }\n"
         "#bar button { background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
         "              border-radius:4px; font-size:12px; cursor:pointer; }\n"
         "#bar button:hover { border-color:#7fb2ff; }\n"
@@ -1974,23 +2257,10 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         idxOf[order[k]] = k;
     }
 
-    // build LINKS: edges among selected nodes, sorted (s asc, t asc) for determinism.
-    //
-    // `w` is Graph::outVals[e] — the resolver's OWN per-edge weight, parallel to outTargets, and until
-    // now computed, stored, and never exported anywhere: not to XML, not to JSON, not here. (outProv is
-    // a different quantity and IS exported, but only under --scip; this is not that.) It is what the
-    // resolver believed about this specific (caller, callee) pair: the tier confidence it resolved at
-    // (1.0 same-file, 0.5 and 0.2 for the wider tiers), times a 0.1 deboost for an overcommon or
-    // leading-underscore name, DIVIDED BY the number of candidate targets when the call could not be
-    // pinned to one, times sqrt(number of references) for repeat evidence, capped at 8.
-    //
-    // THE GRANULARITY IS THE POINT. The XML's `amb="K"` is a PER-SYMBOL count — "K of this symbol's
-    // calls hit a name with several definitions" — and 35.4% of emitted call edges carry it. Dashing
-    // all of a symbol's edges because one of its calls was ambiguous would be a false statement about
-    // every other edge it has, which is why the honest signal had to come from the per-edge array and
-    // not from the symbol-level number that was already on hand.
-    struct Edge { std::uint32_t s, t; float w; };
-    std::vector<Edge> edges;
+    // build LINKS: edges among selected nodes, sorted (s asc, t asc) for determinism. HtmlEdge's own
+    // declaration says what `amb` is and why it has to be per-EDGE and not the per-symbol amb= count.
+    std::vector<HtmlEdge> edges;
+    const std::vector<std::uint8_t>& outProv = g.outProv;
     for( NodeId k = 0; k < cap; ++k )
     {
         const NodeId  id  = order[k];
@@ -2000,20 +2270,51 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
             const NodeId tgt = outTargets[e];
             if( tgt < S && idxOf[tgt] != kNoNode )
             {
-                // outVals is sized to outTargets by buildGraph; the guard covers a Graph assembled by a
-                // harness that filled only the topology (degrade to "no confidence stated", never a
-                // read past the end)
-                const float w = ( e < g.outVals.size() ) ? g.outVals[e] : 0.f;
-                edges.push_back( { si, idxOf[tgt], w } );
+                // outProv is allocated only when the resolver had something to record — an SCIP
+                // overlay, an FFI binding edge, or a split — so an EMPTY one means "nothing here was
+                // ambiguous", not "the array is missing". The bound check degrades to that answer
+                // rather than reading past the end of a Graph a harness filled with topology alone.
+                const std::uint8_t amb = ( e < outProv.size() && outProv[e] == 3u ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
+                edges.push_back( { si, idxOf[tgt], amb } );
             }
         }
     }
-    // sort (s, t) for determinism — the weight rides along and never orders anything
-    std::sort( edges.begin(), edges.end(), [ ]( const Edge& a, const Edge& b )
+    // Sort (s, t). `amb` is deliberately NOT a sort key, so the confidence bit cannot reorder anything.
+    //
+    // THIS ORDER IS LOAD-BEARING FOR THE LAYOUT, not only for the byte-determinism gate. The page runs
+    // its own force sim over these records and float addition is not associative, so permuting LINKS and
+    // re-running the identical sim to full MAX_SIM accumulates the same forces in a different order and
+    // settles into a DIFFERENT local minimum after 300 steps. Measured max coordinate delta over every
+    // drawn node, permuted vs not:
+    //
+    //     top-k=400     2.85e-6   rounding
+    //     top-k=800     1.58e+3   A DIFFERENT LAYOUT
+    //     top-k=1500    7.36e+3   A DIFFERENT LAYOUT
+    //
+    // So above roughly 500 nodes any change to edge EMIT ORDER silently changes every picture this tool
+    // has published — and every change that would do it reads as cosmetic: adding a field to the record
+    // and sorting on it, grouping edges by module, emitting the low-confidence ones in a separate pass,
+    // dedup'ing in a different order. writeEdgePayload's VERIFY is the fence; its note says why STRICT
+    // increase is the property that makes the emitted order a function of the edge SET alone.
+    std::sort( edges.begin(), edges.end(), [ ]( const HtmlEdge& a, const HtmlEdge& b )
     { return a.s != b.s ? a.s < b.s : a.t < b.t; } );
-    // deduplicate (same symbol can appear via different resolve paths)
-    edges.erase( std::unique( edges.begin(), edges.end(), [ ]( const Edge& a, const Edge& b )
-    { return a.s == b.s && a.t == b.t; } ), edges.end() );
+    // Deduplicate (the same pair can arrive via different resolve paths). The flag is OR-FOLDED into the
+    // survivor rather than inherited from whichever row sorted first: an edge one of whose resolutions
+    // was a guess IS a guess, and std::unique's keep-the-first rule would make that answer depend on
+    // sort order — the one thing the note above says must not decide anything.
+    {
+        std::size_t writeIndex = 0;
+        for( std::size_t readIndex = 0; readIndex < edges.size(); ++readIndex )
+        {
+            if( writeIndex > 0 && edges[writeIndex - 1].s == edges[readIndex].s && edges[writeIndex - 1].t == edges[readIndex].t )
+            {
+                edges[writeIndex - 1].amb = std::uint8_t( edges[writeIndex - 1].amb | edges[readIndex].amb );
+                continue;
+            }
+            edges[writeIndex++] = edges[readIndex];
+        }
+        edges.resize( writeIndex );
+    }
 
     // ---- module (community) grouping over the FULL graph, restricted to the selected node set ----
     // communities() is deterministic (id-order local-moving, ties → lower id) so this is byte-stable.
@@ -2084,7 +2385,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     }
 
     // cross-module edge counts (in/out), counted over the selected LINKS only
-    for( const Edge& e : edges )
+    for( const HtmlEdge& e : edges )
     {
         const NodeId ms = moduleOf[e.s], mt = moduleOf[e.t];
         if( ms == kNoNode || mt == kNoNode || ms == mt )
@@ -2178,32 +2479,8 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // the language palette, and the SymKind→shape roster
     writeAppearancePayload( out, fileList, color );
 
-    // emit LINKS array — sorted (s, t) pairs
-    std::fprintf( out, "const LINKS = [\n" );
-    for( std::size_t k = 0; k < edges.size(); ++k )
-    {
-        std::fprintf( out, "  {\"s\":%u,\"t\":%u}", unsigned( edges[k].s ), unsigned( edges[k].t ) );
-        if( k + 1 < edges.size() )
-        {
-            std::fprintf( out, "," );
-        }
-        std::fprintf( out, "\n" );
-    }
-    std::fprintf( out, "];\n" );
-
-    // ...and the per-edge resolver confidence, as a PARALLEL array in hundredths rather than a `"w":`
-    // key inside each LINKS record. Same reason FCHURN is keyed by file index instead of copied into
-    // every node: at the 5000-node ceiling this map carries 13819 edges, where the key text alone would
-    // be ~85 KB of a page that has to load with no network. Integers because the consumer is a
-    // threshold comparison, not arithmetic — two decimal places is far finer than the decision needs,
-    // and a fixed-point integer cannot print differently on a different libc.
-    std::fprintf( out, "const LCONF = [" );
-    for( std::size_t k = 0; k < edges.size(); ++k )
-    {
-        const long hundredths = std::lround( double( edges[k].w ) * 100.0 );
-        std::fprintf( out, "%s%ld", k ? "," : "", hundredths < 0 ? 0L : ( hundredths > 800L ? 800L : hundredths ) );
-    }
-    std::fprintf( out, "];\n" );
+    // the edge payload: LINKS, and the per-edge resolver confidences parallel to it
+    writeEdgePayload( out, edges );
 
     // The remaining provenance facts for the caption. NODE_TOTAL/EDGE_TOTAL are the whole selected map;
     // the caption states them beside the CURRENT view's counts, because "221 nodes in view" out of 200 and
@@ -2221,7 +2498,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         const ModuleCard& m = modules[ modOrder[disp] ];
         std::vector<std::uint32_t> neigh;
-        for( const Edge& e : edges )
+        for( const HtmlEdge& e : edges )
         {
             const NodeId ms = moduleOf[e.s], mt = moduleOf[e.t];
             if( ms == kNoNode || mt == kNoNode )
@@ -2287,7 +2564,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     std::fprintf( out, "];\n" );
 
     // inline the JS sim + wiki router
-    std::fprintf( out, "%s%s%s%s%s", kScriptColour, kScriptSim, kScriptDraw, kScriptViews, kScriptRouter );
+    std::fprintf( out, "%s%s%s%s%s%s", kScriptColour, kScriptSim, kScriptMarks, kScriptDraw, kScriptViews, kScriptRouter );
 
     std::fprintf( out,
         "</script>\n"

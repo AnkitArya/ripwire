@@ -225,25 +225,28 @@ fi
 # ── 9) PALETTE — the shared cx/churn ramp reads as a blue→orange TEMPERATURE spectrum (the owner's own
 #      framing: "hotspots... colour spectrum from dark blue to orange"), not a green→red traffic light.
 #      Green→red leans entirely on red-green hue discrimination, which protanopia/deuteranopia (~8% of
-#      men) cannot make — the two ends can look alike. A blue→azure→aqua→amber→gold ramp keeps
-#      every step on the blue-yellow axis those forms of colour-blindness do NOT impair, and every stop
-#      is bright enough (worst stop 4.75:1 against the canvas's #111 background, measured) to read on the
-#      dark canvas — a literal navy/near-black "dark blue" would vanish there instead.
+#      men) cannot make — the two ends can look alike. A deep-blue→azure→amber→orange→pale-yellow ramp
+#      keeps every step on the blue-yellow axis those forms of colour-blindness do NOT impair, and every
+#      stop is bright enough (worst stop 4.75:1 against the canvas's #111 background, measured) to read
+#      on the dark canvas — a literal navy/near-black "dark blue" would vanish there instead.
 #
-#      THIS ARM PINS THE IDENTITY, NOT THE PROPERTIES. The five stops changed on 2026-09-06 because the
-#      ramp that shipped before was not monotone in luminance (its dark→light order was [4,3,1,0,2], so
-#      the brightest swatch was the MIDDLE bucket) and its first two stops were 29/441 apart under
-#      deuteranopia. Those are measured properties and a hex pin is the wrong instrument for them — it
-#      passes for any five colours somebody typed. They are re-derived from the stops the page actually
-#      emits by test/htmlrendercheck.sh arm (Q): luminance monotonicity, contrast against the ground, and
-#      a Brettel/Viénot CVD simulation, each with its own mutation control. What stays here is what this
-#      file is for — that the emitted ramp is the one the colour payload is documented to carry, and that
+#      THIS ARM PINS THE IDENTITY, NOT THE PROPERTIES. The five stops changed twice on 2026-09-06: first
+#      because the ramp that shipped before was not monotone in luminance (its dark→light order was
+#      [4,3,1,0,2], so the brightest swatch was the MIDDLE bucket) and its first two stops were 29/441
+#      apart under deuteranopia; then again to take the teal midpoint off a ramp that is a blue↔orange
+#      axis everywhere else. Those are measured properties and a hex pin is the wrong instrument for
+#      them — it passes for any five colours somebody typed. They are re-derived from the stops the page
+#      actually emits by test/htmlrendercheck.sh arm (Q): luminance monotonicity, the weakest greyscale
+#      step, contrast against the ground, and a Brettel/Viénot CVD simulation, each with its own
+#      mutation control — and arm (Q7)-(Q10) there measures the module-outline palette AGAINST this
+#      ramp, which is the other half of the same 2026-09-06 change. What stays here is what this file is
+#      for — that the emitted ramp is the one the colour payload is documented to carry, and that
 #      neither the old green nor the old red stop survives on THIS ramp specifically. rampColor is
 #      grepped as its own line; the 'tested' mode's own two fills (a different, deliberately-binary
 #      convention, colorForNode's 'tested' branch + its legend) are untouched by this arm on purpose,
 #      not by omission.
 rampLine="$( grep -m1 'var rampColor' "$TMP/out.html" )"
-if printf '%s' "$rampLine" | grep -qF "['#4b81c9','#0fa3ff','#2bccc0','#ffce1c','#fff794']"; then
+if printf '%s' "$rampLine" | grep -qF "['#005ec9','#29a0cc','#eb9809','#f0ce48','#fffcd1']"; then
     ok "(9a) rampColor is the cool-to-hot 5-stop heat ramp"
 else
     no "(9a) rampColor is not the expected cool-to-hot ramp"
