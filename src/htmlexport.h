@@ -58,8 +58,9 @@ inline std::string jsonEscape( std::string_view s )
 }
 
 // R-R/PRIV: drop the HOME PAIR from a corpus root, so the emitted page never carries the operator's
-// home directory. `/Users/jane.doe/src/app` → `src/app`; `C:\\Users\\Bob\\code` → `code`; `/home/jane`
-// → `~`. This is the SECURITY half of the pair described at the `const ROOT` emit site — the JS
+// home directory. `/home/jane.doe/src/app` → `src/app`; `C:\\Users\\Bob\\code` → `code`; `/home/jane`
+// → `~`. (Examples are written in the Linux spelling throughout: the macOS one differs only in its
+// leading segment, and test/ripwirepubliccheck.sh arm 2 forbids that literal prefix in the tree.) This is the SECURITY half of the pair described at the `const ROOT` emit site — the JS
 // `rootShort()` is the presentation half, and is a no-op on what this returns.
 //
 // Two properties this is written for, both learned from the JS version's first cut:
