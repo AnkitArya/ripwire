@@ -188,6 +188,37 @@ pin 'measureText\(text\)' 'measureText(text)' "(B5) the reserved box is the meas
 #      another route. Every label is stroked in the background colour before it is filled.
 pin 'LABEL_HALO_PX' 'LABEL_HALO_PX' "(B6) labels carry a dark halo so they stay legible over a node"
 pin 'strokeText\(text' 'strokeText' "(B7) that halo is actually stroked behind the glyphs"
+
+# (B7b) LABELS ARE TEXT AND OWE THE TEXT BAR, which is NOT the bar the node fills owe. (Q3) checks the
+# ramp against 3:1 because a filled node is a graphical object under WCAG 1.4.11; a label is text under
+# 1.4.3 and owes 4.5:1. Those two bars are only independent because the halo is stroked behind every
+# glyph unconditionally -- the label's contrast is against the HALO, not against whatever node it lands
+# on. If the halo ever became conditional, or its colour drifted toward the label's, the labels would
+# silently inherit the 3:1 bar. (B6)/(B7) pin that the halo EXISTS; this arm derives that it WORKS,
+# from the colours the page actually emits, so a colour change fails here rather than in someone's eye.
+labFill="$( grep -oE "'#d6d9de'|'#e6e9ee'" "$PAGE" | tr -d "'" | sort -u | head -1 )"
+haloRGB="$( grep -oE "strokeStyle *= *'rgba\([0-9]+,[0-9]+,[0-9]+" "$PAGE" | grep -oE '[0-9]+,[0-9]+,[0-9]+' | head -1 )"
+if [ -z "$labFill" ] || [ -z "$haloRGB" ]; then
+    no "(B7b) could not read the label fill and halo colours from the page — the arm cannot see what it checks"
+else
+    labCon="$( python3 -c "
+import sys
+def lin(x): return x/12.92 if x<=0.04045 else ((x+0.055)/1.055)**2.4
+def lum(t): 
+    r,g,b=[lin(c/255) for c in t]; return 0.2126*r+0.7152*g+0.0722*b
+f=sys.argv[1].lstrip('#'); fill=tuple(int(f[i:i+2],16) for i in (0,2,4))
+halo=tuple(int(x.strip()) for x in sys.argv[2].split(','))
+a,b=lum(fill)+0.05, lum(halo)+0.05
+print('%.2f' % (max(a,b)/min(a,b)))" "$labFill" "$haloRGB" )"
+    # inline comparison, NOT the ge() helper: this arm sits above ge()'s definition, so calling it here
+    # expands to nothing and the arm silently takes the else branch — the use-before-definition shape
+    # manifestcheck's (I1) exists to catch, which I committed here once already.
+    if awk -v a="$labCon" 'BEGIN{ exit !(a+0 >= 4.5) }'; then
+        ok "(B7b) label $labFill on its halo is ${labCon}:1 — labels clear the 4.5:1 TEXT bar independently of the 3:1 node bar"
+    else
+        no "(B7b) label $labFill on its halo is only ${labCon}:1 — labels are text and owe 4.5:1, not the node fills' 3:1"
+    fi
+fi
 # (B8)-(B11) THE LABEL PASS IS DRAWN IN SCREEN SPACE. It used to sit inside the world transform at
 #     `(11/scale) px` with a `LABEL_HALO_PX/scale` halo — a screen-constant size written as a world one.
 #     It renders identically and costs whatever the zoom says: at the scale a settled 1000-node map fits

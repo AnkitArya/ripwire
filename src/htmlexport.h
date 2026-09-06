@@ -1423,10 +1423,24 @@ static const char kScriptRouter[] = R"JS(
     // their home directory often carries their real name. Verified on this repo's own README figures,
     // which went to a public branch reading "root /Users/<name>/...": `strings` finds nothing, because
     // it is rendered as pixels, so no secret scanner would ever have flagged it.
+    // Drop the HOME PAIR before taking the tail. Taking the last two segments alone is not enough:
+    // for `~/myproject` -- probably the most common layout there is -- the home directory IS one of
+    // those two, so the caption published the username anyway. Measured on the first version:
+    //     /Users/jane.doe/src/myproject  -> …/src/myproject   clean
+    //     /Users/jane.doe/myproject      -> …/jane.doe/…      LEAKED
+    //     /Users/jane.doe                -> whole path        LEAKED  (the <=2 guard passed it through)
+    //     C:\Users\Bob.Jones\code       -> whole path        LEAKED  (split was on '/' only)
+    // The leaking segment is always the one after Users/home, and its position is knowable, so remove
+    // it by structure rather than hoping the tail misses it.
     var rootShort = function(r) {
       if (!r) { return '.'; }
-      var parts = r.replace(/\/+$/, '').split('/').filter(function(x){ return x.length; });
-      return parts.length <= 2 ? r : '…/' + parts.slice(-2).join('/');
+      var parts = r.replace(/[\/\\]+$/, '').split(/[\/\\]+/).filter(function(x){ return x.length && x !== '.'; });
+      if (parts.length && /^[A-Za-z]:$/.test(parts[0])) { parts.shift(); }
+      var lead = (parts[0] || '').toLowerCase();
+      if ((lead === 'users' || lead === 'home') && parts.length >= 2) { parts.splice(0, 2); }
+      else if (lead === 'root') { parts.splice(0, 1); }
+      if (!parts.length) { return '~'; }
+      return (parts.length > 2 ? '…/' : '') + parts.slice(-2).join('/');
     };
     factLines.push( k('root') + '<b>' + escHtml(rootShort(ROOT)) + '</b>  ' +
                     k('ranker') + '<b>' + escHtml(RANKER) + '</b>  ' +
