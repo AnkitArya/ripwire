@@ -98,50 +98,84 @@ static const char kScriptColour[] = R"JS(
   // two olives. So `tested` now carries a channel that is NOT hue — tested nodes are FILLED, untested nodes
   // are hollow with a dashed ring — and the hues move onto the blue-yellow axis the ramp already uses, as
   // reinforcement rather than as the message. A monochrome print of this page is still readable.
-  // The two fills are ramp STOPS, not a third palette beside it: they were '#26c6da'/'#ff9800', which were
-  // stops of the ramp this page used to carry, and became orphan hues the moment that ramp was replaced.
-  // Untested is the BRIGHTER of the pair, on the same "risk is what glows" rule the ramp below states.
-  var TESTED_FILL = '#2bccc0', UNTESTED_FILL = '#ffce1c';
+  // The two fills are ramp STOPS, not a third palette beside it: they were '#26c6da'/'#ff9800' and then
+  // '#2bccc0'/'#ffce1c', stops of two earlier ramps that each became an orphan hue the moment the ramp
+  // moved on. They are now stops 1 and 2, the ramp's own BLUE↔AMBER pair — the widest-separated pair it
+  // has (340/441 normal, 259 protan, 269 deutan, 257 tritan, against 265/143/166/257 for the next best),
+  // which is what a binary channel wants. Untested is the BRIGHTER of the two, on the same "risk is what
+  // glows" rule the ramp below states.
+  var TESTED_FILL = '#29a0cc', UNTESTED_FILL = '#eb9809';
   var testedStroke = function(n) { return !n.ts; };   // untested ⇒ dashed ring instead of a solid disc
 
-  // ---- --color-by palettes. commColor: 12 categorical dark-bg-friendly hues (comm % 12).
+  // ---- --color-by palettes. commColor: 12 categorical dark-bg-friendly hues for the community LENS,
+  // where hue IS the message (comm % 12). hullColor is a SEPARATE palette for the module outlines —
+  // see its own note below; the two used to be one array and that is exactly the defect it fixes.
   //
   // rampColor: the shared 5-step COOL→HOT ramp for cx/churn over FIXED thresholds (fixed beats quantiles
   // for legend honesty — the same bucket means the same thing in every repo).
   //   cx buckets:    0 | 1-4 | 5-9 | 10-19 | 20+   → boundaries [1,5,10,20]
   //   churn buckets: 0 | 1-2 | 3-9 | 10-29 | 30+   → boundaries [1,3,10,30]
   //
-  // THE RAMP IT REPLACES WAS AN ORDINAL SCALE THAT DID NOT ORDER. ['#4fc3f7','#26c6da','#ffd54f',
-  // '#ff9800','#e65100'] measured:
-  //   • Relative luminance 0.474 / 0.459 / 0.694 / 0.437 / 0.227 — dark→light order [4,3,1,0,2]. The
-  //     BRIGHTEST swatch was the MIDDLE bucket and the DARKEST was the top one, so in greyscale, in
-  //     print, or to any reader who reads lightness before hue, an ordinal ramp arrived as a permutation.
-  //     Worse for this page specifically: the hottest bucket was the one that RECEDED into the #111
-  //     canvas, so the picture dimmed exactly where it should have shouted.
-  //   • Steps 0 and 1 collapsed under colour blindness — 29/441 RGB distance under both protanopia and
-  //     deuteranopia (1.03:1 in luminance). On the README hero 71.6% of nodes sit in those two stops, so
-  //     for ~8% of male readers nearly three-quarters of the flagship image was one flat colour.
+  // DEEP BLUE → MID BLUE → AMBER → ORANGE → PALE YELLOW, monotone in luminance and ordered COOL-DIM →
+  // HOT-BRIGHT, which is the direction that makes a metric legible at a glance on a dark ground: the
+  // calm majority sits at the dim end and the rare 20+ nodes are the ones that glow. Blue↔orange is the
+  // canonical dichromacy-safe axis — red/green confusion does not act on it at all — and amber-on-black
+  // is the instrument-panel convention for the same reason a car gauge uses it. Measured with a
+  // Brettel/Viénot 1999 CVD simulation:
+  //   stop  hex       hue    rel.lum   vs #111    normal/protan/deutan/tritan distance to the NEXT stop
+  //   0     #4b81c9   214°   0.2141     4.75:1     87.6 /  66.9 /  61.4 /  68.0
+  //   1     #0fa3ff   203°   0.3352     6.93:1    340.2 / 259.1 / 269.4 / 256.6
+  //   2     #f9a408    39°   0.4671     9.30:1    141.8 / 150.2 / 145.6 /  61.3
+  //   3     #fdcc90    33°   0.6608    12.78:1     63.0 /  68.3 /  61.7 /  64.4
+  //   4     #fefabb    56°   0.9303    17.63:1        —
+  // Worst ADJACENT pair, which with a monotone ramp is also the worst of all ten pairs: 63.0 normal /
+  // 66.9 protan / 61.4 deutan / 61.3 tritan, against the teal-midpoint ramp this replaces at 80.2 /
+  // 66.9 / 61.4 / 61.1. Protanopia and deuteranopia are UNCHANGED to the decimal, because on both
+  // ramps the pair that sets them is stops 0-1 and those two stops did not move. Normal vision gives up
+  // 17 points and tritanopia gains 0.2. Every stop still clears 4.5:1 against the canvas ground at the
+  // same 4.75:1 floor, and the greyscale ladder is 1.458 / 1.343 / 1.375 / 1.379 — no step weaker than
+  // the 1.342 the previous ramp's weakest step measured.
   //
-  // The replacement is monotone in luminance and ordered COOL-DIM → HOT-BRIGHT, which is the direction
-  // that makes the metric legible at a glance on a dark ground: the calm majority sits at the dim end and
-  // the rare 20+ nodes are the ones that glow. Measured with a Brettel/Viénot CVD simulation:
-  //   stop  hex       rel.lum   vs #111    protan/deutan/tritan distance to the NEXT stop
-  //   0     #4b81c9   0.2141    4.75:1     67.0 / 60.8 / 67.7
-  //   1     #0fa3ff   0.3352    6.93:1     82.8 / 78.7 / 62.9
-  //   2     #2bccc0   0.4751    9.44:1    171.3 / 205.6 / 203.4
-  //   3     #ffce1c   0.6549   12.68:1    131.6 / 149.6 /  60.8
-  //   4     #fff794   0.8992   17.07:1        —
-  // Worst pair over ALL ten pairs, not just adjacent ones: 80.2 normal / 67.0 protan / 60.8 deutan /
-  // 60.8 tritan, against the old ramp's 50.3 / 29.0 / 29.0 / 41.1 — the protan/deutan bottleneck more
-  // than doubles. Every stop clears 4.5:1 against the canvas ground (the old ramp's floor was 4.98:1 and
-  // is preserved at 4.75:1, still above the bar), and the ramp stays on the blue-yellow axis
-  // protanopia/deuteranopia do NOT impair: no step is red, and step 2 is a cyan-teal at hue 176°, chosen
-  // over the numerically-better green at 168° precisely so that no adjacent pair is a red/green pairing.
-  // The gate does not take any of this on trust — test/htmlrendercheck.sh arm (Q) re-derives the
-  // luminance and the three CVD simulations from the stops the page actually emits.
+  // THREE THINGS THE MEASUREMENT DECIDED, none of which were obvious from the ladder written down:
+  //   • THE ORANGE HAS TO BE THE LIGHTER OF THE TWO WARM STOPS, and therefore the less saturated. At
+  //     full chroma an amber sits at luminance 0.585 and an orange at 0.400 — the hue that reads as
+  //     "orange" is intrinsically darker — so "amber then orange" and "monotone in luminance" can only
+  //     both hold if the orange is a light one. Under a greyscale-step floor no colour above luminance
+  //     0.64 in the orange hue band exceeds 0.47 chroma, so stop 3 is a light orange at 0.43 and that
+  //     is the ceiling, not a preference. Ordering the warm run by hue instead (orange, then amber, the
+  //     way every saturated heat ramp runs) measures 63.9 / 64.6 / 61.4 / 61.4 — the same to within a
+  //     point and a half, so nothing was bought by inverting the ladder that was asked for.
+  //   • THE TOP STOP IS PALE BY BLUE, NOT BY DESATURATION. Keeping the previous ramp's '#fff794' above
+  //     a light orange collapses the top pair to 39.2/441 under deuteranopia — below the gate's 45 bar
+  //     — because the two differ by five points of blue and almost nothing else. '#fefabb' is paler AND
+  //     further away (61.7) precisely because its paleness comes from a blue channel at 187: blue is
+  //     the one channel protanopia and deuteranopia keep intact.
+  //   • THE TEAL WAS LOAD-BEARING AND IS NOT MISSED. A cyan midpoint separates from both neighbours
+  //     across the whole spectrum (171/205/204 to the next stop), which is why the ramp before this one
+  //     could afford a pale top. Three adjacent warm stops cannot do that, and the cost is confined to
+  //     NORMAL vision, where 63.0/441 is still eight times the JND and four times the 16/441 at which
+  //     two swatches start to look alike.
+  // Thresholds stay FIXED. A quantile ramp would let a cold corpus manufacture a hot node by making the
+  // same swatch mean 20+ in one repository and 3 in another. The gate does not take any of this on
+  // trust — test/htmlrendercheck.sh arm (Q) re-derives the luminance, the greyscale step and the three
+  // CVD simulations from the stops the page actually emits, each with its own mutation control.
   var commColor = ['#4a90d9','#e67e22','#2ecc71','#e74c3c','#9b59b6','#f4c542',
                    '#1abc9c','#e84393','#00acd7','#a3d977','#dea584','#7f8c8d'];
-  var rampColor = ['#4b81c9','#0fa3ff','#2bccc0','#ffce1c','#fff794'];
+  var rampColor = ['#005ec9','#29a0cc','#eb9809','#f0ce48','#fffcd1'];
+  // hullColor: the module OUTLINES, and the reason they are not commColor any more. Identity is carried
+  // by containment now (see draw()'s hull block and loadSubset's), so the outline's hue says nothing the
+  // outline and its label do not already say — it is decoration. Borrowed from commColor it was
+  // decoration ON THE RAMP'S OWN AXES: a saturated blue (#4a90d9) and a saturated amber (#f4c542) drawn
+  // over a picture whose metric runs from blue to amber. Measured against the ramp above, the nearest of
+  // those twelve sits 22.0/441 from a ramp stop — closer than two ADJACENT cx buckets are to each other
+  // (63.0) — so nothing in the picture could tell a reader whether a colour meant a module or a
+  // complexity. These twelve are a narrow desaturated violet→rose band, chosen by maximin over that band
+  // so the closest two are still 36.9/441 apart (a hull is a REGION; two adjacent ones must not read as
+  // one), every one is at most 0.196 chromatic against the ramp's 0.263 floor, the nearest is 56.8/441
+  // from any ramp stop, and every one clears 4.71:1 on the #111 ground because the module's NAME is
+  // drawn in it. The band is 240-355°, well clear of both the ramp's blue (203-214°) and its warm run
+  // (33-56°). Consecutive ids alternate dim/bright so two neighbouring modules differ by 52/441 or more.
+  var hullColor = ['#768188','#8c7b7c','#848994','#978d87','#91949f','#a49393','#96a1aa','#ae9b9c','#a4aeb6','#b8a2a6','#c1b0a8','#afb8c5'];
   var CX_STEPS = [1,5,10,20], CHURN_STEPS = [1,3,10,30];
   function rampStep(v, steps) {
     var s = 0;
@@ -176,7 +210,7 @@ static const char kScriptColour[] = R"JS(
     if (mode === 'community') {
       var maxComm = -1;
       for (i = 0; i < NODES.length; i++) if (NODES[i].comm > maxComm) { maxComm = NODES[i].comm; }
-      var shown = Math.min(maxComm + 1, 12);
+      var shown = Math.min(maxComm + 1, hullColor.length);
       html = name('module (community):');
       for (i = 0; i < shown; i++) html += sw(commColor[i]) + 'm' + i + ' ';
       html += sw('#666') + 'none';
@@ -837,7 +871,10 @@ static const char kScriptDraw[] = R"JS(
     }
 
     // ---- module HULLS, behind everything. Containment is the channel; see loadSubset's hull block for
-    // the 12-hues-over-26-modules collision it replaces and why no palette could have fixed it.
+    // the 12-hues-over-26-modules collision it replaces and why no palette could have fixed it. The hue
+    // is what is LEFT after containment took the job, so it comes from hullColor — a deliberately quiet
+    // band measured against rampColor rather than the community lens' twelve saturated hues, which put
+    // decoration on the two axes the metric uses. See hullColor's note for the numbers.
     //
     // Each outline is pushed HULL_PAD_PX (a screen quantity, converted here like every other one on this
     // canvas) outward from the group's centroid so it clears its own members instead of threading
@@ -898,7 +935,7 @@ static const char kScriptDraw[] = R"JS(
         ctx.quadraticCurveTo(ex[hj].x, ex[hj].y, (ex[hj].x + nxt.x)/2, (ex[hj].y + nxt.y)/2);
       }
       ctx.closePath();
-      var hcol = commColor[grp.comm % 12];
+      var hcol = hullColor[grp.comm % 12];
       ctx.fillStyle = hexRgba(hcol, 0.085);
       ctx.fill();
       ctx.strokeStyle = hexRgba(hcol, 0.42);

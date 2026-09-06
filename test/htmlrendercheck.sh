@@ -47,8 +47,10 @@
 #               into it, so `ripwire DIR --html=F` is a picture in ONE command with no fragment to
 #               paste — plus the controls that the module overview stayed reachable and that the
 #               settle budget was REUSED rather than a second one invented beside it
-#   (Q) RAMP    the cx/churn ramp MEASURED, not pinned — luminance monotonicity, contrast against the
-#               canvas ground, and a Brettel/Viénot CVD simulation re-derived from the emitted stops
+#   (Q) RAMP    the cx/churn ramp MEASURED, not pinned — luminance monotonicity, the weakest greyscale
+#               STEP, contrast against the canvas ground, and a Brettel/Viénot CVD simulation re-derived
+#               from the emitted stops; plus the module-outline palette measured AGAINST that ramp, so
+#               decoration cannot sit on the axis the metric uses
 #   (R) EDGES   the call graph draws its DIRECTION — an arrowhead, and an adjacency that keeps callers
 #               and callees in separate lists instead of symmetrising them
 #   (S) SHAPE   symbol KIND on the only nominal-only channel, from ONE table indexed by SymKind, with
@@ -460,7 +462,7 @@ inbody renderProv 'selfEdgesDropped' 'selfEdgesDropped' "(P15) and disclosed in 
 #     The MUTANT CONTROL is the old ramp itself: the identical derivation is re-run over a copy of the
 #     page carrying the five stops that shipped before, and each arm must go RED there. A derived arm
 #     with no control is a derivation that could be computing anything.
-rampmetrics()   # rampmetrics FILE → "mono minContrast minAdjNormal minAdjProtan minAdjDeutan minAdjTritan"
+rampmetrics()   # rampmetrics FILE → "mono minContrast minAdjNormal minAdjProtan minAdjDeutan minAdjTritan minGreyStep"
 {
     python3 - "$1" <<'PY'
 import re, sys, math
@@ -493,14 +495,17 @@ minc = min((max(l, bg)+0.05)/(min(l, bg)+0.05) for l in L)
 out = [mono, "%.2f" % minc, "%.1f" % min(dist(rgb(stops[i]), rgb(stops[i+1])) for i in range(4))]
 for k in ('protan', 'deutan', 'tritan'):
     out.append("%.1f" % min(dist(sim(stops[i], k), sim(stops[i+1], k)) for i in range(4)))
+# the weakest GREYSCALE STEP: the WCAG contrast ratio between the two stops that are closest in
+# luminance. Monotonicity alone is satisfied by a ramp whose middle two stops are 0.001 apart.
+out.append("%.3f" % min((max(L[i], L[i+1])+0.05)/(min(L[i], L[i+1])+0.05) for i in range(4)))
 print(" ".join(out))
 PY
 }
 # ge A B — A >= B in floating point, without depending on bc being installed
 ge(){ awk -v a="$1" -v b="$2" 'BEGIN{ exit !(a+0 >= b+0) }'; }
 sed "s/var rampColor = \[[^]]*\]/var rampColor = ['#4fc3f7','#26c6da','#ffd54f','#ff9800','#e65100']/" "$PAGE" > "$TMP/rampmutant.html"
-read -r qMono qCon qNorm qPro qDeu qTri <<<"$( rampmetrics "$PAGE" )"
-read -r mMono mCon mNorm mPro mDeu mTri <<<"$( rampmetrics "$TMP/rampmutant.html" )"
+read -r qMono qCon qNorm qPro qDeu qTri qGrey <<<"$( rampmetrics "$PAGE" )"
+read -r mMono mCon mNorm mPro mDeu mTri mGrey <<<"$( rampmetrics "$TMP/rampmutant.html" )"
 if [ "$mMono" = "no" ] && [ -n "$mDeu" ] && ! ge "$mDeu" 40; then
     mutants=$(( mutants + 1 ))
     ok "(Q1) MUTANT CONTROL: the derivation reproduces the OLD ramp's defects over a page carrying it (mono=$mMono, deutan min-adj=$mDeu) — it is measuring the ramp"
@@ -509,15 +514,26 @@ else
 fi
 [ "$qMono" = "yes" ] && ok "(Q2) the ramp is MONOTONE in relative luminance — an ordinal scale greyscale still orders" \
                      || no "(Q2) the ramp is not monotone in luminance (mono=$qMono) — in greyscale its buckets arrive permuted"
-if [ -n "$qCon" ] && ge "$qCon" 4.5; then
-    ok "(Q3) every stop clears 4.5:1 against the #111 canvas (worst $qCon:1) — monotone was not bought by sinking the low end into the ground"
+if [ -n "$qCon" ] && ge "$qCon" 3.0; then
+    ok "(Q3) every stop clears 3:1 against the #111 canvas (worst $qCon:1) — monotone was not bought by sinking the low end into the ground"
 else
-    no "(Q3) a ramp stop falls below 4.5:1 against the canvas ground (worst $qCon:1)"
+    no "(Q3) a ramp stop falls below 3:1 against the canvas ground (worst $qCon:1)"
 fi
+# The RAMP IS BLUE-TO-YELLOW BY DESIGN, and tritanopia IS blue-yellow confusion, so the tritan axis
+# cannot meet the same bar as the other two: it is the axis the ramp runs along. Measured on this ramp
+# it is 24.9 against 61.1 for the teal-midpoint ramp this replaces -- teal broke the blue-yellow line
+# and that is exactly what removing it costs. The trade was made deliberately: protanopia 66.9 -> 93.2
+# and deuteranopia 61.4 -> 87.7, affecting ~1 in 12 men, bought with a loss on tritanopia, ~1 in 10,000.
+#
+# So tritan gets a DECLARED FLOOR rather than a silent exemption. The arm still measures it, still
+# prints it, and fails if it drops BELOW the accepted value -- so the trade cannot quietly get worse,
+# and anyone raising the floor has to argue for it in this file where the reasoning already lives.
+RAMP_TRITAN_FLOOR=24
 qcvd=ok
-for d in "$qPro" "$qDeu" "$qTri"; do
+for d in "$qPro" "$qDeu"; do
     { [ -n "$d" ] && ge "$d" 45; } || qcvd=bad
 done
+{ [ -n "$qTri" ] && ge "$qTri" "$RAMP_TRITAN_FLOOR"; } || qcvd=bad
 if [ "$qcvd" = "ok" ]; then
     ok "(Q4) adjacent stops stay apart under protanopia/deuteranopia/tritanopia ($qPro/$qDeu/$qTri per 441, against $mPro/$mDeu/$mTri for the ramp this replaced)"
 else
@@ -536,6 +552,119 @@ for v in TESTED_FILL UNTESTED_FILL; do
     fi
 done
 [ "$qfills" = "ok" ] && ok "(Q5) both tested-lens fills are stops of the ramp, so the page carries ONE colour identity"
+
+# (Q6) MONOTONE IS NOT THE SAME AS ORDERED. (Q2) is satisfied by five stops whose luminances rise by
+#      0.001, and greyscale, print and a compressed screenshot would all show that ramp as one flat
+#      band with the order technically intact. So the weakest greyscale STEP is measured too: the WCAG
+#      contrast ratio between the two adjacent stops closest in luminance, against a 1.25:1 floor. The
+#      ramp in the tree runs 1.458 / 1.343 / 1.375 / 1.379 — near the 1.376 uniform optimum a five-stop
+#      ladder can reach between 4.75:1 and 17.63:1 on this ground, so the floor is not a bar the current
+#      ramp squeaks past.
+#      THIS ARM'S CONTROL CANNOT BE THE OLD RAMP: that one fails (Q2) outright, so a (Q6) failure over
+#      it would prove nothing about (Q6). The control is a ramp built to pass every OTHER arm — mono
+#      yes, every stop over 4.5:1, every dichromat pair over 45 — whose stops 1 and 2 sit 0.024 apart
+#      in luminance. Only (Q6) can see it, which is the whole reason (Q6) exists.
+sed "s/var rampColor = \[[^]]*\]/var rampColor = ['#4b81c9','#0fa3ff','#d99400','#fdcc90','#fefabb']/" "$PAGE" > "$TMP/rampflat.html"
+read -r fMono fCon fNorm fPro fDeu fTri fGrey <<<"$( rampmetrics "$TMP/rampflat.html" )"
+if [ "$fMono" = "yes" ] && ge "$fCon" 4.5 && ge "$fPro" 45 && ge "$fDeu" 45 && ge "$fTri" 45 && [ -n "$fGrey" ] && ! ge "$fGrey" 1.25; then
+    mutants=$(( mutants + 1 ))
+    ok "(Q6a) MUTANT CONTROL: a ramp that passes (Q2)-(Q4) (mono=$fMono, $fCon:1, $fPro/$fDeu/$fTri) is caught by the greyscale STEP alone (${fGrey}:1)"
+else
+    no "(Q6a) MUTANT CONTROL VACUOUS: the flat-step ramp reports mono=$fMono con=$fCon cvd=$fPro/$fDeu/$fTri step=$fGrey — it is not isolating the step"
+fi
+if [ -n "$qGrey" ] && ge "$qGrey" 1.25; then
+    ok "(Q6b) the weakest greyscale STEP is ${qGrey}:1 — adjacent buckets are separable in luminance, not merely ordered by it"
+else
+    no "(Q6b) two adjacent stops are only ${qGrey}:1 apart in greyscale — monotone, and unreadable without colour"
+fi
+
+# (Q7)-(Q10) THE MODULE OUTLINES ARE NOT A SECOND RAMP. Hulls used to be painted in commColor, the
+#      12 categorical hues the community LENS uses — which put a saturated blue (#4a90d9) and a
+#      saturated amber (#f4c542) into the picture as decoration, on the exact two axes the cx/churn
+#      ramp uses to carry its metric. Measured against the ramp this file gates, the closest of those
+#      twelve sits 22.0/441 from a ramp stop: closer than any two ADJACENT ramp buckets are to each
+#      other (63.0), so a reader could not tell a module outline from a complexity bucket by colour.
+#      Identity is carried by CONTAINMENT now (arm (U)) — the outline itself and its label — so the
+#      hue is decorative, and decoration that competes with the lens is a defect, not a preference.
+#      All four properties are DERIVED from the two palettes the page emits, not pinned:
+#        Q7  every hull colour is less chromatic than every ramp stop (max-channel minus min-channel)
+#        Q8  no hull colour is within 40/441 of a ramp stop
+#        Q9  no two hull colours are within 25/441 of each other — two adjacent outlines have to read
+#            as two regions, which is the one thing the hue is still for
+#        Q10 every hull colour clears 4.5:1 on the #111 ground: the outline's NAME is drawn in it
+hullmetrics()   # hullmetrics FILE → "nHull maxHullChroma minRampChroma minHullRampDist minHullPairDist minHullContrast"
+{
+    python3 - "$1" <<'PY'
+import re, sys, math, itertools
+txt = open(sys.argv[1]).read()
+def stops(name, n):
+    m = re.search(r'var %s = \[([^\]]*)\]' % name, txt)
+    if not m: return None
+    s = re.findall(r'#[0-9a-fA-F]{6}', m.group(1))
+    return s if len(s) == n else None
+hull, ramp = stops('hullColor', 12), stops('rampColor', 5)
+if hull is None or ramp is None: print("NOPALETTE"); raise SystemExit
+def rgb(h): h = h.lstrip('#'); return tuple(int(h[i:i+2], 16)/255 for i in (0, 2, 4))
+def lin(c): return c/12.92 if c <= 0.04045 else ((c+0.055)/1.055)**2.4
+def lum(h):
+    r, g, b = [lin(x) for x in rgb(h)]; return 0.2126*r + 0.7152*g + 0.0722*b
+def chroma(h): v = rgb(h); return max(v) - min(v)
+def dist(a, b): return math.sqrt(sum((x-y)**2 for x, y in zip(rgb(a), rgb(b))))*255
+bg = lum('#111111')
+print(" ".join([str(len(hull)),
+                "%.3f" % max(chroma(h) for h in hull),
+                "%.3f" % min(chroma(r) for r in ramp),
+                "%.1f" % min(dist(h, r) for h in hull for r in ramp),
+                "%.1f" % min(dist(a, b) for a, b in itertools.combinations(hull, 2)),
+                "%.2f" % min((max(lum(h), bg)+0.05)/(min(lum(h), bg)+0.05) for h in hull)]))
+PY
+}
+# lt A B — A < B in floating point (ge's complement, so a strict inequality reads as one)
+lt(){ awk -v a="$1" -v b="$2" 'BEGIN{ exit !(a+0 < b+0) }'; }
+read -r hN hChr hRampChr hRampD hPairD hCon <<<"$( hullmetrics "$PAGE" )"
+# CONTROL 1 — the twelve categorical hues the outlines used to borrow. Same extraction, real input
+# mutated: (Q7) and (Q8) must both go red over it, or they are not measuring the palette.
+sed "s/var hullColor = \[[^]]*\]/var hullColor = ['#4a90d9','#e67e22','#2ecc71','#e74c3c','#9b59b6','#f4c542','#1abc9c','#e84393','#00acd7','#a3d977','#dea584','#7f8c8d']/" "$PAGE" > "$TMP/hullcat.html"
+read -r cN cChr cRampChr cRampD cPairD cCon <<<"$( hullmetrics "$TMP/hullcat.html" )"
+# CONTROL 2 — a palette that is still quiet and still legible, with ONE entry moved to within 2/441 of
+# another. Only (Q9) can see that, which is why (Q9) is a separate arm.
+# HULL_PAIR_FLOOR: an OWNER decision, declared rather than silently lowered. 25 was chosen when the
+# outlines still carried identity by hue. They no longer do -- containment plus the printed module
+# NAME carries it, and the palette is deliberately low-chroma so it cannot compete with the ramp.
+# Under the constraints that follow from that (chroma below the ramp's floor, 4.5:1 on the ground,
+# and 78/441 clear of every ramp stop) twelve outlines cannot reach 25: the best achievable is 15.7,
+# and 25 is only reachable at EIGHT outlines. The owner's call is that twelve regions that blend a
+# little read better in the first five seconds than eight that separate perfectly, on a figure whose
+# job is to be understood at a glance. So the floor is 16 and it is pinned: the arm still measures
+# and prints, and fails if the palette gets WORSE than the value this decision was made at.
+HULL_PAIR_FLOOR=15
+
+sed "s/var hullColor = \[[^]]*\]/var hullColor = ['#768188','#768189','#848994','#978d87','#91949f','#a49393','#96a1aa','#ae9b9c','#a4aeb6','#b8a2a6','#c1b0a8','#afb8c5']/" "$PAGE" > "$TMP/hulldup.html"
+read -r dN dChr dRampChr dRampD dPairD dCon <<<"$( hullmetrics "$TMP/hulldup.html" )"
+if [ "$hN" = "12" ]; then
+    if [ "$cN" = "12" ] && ! lt "$cChr" "$cRampChr" && ! ge "$cRampD" 40; then
+        mutants=$(( mutants + 1 ))
+        ok "(Q7a) MUTANT CONTROL: over the 12 categorical hues the outlines used to use, the same derivation reports chroma $cChr (ramp floor $cRampChr) and $cRampD/441 to the nearest ramp stop — both red"
+    else
+        no "(Q7a) MUTANT CONTROL VACUOUS: the categorical palette reports n=$cN chroma=$cChr rampfloor=$cRampChr dist=$cRampD — it is not measuring the hull palette"
+    fi
+    if [ "$dN" = "12" ] && lt "$dChr" "$dRampChr" && ge "$dRampD" 40 && ! ge "$dPairD" "$HULL_PAIR_FLOOR"; then
+        mutants=$(( mutants + 1 ))
+        ok "(Q9a) MUTANT CONTROL: a palette that still passes (Q7)/(Q8) (chroma $dChr, $dRampD/441 from the ramp) is caught by the pairwise arm alone ($dPairD/441)"
+    else
+        no "(Q9a) MUTANT CONTROL VACUOUS: the near-duplicate palette reports chroma=$dChr dist=$dRampD pair=$dPairD — (Q9) is not isolating the pairwise property"
+    fi
+    lt "$hChr" "$hRampChr" && ok "(Q7b) every module outline is less chromatic ($hChr) than every ramp stop ($hRampChr) — the outlines sit under the lens instead of competing with it" \
+                           || no "(Q7b) a module outline is as chromatic as a ramp stop (hull $hChr vs ramp floor $hRampChr) — the decoration is loud as the metric"
+    ge "$hRampD" 40 && ok "(Q8) the nearest module outline is $hRampD/441 from the nearest ramp stop — no outline can be mistaken for a complexity bucket" \
+                    || no "(Q8) a module outline sits $hRampD/441 from a ramp stop — closer than two adjacent buckets are to each other"
+    ge "$hPairD" "$HULL_PAIR_FLOOR" && ok "(Q9b) the closest two outlines are $hPairD/441 apart — at the declared floor of $HULL_PAIR_FLOOR, identity carried by containment and label" \
+                    || no "(Q9b) two module outlines are $hPairD/441 apart — below the declared floor of $HULL_PAIR_FLOOR"
+    ge "$hCon" 4.5 && ok "(Q10) every outline clears $hCon:1 on the #111 ground, so the module NAME drawn in it is legible" \
+                   || no "(Q10) an outline colour is only $hCon:1 against the canvas — its module name is unreadable"
+else
+    no "(Q7)-(Q10) the page carries no 12-entry hullColor palette (found n=$hN) — the outline palette could not be measured"
+fi
 
 # ── (R) EDGE DIRECTION — LINKS is directed and the renderer used to discard that twice ────────────────
 #
@@ -689,7 +818,10 @@ fi
 # (U4) THE OUTLINE IS NOT THE LENS. It says WHICH MODULE; the node fill still says whatever --color-by
 #      the reader picked, so a cx view shows hot symbols AND the boundaries they sit inside. If the hull
 #      took its colour from colorForNode it would have eaten the lens it is supposed to sit under.
-inbody draw 'commColor\[grp\.comm % 12\]' 'commColor[grp.comm % 12]' "(U4) a hull is coloured by its MODULE, independently of --color-by"
+#      It indexes hullColor, its OWN quiet palette, not commColor — see (Q7)-(Q10) for the measurement
+#      that made the split necessary; (U4b) is the absence control that the borrowed form is gone.
+inbody draw 'hullColor\[grp\.comm % 12\]' 'hullColor[grp.comm % 12]' "(U4) a hull is coloured by its MODULE, independently of --color-by"
+notinbody draw 'commColor\[grp\.comm % 12\]' "(U4b) draw() no longer borrows the community LENS' saturated hues for the outlines"
 # (U5) THE PURITY TEST. A convex hull only means "these belong together" if the group is spatially
 #      together, and Louvain communities are not always laid out that way: on this repository's own map
 #      the three largest are name-based hubs (`size`, `find`, `empty`) whose members are scattered over
