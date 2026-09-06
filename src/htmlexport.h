@@ -1416,7 +1416,19 @@ static const char kScriptRouter[] = R"JS(
 
     // ---- CAPTION FACTS. stampProvenance burns THIS half, and only this half, into the exported PNG.
     var factLines = [];
-    factLines.push( k('root') + '<b>' + escHtml(ROOT || '.') + '</b>  ' +
+    // R-R/PRIV: the caption shows the TAIL of the root, not the whole path. const ROOT keeps the full
+    // string because the FILES[] entries below are relative to it and the page must still resolve them
+    // -- but the caption is what stampProvenance burns into every exported PNG, and a PNG is the thing
+    // people share. Shipping the absolute path there published the operator's filesystem layout, and
+    // their home directory often carries their real name. Verified on this repo's own README figures,
+    // which went to a public branch reading "root /Users/<name>/...": `strings` finds nothing, because
+    // it is rendered as pixels, so no secret scanner would ever have flagged it.
+    var rootShort = function(r) {
+      if (!r) { return '.'; }
+      var parts = r.replace(/\/+$/, '').split('/').filter(function(x){ return x.length; });
+      return parts.length <= 2 ? r : '…/' + parts.slice(-2).join('/');
+    };
+    factLines.push( k('root') + '<b>' + escHtml(rootShort(ROOT)) + '</b>  ' +
                     k('ranker') + '<b>' + escHtml(RANKER) + '</b>  ' +
                     k('top-k') + '<b>' + TOPK + '</b> of ' + SYM_TOTAL + ' symbols (' + pct + '%)  ' +
                     k('map') + '<b>' + NODE_TOTAL + '</b> nodes / <b>' + EDGE_TOTAL + '</b> call edges' );
