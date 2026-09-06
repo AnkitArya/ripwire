@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+# RIPWIRE_TEST_DEPS: src/htmlexport.h
 # htmlrendercheck.sh — gate for the --html RENDERER: what the picture is, and what the page says
 # about itself.
+#
+# The RIPWIRE_TEST_DEPS line above is manifest_declared evidence for --test-gate. This gate greps a page
+# it asks the BINARY to emit and never names the source that emits it, so the script_literal rule cannot
+# see the link and a change to src/htmlexport.h came back with tests="0" — the verb naming no test at all
+# for the one file it has 100+ arms about. See test/shellgateindexcheck.sh for the evidence contract.
 #
 # WHY THIS FILE EXISTS. test/htmlexport.sh and test/htmlcolorcheck.sh both check the emitted document
 # at byte/grep level and NEITHER ever executes the JS — which is precisely how this batch of defects
@@ -49,11 +55,15 @@
 #               the key on the caption the PNG export stamps
 #   (T) LAYOUT  seeded and pulled in the VIEWPORT'S proportions, so a 16:9 frame is not half empty
 #   (U) HULLS   module identity as CONTAINMENT, because comm % 12 collides 24-25 ways at top-k 2000 —
-#               drawn behind the graph, independent of --color-by, purity-tested, and both truncations
-#               (the cap and the purity drop) stated in the caption
+#               drawn behind the graph, independent of --color-by, purity- AND shape-tested (three
+#               points can be collinear, and node count cannot tell you whether a hull is a region),
+#               with all three truncations — the cap, the purity drop, the shape drop — in the caption
 #   (V) EDGE CONFIDENCE  Graph::outVals — computed, stored and never exported anywhere — reaches the
 #               page PER EDGE (not the per-symbol amb= that was already on hand and would be a lie on
 #               two edges in three) and dashes a low-confidence shaft, with count and threshold stated
+#   (W) CAPTION SPLIT  the bitmap carries PROVENANCE and the methodology travels beside it in a
+#               companion .txt the same export writes — with the pointer that says so, and the control
+#               pair proving the clauses left one half and landed in the other rather than being deleted
 #
 # Usage:
 #   test/htmlrendercheck.sh                          # uses build/ripwire on test/fixture
@@ -564,7 +574,7 @@ inbody egoGraph 'gout\[u\]' 'gout[u]' "(R9a) the ego walk follows callees"
 inbody egoGraph 'gin\[u\]' 'gin[u]' "(R9b) control: and callers, so the neighbourhood is not halved by making it directed"
 pin 'callers / ' 'callers / ' "(R10) the node view states how much of the neighbourhood is callers and how much callees"
 # (R11) and the CAPTION says which way an arrow points, because a screenshot travels without the page.
-inbody renderProv 'arrow points caller' 'arrow points caller' "(R11) the provenance caption states that an arrow points caller → callee"
+inbody renderProv 'arrow points caller' 'arrow points caller' "(R11) the caption states that an arrow points caller → callee (METHOD half — see (W9b))"
 
 # ── (S) NODE SHAPE carries symbol KIND, and the picture says which shape means what ───────────────────
 #
@@ -626,7 +636,11 @@ absent 'nodeRadiusPx\(n\)\*1\.2/scale' "(S6c) the flat 1.2x hit radius that was 
 #      the same lookup draw() uses, so the key cannot name a shape the picture does not draw.
 pin 'function shapeKey' 'function shapeKey' "(S7) the page emits a shape key"
 inbody shapeKey 'SYM_SHAPES\[t\]' 'SYM_SHAPES[t]' "(S8a) that key is built from the SAME roster the marks are drawn from"
-inbody renderProv 'shapeKey\(\)' 'shapeKey()' "(S8b) and it is on the provenance caption, which is what the PNG export stamps"
+# (S8b) NOTE: this arm's surface MOVED. The key is still built by renderProv and still travels with the
+#      exported picture, but in the METHOD half — the companion .txt (W5)/(W9a) — rather than burned into
+#      the bitmap, because the stamp was trimmed to provenance. The arm is not weakened: (W9a) holds the
+#      key's new home and (W8a) holds that it left the old one.
+inbody renderProv 'shapeKey\(\)' 'shapeKey()' "(S8b) and it is on the provenance caption, in the METHOD half the export writes beside the PNG"
 # (S9) so the STAMP has to grow with the caption. A constant height silently truncated it the day it
 #      gained a third line, which is the clipping defect (I5) already exists to stop, by the other axis.
 pin 'function stampHeight' 'function stampHeight' "(S9a) the stamped strip's height is derived from the caption's line count"
@@ -701,6 +715,54 @@ inbody draw 'placeTextAt\(hullAnchors' 'placeTextAt' "(U11) hull names are place
 ncells="$( grep -c 'var labelCells = new Set' "$PAGE" )"
 [ "$ncells" = "1" ] && ok "(U12) control: exactly one label occupancy grid on the page ($ncells)" \
                     || no "(U12) control: $ncells occupancy grids — two placement rules will disagree about what overlaps"
+# (U13)-(U18) THE SHAPE TEST — a hull has to be a REGION, and node count cannot tell you whether it is.
+#      MIN_HULL_MEMBERS was the only gate on geometry and it counts POINTS: three points that happen to
+#      be collinear pass it and draw a hull with no area, which renders as a thin coloured smear across
+#      the picture and reads as a scratch on the lens rather than a region. Measured over both corpora at
+#      the pinned figure argv — 23 groups with 3+ members in view, django/db/migrations at rrf/top-k=120
+#      and this repository at top-k=200 — the isoperimetric ratio 4*pi*A/P^2 of the raw hull ring splits
+#      them into a low cluster {0.0011, 0.0718, 0.1493} and a body at >= 0.2879, and the two widest
+#      adjacent gaps in the whole distribution (2.08x and 1.93x) bracket exactly that band. The three in
+#      the low cluster are `resolve_model_field_relations` (a 107x0 px line, hull area 4 px^2),
+#      `add_operation` (178x8 px) and `reload_model` (137x13 px) — the smears, by name.
+#
+#      The ratio, NOT an area floor and not the OBB aspect: the hull is convex by construction, and on a
+#      convex ring 4*pi*A/P^2 IS thinness, so it needs no geometry the draw does not already walk (O(ring),
+#      one pass, against the O(ring^2) rotating calipers an OBB aspect needs). An AREA floor is the wrong
+#      predicate twice over — it is not scale-invariant, and it would drop `varint` (23x18 px, a small
+#      round blob that reads perfectly well) while keeping nothing it should.
+pin 'HULL_COMPACTNESS' 'HULL_COMPACTNESS' "(U13) the shape test's threshold is a named constant, not a number buried in a branch"
+# (U14) the ratio is ISOPERIMETRIC — the perimeter is load-bearing, which is what makes this a SHAPE test
+#       rather than the area floor that would drop a small round module and keep a long thin one.
+inbody draw '4\*Math\.PI\*hullArea/\(hullPerim\*hullPerim\) < HULL_COMPACTNESS' 'hullPerim' "(U14) a hull thinner than that ratio is not drawn (and the perimeter is what makes it a shape test)"
+# (U15) THE THRESHOLD IS IN THE CALIBRATED BAND. Below 0.149 it stops dropping `reload_model`, the
+#       smear the eye actually catches; at or above 0.288 it starts dropping `shSingleQuote`-shaped
+#       groups and then the ordinary lozenges (`generate_deleted_models` 0.315, `fnv1aMultiply` 0.372)
+#       that read fine. A number outside the band is a number nobody measured.
+hcomp="$( grep -oE 'HULL_COMPACTNESS = [0-9.]+' "$PAGE" | grep -oE '[0-9.]+$' )"
+if [ -n "$hcomp" ] && ge "$hcomp" 0.16 && ge 0.28 "$hcomp"; then
+    ok "(U15) the threshold ($hcomp) sits in the measured gap between the smears (<=0.1493) and the regions (>=0.2879)"
+else
+    no "(U15) HULL_COMPACTNESS is ${hcomp:-unset} — outside the [0.16, 0.28] band the two corpora measured"
+fi
+# (U16) THE DROP IS COUNTED AND CAPTIONED, with its own reason. Non-negotiable #3: this page already
+#       states the cap and the purity drop, and a third silent removal would be the same defect a third
+#       time — a reader counting outlines concluding the repository has fewer modules than it has.
+inbody renderProv 'hullsThin' 'hullsThin' "(U16) the caption states how many outlines the shape test removed, separately from the purity drop"
+inbody renderProv 'hullsImpure' 'hullsImpure' "(U17) and how many the purity test removed, so the two reasons are not pooled into one number"
+# (U18) ABSENCE CONTROL: the SILENT drop is gone. `if (ring.length < 3) { continue; }` discarded a
+#       fully-collinear group — the worst case of exactly this defect — and no number on the page ever
+#       moved. It is now the same counted branch as every other shape drop.
+absent 'if \(ring\.length < 3\) \{ continue; \}' "(U18) the uncounted collinear-hull drop that no caption number ever reflected is gone"
+# (U19) and the cheap O(ring) shape test runs BEFORE the O(N) purity scan, so a group that cannot be a
+#       region never costs a pass over every node in view. Checked by line order in the emitted script.
+uShape="$( grep -n 'THE SHAPE TEST' "$PAGE" | head -1 | cut -d: -f1 )"
+uPure="$( grep -n 'THE PURITY TEST' "$PAGE" | head -1 | cut -d: -f1 )"
+if [ -n "$uShape" ] && [ -n "$uPure" ] && [ "$uShape" -lt "$uPure" ]; then
+    ok "(U19) the O(ring) shape test filters before the O(N) purity scan (lines $uShape < $uPure)"
+else
+    no "(U19) shape=$uShape purity=$uPure — the O(N) scan runs for groups the cheap test would have dropped"
+fi
 
 # ── (V) PER-EDGE RESOLVER CONFIDENCE, drawn as a dashed shaft ─────────────────────────────────────────
 #
@@ -742,6 +804,108 @@ inbody renderProv 'LOW_CONF' 'LOW_CONF' "(V7) and the numeric threshold that mad
 #      view where a reader is looking closely at a handful of edges.
 inbody egoGraph 'edges\.push\(LINKS\[k\]\)' 'edges.push(LINKS[k])' "(V8) the ego view passes the edge records through, so an edge cannot lose its confidence on the way"
 absent 'edges\.push\(\{ s: s, t: t \}\)' "(V9) the rebuilt {s,t} pair that dropped it is gone"
+
+# ── (W) THE CAPTION SPLIT — the bitmap carries PROVENANCE, the sidecar carries METHOD ─────────────────
+#
+#     The stamped strip had grown to three dense lines carrying the whole methodology: arrow semantics,
+#     the dash threshold, the label rule, the shape key and the hull rule, on top of the provenance. A
+#     README figure gets three to five seconds, and at 880 px the fitted stamp font is already down near
+#     its 8 px floor — so every clause added to it made the provenance it exists to carry harder to read,
+#     not easier. The split is by KIND: what this picture IS (root, ranker, top-k, the counts, the colour
+#     metric) is burned into the bitmap, and how to READ it travels beside the PNG in a companion .txt
+#     that the same export writes.
+#
+#     THE HONESTY CONSTRAINT IS THE WHOLE ARM SET. Non-negotiable #3 forbids a surface that quietly
+#     omits, and "the methodology moved" is only not-quiet if the bitmap says so and the sidecar actually
+#     exists. (W7) holds the pointer, (W4)/(W5) hold the file, and (W8)/(W9) are the control pair that
+#     proves the clauses LEFT the stamped half and LANDED in the other one rather than being deleted.
+#
+#     provfacts / provmethod scope an arm to one half of renderProv's body. "renderProv mentions the
+#     shape key somewhere" is now true of both halves at once and says nothing about which surface a
+#     reader sees it on, which is precisely what these arms are about. An empty segment is a broken
+#     derivation and every caller below fails on one by name rather than passing over nothing.
+provfacts(){ awk '/---- CAPTION FACTS/,/---- CAPTION METHOD/' "$PAGE"; }
+provmethod(){ awk '/---- CAPTION METHOD/,/^  \}/' "$PAGE"; }
+# insegment NAME PATTERN TOKEN DESC — pin() at segment scope, with pin()'s mutation control.
+insegment()
+{
+    local seg="$1" pat="$2" tok="$3" desc="$4"
+    "$seg" > "$TMP/seg.txt"
+    if [ ! -s "$TMP/seg.txt" ]; then no "$desc — the $seg segment of renderProv is empty (the awk range broke; the arm asserts nothing)"; return; fi
+    if ! grep -qE -- "$pat" "$TMP/seg.txt"; then no "$desc — not found in the $seg half of the caption"; return; fi
+    # shellcheck disable=SC2001
+    sed "s/$( printf '%s' "$tok" | sed 's/[][\.*^$\/&]/\\&/g' )/zzRIPWIREMUTANTzz/g" "$TMP/seg.txt" > "$TMP/segmut.txt"
+    if grep -qE -- "$pat" "$TMP/segmut.txt"; then
+        no "$desc — MUTANT CONTROL VACUOUS: the pattern still matches with '$tok' corrupted"
+    else
+        mutants=$(( mutants + 1 )); ok "$desc"
+    fi
+}
+# notinsegment NAME PATTERN DESC — absent() at segment scope; the non-empty segment is its own control.
+notinsegment()
+{
+    local seg="$1" pat="$2" desc="$3"
+    "$seg" > "$TMP/seg.txt"
+    if [ ! -s "$TMP/seg.txt" ]; then no "$desc — the $seg segment of renderProv is empty (the awk range broke; the arm asserts nothing)"; return; fi
+    if grep -qE -- "$pat" "$TMP/seg.txt"; then no "$desc — still in the $seg half: $( grep -oE -- "$pat" "$TMP/seg.txt" | head -1 )"; else ok "$desc"; fi
+}
+# (W1)/(W2) THE STAMP READS THE FACTS HALF ONLY. This is the mechanism of the whole split: if
+#      stampLines() still read #prov it would burn both halves into the bitmap and every other arm here
+#      would pass over a picture that had not changed. (W2) is the absence control.
+pin "getElementById\('provfacts'\)" "'provfacts'" "(W1) the exported bitmap stamps the provenance half of the caption"
+notinbody stampLines "getElementById\('prov'\)" "(W2) the whole-caption read that stamped the methodology into every PNG is gone"
+# (W3) both halves are on the page — the reader looking at the live page loses nothing, only the bitmap
+#      is trimmed. A split that dropped the methodology from the page too would be a deletion, not a move.
+insegment provmethod 'id="provmethod"' 'id="provmethod"' "(W3) the methodology is still rendered on the page, in its own block"
+# (W4)/(W5)/(W6) THE COMPANION FILE. The methodology has to land somewhere a README author can lift it
+#      from verbatim, or "moved to the caption underneath" is a paraphrase waiting to happen. One export
+#      click writes both files; (W6) holds them to ONE basename, because two independently-built names
+#      are two names that can drift apart and leave a .txt beside the wrong .png.
+pin "'\.txt'" "'.txt'" "(W4) the export writes a companion text file beside the PNG"
+inbody sidecarText 'provmethod' 'provmethod' "(W5) and that file carries the methodology half, not just the provenance the bitmap already has"
+pin 'function exportBase' 'function exportBase' "(W6a) the two files' shared basename is built once"
+inbody sidecarText 'exportBase\(\)' 'exportBase()' "(W6b) and the sidecar takes its name from it"
+# (W7) THE BITMAP SAYS WHERE THE REST WENT, and names every channel whose rule it is no longer printing.
+#      Without this the trim is exactly the quiet omission non-negotiable #3 forbids: a picture that
+#      draws arrowheads, dashes, shapes and outlines and prints no way to read any of them.
+insegment provfacts 'exportBase\(\)' 'exportBase()' "(W7a) the stamped half names the companion file it points at"
+insegment provfacts 'module-outline' 'module-outline' "(W7b) and enumerates the channels whose rules moved into it"
+# (W8)/(W9) THE CONTROL PAIR: the clauses LEFT the stamped half (W8) and ARE in the other one (W9).
+#      Either arm alone passes over a deletion — (W8) over one that threw the methodology away, (W9)
+#      over one that never trimmed the bitmap at all.
+notinsegment provfacts 'shapeKey\(\)'         "(W8a) the shape key is no longer burned into the bitmap"
+notinsegment provfacts 'arrow points caller'  "(W8b) nor is the arrow semantics"
+notinsegment provfacts 'LOW_CONF'             "(W8c) nor the dash threshold"
+notinsegment provfacts 'MAX_LABELS'           "(W8d) nor the label rule"
+notinsegment provfacts 'MAX_HULLS'            "(W8e) nor the hull rule"
+insegment provmethod 'shapeKey\(\)' 'shapeKey()' "(W9a) control: the shape key landed in the methodology half rather than being deleted"
+insegment provmethod 'arrow points caller' 'arrow points caller' "(W9b) control: and the arrow semantics"
+insegment provmethod 'LOW_CONF' 'LOW_CONF' "(W9c) control: and the dash threshold"
+insegment provmethod 'MAX_LABELS' 'MAX_LABELS' "(W9d) control: and the label rule"
+insegment provmethod 'MAX_HULLS' 'MAX_HULLS' "(W9e) control: and the hull rule, with both of its drop counts"
+# (W10) the stamped half stays inside the strip's line ceiling. STAMP_MAX_LINES slices, so a fourth
+#       facts line would be dropped from the bitmap silently — the (S9) clipping defect by the other axis.
+# counted with -o, not -c: grep -c counts LINES, and two pushes sharing a line would under-report the
+# stamped half by one and let a silently-sliced line through. (Found by the control for this arm.)
+# (W11)-(W14) THE STAMP DESCRIBES THE FRAME IT IS UNDER. Found while cutting the README's crop figures:
+#      the caption's counts are the LOADED subset, and the camera is free to be zoomed anywhere inside it,
+#      so a crop exported after a zoom stamped "120 nodes / 183 edges" onto a picture of fifteen. That is
+#      a bitmap overstating its own contents — the same defect class as an undisclosed cap, in the one
+#      artifact the caption exists for. draw() counts what is actually inside the canvas rect (W11), the
+#      STAMPED half states it (W12) whenever it is less than the view's own total (W13), and draw()
+#      re-renders the caption when that number or a hull count moves (W14) — without which the stamp
+#      would still carry the counts from the frame before the zoom.
+inbody draw 'nodesInFrame' 'nodesInFrame' "(W11) draw() counts the nodes the camera is actually framing"
+insegment provfacts 'nodesInFrame' 'nodesInFrame' "(W12) and the STAMPED half of the caption states it, so a cropped export cannot overstate its contents"
+insegment provfacts 'nodesInFrame < N' 'nodesInFrame < N' "(W13) stated against the view's own total, so it appears exactly when the camera frames less than the map"
+inbody draw 'provStamp' 'provStamp' "(W14) and the caption is re-rendered when that count moves — a stamp a frame behind the zoom is the same overstatement"
+wfacts="$( provfacts | grep -oE 'factLines\.push' | wc -l | tr -d ' ' )"
+wmax="$( grep -oE 'STAMP_MAX_LINES = [0-9]+' "$PAGE" | grep -oE '[0-9]+$' )"
+if [ -n "$wmax" ] && [ "$wfacts" -gt 0 ] && [ "$wfacts" -le "$wmax" ]; then
+    ok "(W10) the stamped half is $wfacts lines against a $wmax-line ceiling — none of it is sliced away"
+else
+    no "(W10) the stamped half is ${wfacts:-0} lines against a ${wmax:-unset}-line ceiling — a line would be dropped from the bitmap with nothing to say so"
+fi
 
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"

@@ -344,7 +344,11 @@ static const char kScriptSim[] = R"JS(
   // ---- module HULLS: the groups draw() outlines, rebuilt per load (see loadSubset's hull block).
   var hullGroups = [];           // [{ comm, name, idx: [local indices] }], largest first
   var hullsTotal = 0;            // modules with >= MIN_HULL_MEMBERS in view — the DENOMINATOR the caption states
-  var hullsDrawn = 0;            // ...and how many survived draw()'s dispersion test and the cap
+  var hullsDrawn = 0;            // ...and how many survived draw()'s two geometry tests and the cap
+  var hullsThin = 0;             // ...dropped by the SHAPE test (see HULL_COMPACTNESS) — captioned separately,
+  var hullsImpure = 0;           // ...and by the PURITY test (see HULL_PURITY): two reasons, two numbers
+  var nodesInFrame = 0;          // nodes whose centre is inside the canvas rect — what a ZOOMED export shows,
+  var provStamp = '';            // ...against the caption's loaded-subset totals (see draw()'s closing block)
   var MAX_HULLS = 12, MIN_HULL_MEMBERS = 3;
   var HULL_PAD_PX = 16;          // how far the outline stands off its outermost members, in SCREEN px
   // A convex hull only means "these belong together" if the group IS spatially together, and Louvain
@@ -362,6 +366,33 @@ static const char kScriptSim[] = R"JS(
   // HULL_CANDIDATES bounds that cost from the other side: only the largest few groups are ever
   // considered, because they are the only ones whose outline tells a reader anything at this scale.
   var HULL_PURITY = 0.5, HULL_CANDIDATES = 24;
+  // ...and the second test is SHAPE, because MIN_HULL_MEMBERS counts POINTS and a hull is a REGION.
+  // Three members that happen to sit near a line pass a node count and produce a hull with almost no
+  // area: it draws as a thin coloured streak across the picture and reads as a scratch on the lens, not
+  // as containment. Three of them were visible on the django/db/migrations figure at rrf/top-k=120 —
+  // `resolve_model_field_relations` (a 107x0 px line whose hull area is 4 px^2), `add_operation`
+  // (178x8 px) and `reload_model` (137x13 px) — and the first of those was being dropped SILENTLY,
+  // because a fully collinear group makes convexHull return a 2-point ring and the caller just skipped
+  // it without counting it anywhere.
+  //
+  // The measure is the isoperimetric ratio 4*pi*A/P^2 of the RAW hull ring. The hull is convex by
+  // construction, and on a convex ring that ratio is exactly thinness: 1.0 for a circle, 0.785 for a
+  // square, 0.605 for an equilateral triangle — the roundest a three-member hull can be — and it falls
+  // to pi/(2*aspect) for a thin one, which reproduces the three measurements above to three decimals.
+  // Chosen over the two alternatives on their own terms. An AREA floor is the wrong predicate twice: it
+  // is not scale-invariant, and it would drop a small ROUND module (`varint`, 23x18 px, perfectly
+  // legible once HULL_PAD_PX has stood the outline off it) while the streaks it is aimed at are long
+  // enough to survive one. An OBB aspect ratio measures the same thing but needs rotating calipers,
+  // O(ring^2), where this is one O(ring) pass over vertices draw() already walks.
+  //
+  // 0.20 IS MEASURED, not picked. Over both corpora at the figure argv — 23 groups with 3+ members in
+  // view — the ratios form a low cluster {0.0011, 0.0718, 0.1493} and a body from 0.2879 up, and the
+  // two widest adjacent gaps in the entire distribution (2.08x and 1.93x) bracket exactly that band;
+  // 0.20 is its geometric midpoint. In shape terms it is a triangle about 8:1 base-to-height. Measured
+  // on the raw ring rather than the padded one drawn, so it is scale-invariant: HULL_PAD_PX is a screen
+  // quantity, and testing the padded shape would make an outline appear and disappear as the reader
+  // zooms — and the caption's count change with it.
+  var HULL_COMPACTNESS = 0.20;
   var labelDegreeOrder = [];     // the same set as an ARRAY in descending importance, so the declutter in
                                  // draw() places the ones that matter first and drops the collisions
   var MAX_LABELS = 24;
@@ -816,12 +847,25 @@ static const char kScriptDraw[] = R"JS(
     // sitting UNDER whatever --color-by the reader chose, and a hull that competes with the node colours
     // has taken the lens away from them.
     var hullAnchors = [];
-    hullsDrawn = 0;
-    for (var gi = 0; gi < hullGroups.length && hullsDrawn < MAX_HULLS; gi++) {
+    hullsDrawn = 0; hullsThin = 0; hullsImpure = 0;
+    for (var gi = 0; gi < hullGroups.length; gi++) {
       var grp = hullGroups[gi], gpts = [], mi;
       for (mi = 0; mi < grp.idx.length; mi++) { gpts.push({ x: nodes[grp.idx[mi]].x, y: nodes[grp.idx[mi]].y }); }
       var ring = convexHull(gpts);
-      if (ring.length < 3) { continue; }
+      // THE SHAPE TEST — see HULL_COMPACTNESS for the three streaks that made it necessary and for why
+      // 0.20. It runs FIRST because it is one O(ring) pass and the purity test below is O(N): a group
+      // that cannot be a region at all never costs a walk over every node in view. A ring of fewer than
+      // three points is the extreme case of the same defect — a fully collinear group, whose hull has no
+      // area whatsoever — and it lands in the same counted branch, where it used to be skipped silently.
+      var hullArea = 0, hullPerim = 0, hk;
+      for (hk = 0; hk < ring.length; hk++) {
+        var rb = ring[(hk + 1) % ring.length], rdx = rb.x - ring[hk].x, rdy = rb.y - ring[hk].y;
+        hullArea  += ring[hk].x*rb.y - rb.x*ring[hk].y;
+        hullPerim += Math.sqrt(rdx*rdx + rdy*rdy);
+      }
+      hullArea = Math.abs(hullArea)/2;
+      if (ring.length < 3 || !(hullPerim > 0) || 4*Math.PI*hullArea/(hullPerim*hullPerim) < HULL_COMPACTNESS) { hullsThin++; continue; }
+      if (hullsDrawn >= MAX_HULLS) { continue; }
       var gcx = 0, gcy = 0, hj;
       for (hj = 0; hj < ring.length; hj++) { gcx += ring[hj].x; gcy += ring[hj].y; }
       gcx /= ring.length; gcy /= ring.length;
@@ -845,7 +889,7 @@ static const char kScriptDraw[] = R"JS(
         var qn = nodes[qi];
         if (qn.x >= bx0 && qn.x <= bx1 && qn.y >= by0 && qn.y <= by1) { inside++; }
       }
-      if (inside > 0 && grp.idx.length/inside < HULL_PURITY) { continue; }
+      if (inside > 0 && grp.idx.length/inside < HULL_PURITY) { hullsImpure++; continue; }
       hullsDrawn++;
       ctx.beginPath();
       ctx.moveTo((ex[ex.length-1].x + ex[0].x)/2, (ex[ex.length-1].y + ex[0].y)/2);
@@ -1075,6 +1119,29 @@ static const char kScriptDraw[] = R"JS(
       ctx.fillStyle = '#fff';
       ctx.fillText(msg, sx+13, sy-2);
     }
+
+    // ---- WHAT THIS FRAME ACTUALLY CONTAINS, and re-caption if it moved.
+    //
+    // The caption's node and edge counts are the LOADED subset. The camera is free to sit anywhere
+    // inside it, and a picture exported after a zoom therefore stamped "120 nodes / 183 edges" across a
+    // frame holding fifteen — a bitmap overstating its own contents, in the one artifact the caption
+    // exists to travel in. (Found cutting the README's crop figures.) The count is of NODE CENTRES
+    // inside the canvas rect: a mark half off the edge is in frame, and counting it is the reading that
+    // errs toward the larger number rather than toward flattering the crop.
+    //
+    // The re-render is guarded on a CHANGE because the numbers renderProv states — this count and the
+    // three hull counts — are all computed here, one frame after the caption that reports them. On a
+    // settled page that is invisible; on an export taken straight after a zoom it is the previous view's
+    // numbers stamped onto the new one. Rebuilding the caption unconditionally would put an innerHTML
+    // write inside the settle loop at sixty frames a second, so it happens only when a stated number
+    // actually moved.
+    nodesInFrame = 0;
+    for (var fi = 0; fi < N; fi++) {
+      var fsx = nodes[fi].x*scale + ox, fsy = nodes[fi].y*scale + oy;
+      if (fsx >= 0 && fsx <= W && fsy >= 0 && fsy <= H) { nodesInFrame++; }
+    }
+    var provNow = nodesInFrame + ':' + hullsDrawn + ':' + hullsThin + ':' + hullsImpure;
+    if (provNow !== provStamp) { provStamp = provNow; renderProv(); }
   }
 
   // FILES[n.file] — the path, or an honest blank when the payload has no entry for it. FILES was emitted
@@ -1265,13 +1332,32 @@ static const char kScriptRouter[] = R"JS(
     if (!showCards) { document.getElementById('hits').style.display = 'none'; }
   }
 
-  // ---- the provenance caption. Two lines under the bar naming what this picture IS: the root it was
-  // built from, the ranker whose scores set the sizes, the top-k that bounded the selection and what
-  // fraction of the repository that is, the counts in the CURRENT view, and the colour metric. This tool
-  // states every truncation it makes in its XML header and the page stated nothing at all about itself —
-  // a screenshot of it could not be audited, which is exactly the disclosure the rest of the tool is for.
-  // The label rule goes here too: rule 2 of loadSubset deliberately shows one label per name, and a
-  // reader must not have to infer that from the picture.
+  // ---- the caption, in TWO HALVES, because they answer different questions and travel to different
+  // places.
+  //
+  // FACTS is what this picture IS: the root it was built from, the ranker whose scores set the sizes,
+  // the top-k that bounded the selection and what fraction of the repository that is, the counts in the
+  // current view, the colour metric, and any state that makes the picture provisional. This tool states
+  // every truncation it makes in its XML header and the page used to state nothing at all about itself —
+  // a screenshot could not be audited, which is exactly the disclosure the rest of the tool is for.
+  //
+  // METHOD is how to READ it: which way an arrow points, what a dashed shaft means and at what
+  // threshold, which nodes got labels, what each mark shape is, and how many module outlines were drawn
+  // of how many — with each truncation's own count and its own reason.
+  //
+  // WHY THEY SPLIT. Both halves used to be one block and stampProvenance burned all of it into the
+  // exported bitmap, which had reached three dense lines. A figure in a README gets three to five
+  // seconds, and the stamp font is FITTED to the bitmap width against an 8 px readability floor
+  // (stampProvenance), so every methodology clause added to it made the provenance it exists to carry
+  // physically smaller. Method is what a caption UNDERNEATH a figure says once, in prose; provenance is
+  // what has to survive the picture being lifted out of the page it came from. So the bitmap carries
+  // FACTS, and the export writes METHOD beside it as a .txt (see sidecarText) — where a README author
+  // can lift the wording verbatim rather than paraphrase it.
+  //
+  // Non-negotiable #3 is why the last FACTS line exists at all: it names the companion file AND every
+  // channel whose rule moved into it. A trimmed bitmap that said nothing about the trim would be a
+  // picture drawing arrowheads, dashes, shapes and outlines with no way to read any of them — the quiet
+  // omission this whole block was added to prevent, re-introduced by the fix for it.
   function renderProv() {
     var el = document.getElementById('prov');
     if (!el) return;
@@ -1279,54 +1365,73 @@ static const char kScriptRouter[] = R"JS(
     var metric = { lang: 'language', community: 'module (community)', cx: 'cyclomatic complexity',
                    churn: 'commits (' + (CHURN_WINDOW || 'window not recorded') + ')', tested: 'has a test' }[mode] || mode;
     var pct = SYM_TOTAL ? Math.round(1000*NODE_TOTAL/SYM_TOTAL)/10 : 0;
-    var l1 = k('root') + '<b>' + escHtml(ROOT || '.') + '</b>  ' +
-             k('ranker') + '<b>' + escHtml(RANKER) + '</b>  ' +
-             k('top-k') + '<b>' + TOPK + '</b> of ' + SYM_TOTAL + ' symbols (' + pct + '%)  ' +
-             k('map') + '<b>' + NODE_TOTAL + '</b> nodes / <b>' + EDGE_TOTAL + '</b> call edges';
     var viewName = currentView === 'overview' ? MODULES.length + ' modules'
                  : currentView === 'graph'    ? 'whole map'
                  : currentView === 'module'   ? 'module subgraph'
                  : 'depth-' + egoDepth + ' neighbourhood';
-    // Self-calls are counted in EDGE_TOTAL on line 1 and cannot be drawn (loadSubset says why). In a
-    // subset view nobody compares L against EDGE_TOTAL; in the whole-map view the two numbers sit on the
-    // same screen over the same node set, and an unexplained difference between them is precisely the
-    // silent inconsistency this caption exists to prevent.
-    var drops = ( currentView !== 'overview' && selfEdgesDropped > 0 )
+    var isGraph = ( currentView !== 'overview' && N > 0 );
+    // Self-calls are counted in EDGE_TOTAL and cannot be drawn (loadSubset says why). This clause is
+    // method-shaped but it stays with the FACTS, because it RECONCILES two counts that are both on the
+    // bitmap: in the whole-map view EDGE_TOTAL and L sit on the same screen over the same node set, and
+    // an unexplained difference between them is precisely the silent inconsistency this block prevents.
+    var drops = ( isGraph && selfEdgesDropped > 0 )
               ? ' (' + selfEdgesDropped + ' self-call' + (selfEdgesDropped === 1 ? '' : 's') + ' not drawn)' : '';
-    // The dashed shafts need a key, and it has to name the THRESHOLD and not just the word "low":
-    // "some of these edges are uncertain" is not a disclosure, it is a mood. Stated as a count so a
-    // reader can weigh it, and as a number so it means the same thing on every page.
-    var dashes = ( currentView !== 'overview' && lowConfEdges > 0 )
-               ? ', <b>' + lowConfEdges + '</b> dashed = resolver confidence below ' + (LOW_CONF/100).toFixed(2) : '';
-    // "caller → callee" is stated for the same reason every other fact on this line is: the picture now
-    // draws a direction, and a screenshot travelling without this caption would leave the reader to
-    // guess which end of an arrow is the one doing the calling.
-    var l2 = k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges, arrow points caller → callee' + dashes + drops) + '  ' +
-             k('colour') + '<b>' + escHtml(metric) + '</b>' + (mode === 'churn' && !CHURN_OK ? ' <b>unavailable (no git history)</b>' : '') + '  ' +
-             k('labels') + 'top ' + MAX_LABELS + ' by in-view degree, one per name' +
-             (settleTimedOut ? '  <b>settling…</b> (layout over the ' + SETTLE_BUDGET_MS + ' ms budget, still converging)'
-              : layoutStopped ? '  <b>layout stopped at step ' + SIM_STEPS + ' of ' + MAX_SIM + '</b> (the ' + LAYOUT_BUDGET_MS +
-                                ' ms layout budget is spent — positions are under-converged, drag to adjust)'
-              : '');
-    // Line 3 is the SHAPE key, and it is on the caption rather than in the bar's legend for one reason:
-    // the caption is what stampProvenance burns into the exported PNG. A picture that encodes symbol kind
-    // in its marks and travels without a way to read them is exactly the undisclosed channel this block
-    // exists to prevent — the same argument that put the ranker and the top-k here. It is built from
-    // SYM_SHAPES, the identical lookup draw() marks a node with, so the key cannot name a shape the
-    // picture does not draw; and it lists only the kinds actually IN THIS VIEW, because a fixed roster
-    // would print marks a reader can hunt for and never find.
-    // The HULL count is a truncation and is stated as one. MAX_HULLS caps how many module outlines are
-    // drawn because 26 overlapping regions is the hairball again in a second channel; a cap the picture
-    // does not admit to would leave a reader counting outlines and concluding the repository has twelve
-    // modules. `>=3 in view` is the other half of the same disclosure — a two-member module has no hull
-    // to draw, so it is absent from the picture for a reason the caption names rather than a reason the
-    // reader has to guess.
-    var hullNote = ( hullsTotal > 0 )
-                 ? '  ' + k('hulls') + hullsDrawn + ' of ' + hullsTotal + ' modules with ' + MIN_HULL_MEMBERS +
-                   '+ nodes in view (cap ' + MAX_HULLS + '; an outline enclosing mostly other modules is not drawn)'
-                 : '';
-    var l3 = ( currentView === 'overview' || N === 0 ) ? '' : k('shape') + shapeKey() + hullNote;
-    el.innerHTML = l3 ? ( l1 + '<br>' + l2 + '<br>' + l3 ) : ( l1 + '<br>' + l2 );
+
+    // ---- CAPTION FACTS. stampProvenance burns THIS half, and only this half, into the exported PNG.
+    var factLines = [];
+    factLines.push( k('root') + '<b>' + escHtml(ROOT || '.') + '</b>  ' +
+                    k('ranker') + '<b>' + escHtml(RANKER) + '</b>  ' +
+                    k('top-k') + '<b>' + TOPK + '</b> of ' + SYM_TOTAL + ' symbols (' + pct + '%)  ' +
+                    k('map') + '<b>' + NODE_TOTAL + '</b> nodes / <b>' + EDGE_TOTAL + '</b> call edges' );
+    // ...and how much of that the CAMERA is on. Absent when the camera frames the whole view, which is
+    // the auto-fit default and the case where the counts above already describe the frame; present the
+    // moment a zoom or a pan makes them describe more than the picture does (see draw()'s closing block).
+    var framing = ( isGraph && nodesInFrame < N ) ? ', camera framing <b>' + nodesInFrame + '</b>' : '';
+    factLines.push( k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges' + drops + framing) + '  ' +
+                    k('colour') + '<b>' + escHtml(metric) + '</b>' + (mode === 'churn' && !CHURN_OK ? ' <b>unavailable (no git history)</b>' : '') +
+                    (settleTimedOut ? '  <b>settling…</b> (layout over the ' + SETTLE_BUDGET_MS + ' ms budget, still converging)'
+                     : layoutStopped ? '  <b>layout stopped at step ' + SIM_STEPS + ' of ' + MAX_SIM + '</b> (the ' + LAYOUT_BUDGET_MS +
+                                       ' ms layout budget is spent — positions are under-converged, drag to adjust)'
+                     : '') );
+    if (isGraph) {
+      factLines.push( k('method') + 'arrow, dash, label, shape and module-outline rules → <b>' + escHtml(exportBase()) +
+                      '.txt</b> (saved with this image)' );
+    }
+
+    // ---- CAPTION METHOD. Rendered on the page and written to the companion .txt; NOT stamped.
+    var methodClauses = [];
+    if (isGraph) {
+      // "caller → callee" is stated for the same reason every other clause here is: the picture draws a
+      // direction, and a reader must not have to guess which end of an arrow is the one doing the calling.
+      methodClauses.push( 'arrow points caller → callee' );
+      // The dashed shafts need a key, and it has to name the THRESHOLD and not just the word "low":
+      // "some of these edges are uncertain" is not a disclosure, it is a mood. Stated as a count so a
+      // reader can weigh it, and as a number so it means the same thing on every page — and stated at
+      // zero too, because a zero here means "the resolver was sure of all of them", which is a result.
+      methodClauses.push( '<b>' + lowConfEdges + '</b> of ' + L + ' shafts dashed = resolver confidence below ' + (LOW_CONF/100).toFixed(2) );
+      // rule 2 of loadSubset deliberately shows one label per name; a reader must not infer that from the picture
+      methodClauses.push( 'labels top ' + MAX_LABELS + ' by in-view degree, one per name' );
+      // The shape key is built from SYM_SHAPES, the identical lookup draw() marks a node with, so it
+      // cannot name a shape the picture does not draw; and it lists only the kinds actually IN THIS
+      // VIEW, because a fixed roster would print marks a reader can hunt for and never find.
+      methodClauses.push( 'shapes ' + shapeKey() );
+      // EVERY HULL TRUNCATION, EACH WITH ITS OWN COUNT AND ITS OWN REASON. There are three and they are
+      // different failures: the cap (26 overlapping regions is the hairball again in a second channel),
+      // the SHAPE test (a near-collinear group draws a streak, not a region — see HULL_COMPACTNESS), and
+      // the PURITY test (an outline enclosing mostly other modules says nothing). Pooling them into one
+      // number would tell a reader that outlines are missing without telling them why, and a reader
+      // counting outlines against the module count is exactly who this line is for.
+      if (hullsTotal > 0) {
+        var hullWhy = [];
+        if (hullsThin > 0)   { hullWhy.push(hullsThin + ' dropped as too thin to read as a region'); }
+        if (hullsImpure > 0) { hullWhy.push(hullsImpure + ' dropped as enclosing mostly other modules'); }
+        methodClauses.push( 'module outlines <b>' + hullsDrawn + '</b> of ' + hullsTotal + ' modules with ' + MIN_HULL_MEMBERS +
+                            '+ nodes in view (cap ' + MAX_HULLS + (hullWhy.length ? '; ' + hullWhy.join('; ') : '') + ')' );
+      }
+    }
+    el.innerHTML = '<div id="provfacts">' + factLines.join('<br>') + '</div>' +
+                   ( methodClauses.length ? '<div id="provmethod">' + k('how to read') +
+                     '<span class="mc">' + methodClauses.join('</span> · <span class="mc">') + '</span></div>' : '' );
   }
 
   // the shape key's text: one entry per shape present, naming every kind that shares it (class/struct/
@@ -1537,8 +1642,12 @@ static const char kScriptRouter[] = R"JS(
   // other axis.
   var STAMP_MAX_LINES = 4, STAMP_LINE_H = 17, STAMP_TOP = 19, STAMP_BOT = 8;
   var STAMP_PAD = 14, STAMP_FONT_MAX = 13, STAMP_FONT_MIN = 8;
+  // #provfacts, not #prov: the bitmap carries what this picture IS and the companion .txt carries how to
+  // read it (renderProv says why the two halves split). Reading the whole caption here is what put three
+  // dense lines of methodology into every exported figure, shrinking the fitted stamp font against its
+  // 8 px floor until the provenance the stamp exists for was the smallest thing in the image.
   function stampLines() {
-    var el = document.getElementById('prov');
+    var el = document.getElementById('provfacts');
     return el ? el.innerText.split('\n').slice(0, STAMP_MAX_LINES) : [];
   }
   function stampHeight() { var n = stampLines().length; return n ? STAMP_TOP + STAMP_LINE_H*(n - 1) + STAMP_BOT : 0; }
@@ -1584,14 +1693,43 @@ static const char kScriptRouter[] = R"JS(
     stampProvenance(g, out.width/DPR, canvas.height/DPR);
     return out;
   }
+  // ONE basename for both files the export writes. It was inline in the click handler and is a function
+  // now because renderProv's last FACTS line has to name the .txt the export is about to write: two
+  // independently-built names are two names that drift, and a drifted one leaves a picture pointing at a
+  // file that is not the one beside it — a disclosure that reads as precise and is wrong.
+  function exportBase() {
+    var slug = (currentView === 'node' && centreGid >= 0) ? NODES[centreGid].label : (currentView || 'graph');
+    return 'ripwire-' + String(slug).replace(/[^A-Za-z0-9_.-]+/g, '_') + '-' + mode;
+  }
+  // The COMPANION FILE: the whole caption as plain text, provenance first and then the method half the
+  // bitmap no longer carries. Both halves, because this is the file a README author lifts the wording out
+  // of, and a sidecar holding only the part that moved would make them reassemble the sentence by hand.
+  //
+  // Built from the SAME DOM the page renders, not from a second set of strings: a plain-text copy of
+  // these clauses maintained beside the HTML ones is a second thing that can disagree with the picture,
+  // which is the argument that gave the hulls and the labels one placeTextAt instead of two.
+  function sidecarText() {
+    function textOf(id) { var e = document.getElementById(id); return e ? e.innerText : ''; }
+    var out = ['ripwire --html — provenance and method for ' + exportBase() + '.png', ''];
+    out = out.concat(textOf('provfacts').split('\n'));
+    var spans = document.querySelectorAll('#provmethod .mc');
+    if (spans.length) {
+      out.push('', 'how to read this picture');
+      for (var i = 0; i < spans.length; i++) { out.push('  ' + spans[i].innerText); }
+    }
+    return out.join('\n') + '\n';
+  }
+  function download(name, href) {
+    var a = document.createElement('a');
+    a.download = name; a.href = href;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
   document.getElementById('savePng').addEventListener('click', function() {
     if (canvas.style.display === 'none') { info.textContent = 'nothing to export from the module list — open Graph, a module or a symbol first'; return; }
     draw();                                     // guarantee the frame is current, not a stale hover state
-    var a = document.createElement('a');
-    var slug = (currentView === 'node' && centreGid >= 0) ? NODES[centreGid].label : (currentView || 'graph');
-    a.download = 'ripwire-' + String(slug).replace(/[^A-Za-z0-9_.-]+/g, '_') + '-' + mode + '.png';
-    a.href = exportBitmap().toDataURL('image/png');
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    var base = exportBase();
+    download(base + '.png', exportBitmap().toDataURL('image/png'));
+    download(base + '.txt', 'data:text/plain;charset=utf-8,' + encodeURIComponent(sidecarText()));
   });
 
   // boot
@@ -1903,6 +2041,11 @@ inline void writeDocumentShell( std::FILE* out )
         "        white-space:nowrap; overflow-x:auto; border-bottom:1px solid #222; }\n"
         "#prov b { color:#c8ccd2; font-weight:600; }\n"
         "#prov .k { color:#6f757e; }\n"
+        // The METHOD half of the caption, dimmed and ruled off from the FACTS above it. The two are
+        // separated visually on the page for the same reason they are separated in the export: one says
+        // what this picture is and the other says how to read it, and only the first is stamped into the
+        // bitmap. Both stay in #prov so chromeTop() keeps measuring the whole strip in one offsetHeight.
+        "#provmethod { color:#787f88; }\n"
         "#bar button { background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
         "              border-radius:4px; font-size:12px; cursor:pointer; }\n"
         "#bar button:hover { border-color:#7fb2ff; }\n"
