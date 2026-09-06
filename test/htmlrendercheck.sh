@@ -69,6 +69,9 @@
 #   (W) CAPTION SPLIT  the bitmap carries PROVENANCE and the methodology travels beside it in a
 #               companion .txt the same export writes — with the pointer that says so, and the control
 #               pair proving the clauses left one half and landed in the other rather than being deleted
+#   (Z) FIT vs DRAW  the auto-fit frames the node DISCS and their LABELS, measured through placeLabel's
+#               own constants and solved as a feasibility interval — not the bounding box of centres
+#               against a flat pad, which shipped a sliced symbol name in the README's own figure
 #   (Y) ROOT LABEL  the operator's home directory reaches neither the exported pixels nor the emitted
 #               FILE — stripped by position (both segments, not a tail), with the mutation control that
 #               proves the grep can see a leak and the counter-control that a non-home root survives intact
@@ -1221,6 +1224,49 @@ if [ -n "$wmax" ] && [ "$wfacts" -gt 0 ] && [ "$wfacts" -le "$wmax" ]; then
 else
     no "(W10) the stamped half is ${wfacts:-0} lines against a ${wmax:-unset}-line ceiling — a line would be dropped from the bitmap with nothing to say so"
 fi
+
+# ── (Z) THE FIT FRAMES WHAT IT DRAWS, not where the centres are ──────────────────────────────────────
+# fitView used to fit the bounding box of node CENTRES against a flat 70 px pad. That is a different set
+# from what lands on the canvas: a node is a disc, and a labelled node carries its name to the RIGHT in
+# screen-constant 11 px text, which for `generate_deleted_models` is 130 px the centre-box knows nothing
+# about. The pad hid it until a wide name happened to sit on the right edge — and then the README's own
+# lens figure shipped with a symbol's name sliced in half by the frame. It is not fixable downstream
+# either: the frame is what the README's stated command produces, so hand-panning the screenshot would
+# publish a picture that command does not make.
+#
+# WHAT THESE ARMS CAN AND CANNOT SEE. The property is "nothing drawn falls outside the canvas", and it
+# is only decidable by running the page's own layout with real font metrics — there is no JS engine in
+# this suite, and adding one would make every gate depend on a host tool the build deliberately does not
+# need. So these arms assert the MECHANISM, not the pixels: that the fit measures the same text
+# placeLabel draws, through the same constants, and picks the camera from a feasibility interval rather
+# than a centre formula. Pixel containment was verified out-of-band while cutting the figures, by
+# walking every labelled node's drawn box against the canvas rect in a browser (0 overflowing, at
+# 880x500 and 430x340). That is a measurement, not a gate, and it is recorded as one.
+inbody fitView 'measureText'                    'measureText'          "(Z1) the fit MEASURES the label text rather than estimating it from a character count"
+inbody fitView 'nodeRadiusPx'                   'nodeRadiusPx'         "(Z2) and includes the node's drawn radius, so a disc cannot hang over the edge either"
+inbody fitView 'labelDegreeOrder'               'labelDegreeOrder'     "(Z3) over the SAME label set the draw pass will place (labelDegreeOrder)"
+inbody fitView 'LABEL_GAP_PX'                   'LABEL_GAP_PX'         "(Z4) using placeLabel's own gap constant, so the two cannot disagree about where a name starts"
+inbody fitView 'offsetRange'                    'offsetRange'          "(Z5) the offset comes from a feasibility interval over every reserved box"
+inbody fitView 'fits\('                         'fits('                "(Z6) and the scale is the largest one that interval stays non-empty at"
+# (Z7) THE CONSTANTS ARE SHARED, NOT COPIED. Two numbers for one gap is how the fit drifts away from the
+# draw: the fit would keep reserving 3 px after placeLabel moved to 5 and nothing would fail. Assert each
+# is declared exactly once in the whole renderer, which is what makes (Z4)'s "same constant" true.
+for zc in LABEL_GAP_PX LABEL_BASE_PX LABEL_H; do
+    zdecl="$( grep -cE "var [A-Z_, =0-9.]*\b$zc = " "$XSRC" || true )"
+    if [ "$zdecl" = "1" ]; then
+        ok "(Z7:$zc) declared exactly once — the fit and the draw read one number"
+    else
+        no "(Z7:$zc) declared $zdecl times — a second definition lets the fit reserve what the draw no longer uses"
+    fi
+done
+# (Z8) THE OLD FIT IS GONE FROM THE MAIN PATH. It survives as the explicit fallback for a canvas too
+# small to hold the boxes at all, so this asserts the shape of that: the centre-box formula appears, and
+# it appears under a guard, not as the function's answer.
+inbody fitView 'if \(!fits\(loS\)\)'            'if (!fits(loS))'      "(Z8) the centre-box formula survives only behind the cannot-fit guard, as a disclosed fallback"
+# (Z9) MUTATION CONTROL FOR THE PAD. A pad that never yields would reintroduce the clipping on a narrow
+# canvas by a second route — no scale fits, so the fallback fires and the label is sliced again. The
+# concession must be in the code, and it must be to the PAD.
+inbody fitView 'pad /= 2'                       'pad /= 2'             "(Z9) padding yields before containment does — the pad halves until a fit exists"
 
 # ── (Y) THE ROOT LABEL — the operator's home directory reaches neither the pixels nor the file ───────
 # The first cut of this fix stripped the home pair in the JS that renders the CAPTION, and stopped

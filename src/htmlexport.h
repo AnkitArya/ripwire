@@ -522,6 +522,9 @@ static const char kScriptSim[] = R"JS(
   var MIN_NODE_PX = 4.0, MAX_NODE_PX = 15.0;
   var LABEL_HALO_PX = 3.0;       // the dark outline stroked behind every label (see placeLabel)
   var LABEL_CULL_PX = 2000;      // a label anchored further than this off-canvas is skipped (see placeLabel)
+  var LABEL_H = 13;              // how tall a drawn label actually is — placeTextAt reserves rows with it
+  var LABEL_GAP_PX = 3;          // placeLabel's gap between a node's edge and the first glyph of its name
+  var LABEL_BASE_PX = 4;         // ...and how far BELOW the node centre that name's baseline sits
   // THE INTEGRATOR'S STABILITY LIMIT, and the freeze that came of not having one.
   //
   // The spring term is LINEAR in distance with no cap, so a node's effective stiffness scales with its
@@ -720,20 +723,103 @@ static const char kScriptSim[] = R"JS(
     renderProv();
   }
 
-  // frame ALL nodes into the viewport with padding. Called each settling frame (while autoFit) so the graph
-  // is visible no matter how far the force sim spreads it; the user taking control (pan/zoom/drag) stops it.
+  // frame everything the page DRAWS into the viewport. Called each settling frame (while autoFit) so the
+  // graph is visible no matter how far the force sim spreads it; the user taking control stops it.
+  //
+  // It used to fit the bounding box of node CENTRES against a flat 70 px pad, and that is not the same
+  // set as what lands on the canvas. A node is a disc of up to MAX_NODE_PX, and a labelled node also
+  // carries its name to the RIGHT, in screen-constant 11 px text — `generate_deleted_fields` is 130 px
+  // of glyphs that the centre-box knows nothing about. The flat pad absorbed the discs and roughly one
+  // short name, so the defect only appears when a wide label happens to sit on the right edge: the
+  // README's own lens figure shipped with a name sliced in half by the frame. Worse, it is not fixable
+  // downstream — the frame is what the stated command produces, so a hand-panned screenshot would be a
+  // picture the README's own reproduction line does not make.
+  //
+  // Reserve the drawn EXTENT per node instead, and solve for the largest scale that fits all of them.
+  // The extents are screen-constant (radii and label metrics are both in screen px, deliberately — see
+  // placeTextAt), so they do not move as `scale` does, which is what makes the solve exact rather than
+  // iterative-until-it-looks-right: for a given s, node i occupies [x_i*s + ox - Lft_i, x_i*s + ox +
+  // Rgt_i], so the admissible ox is an interval, feasibility is that interval being non-empty, and
+  // feasibility is monotone in s. Binary-search s, then take the interval's midpoint, which centres the
+  // drawn content — not the centres — in the frame.
+  //
+  // Hull NAMES are not reserved: their anchors are computed in screen space during the hull pass, which
+  // needs the camera this function is choosing. The right margin a labelled node reserves absorbs most
+  // of that, and a clipped hull name is one word of a region title rather than a symbol's identity.
+  // The frame's own breathing room, on top of every reserved box — a FRACTION of the shorter side, not a
+  // pixel count, so a thumbnail and a full-width figure get the same visual air rather than the same
+  // number of pixels. A fixed pad reads as generous at 430 px and as a hairline at 1600. Floored so a
+  // very small canvas still gets a margin at all; the graph is meant to sit IN the frame, not against it.
+  var FIT_PAD_FRAC = 0.13, FIT_PAD_MIN_PX = 18;
+  function fitPad() { return Math.max(FIT_PAD_MIN_PX, FIT_PAD_FRAC*Math.min(W, H)); }
   function fitView() {
     if (!N) return;
-    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    ctx.font = '11px sans-serif';                       // placeLabel's font — measure what IT will draw
+    var lft = new Float64Array(N), rgt = new Float64Array(N);
+    var top = new Float64Array(N), bot = new Float64Array(N);
     for (var i = 0; i < N; i++) {
-      var n = nodes[i];
-      if (n.x < minX) minX = n.x;  if (n.x > maxX) maxX = n.x;
-      if (n.y < minY) minY = n.y;  if (n.y > maxY) maxY = n.y;
+      var rp = nodeRadiusPx(nodes[i]);
+      lft[i] = rp; rgt[i] = rp; top[i] = rp; bot[i] = rp;
     }
-    var pad = 70, gw = Math.max(1, maxX-minX), gh = Math.max(1, maxY-minY);
-    scale = Math.max(0.05, Math.min((W-2*pad)/gw, (H-2*pad)/gh, 2.0));
-    ox = (W - scale*(minX+maxX))/2;
-    oy = (H - scale*(minY+maxY))/2;
+    for (var li = 0; li < labelDegreeOrder.length; li++) {
+      // The declutter grid may still drop some of these; reserving for a label that is then skipped only
+      // zooms out a hair, while NOT reserving for one that is drawn slices it. Over-reserve, deliberately.
+      var k = labelDegreeOrder[li], rpk = nodeRadiusPx(nodes[k]);
+      rgt[k] = Math.max(rgt[k], rpk + LABEL_GAP_PX + ctx.measureText(nodes[k].label).width);
+      top[k] = Math.max(top[k], LABEL_H - LABEL_BASE_PX);
+      bot[k] = Math.max(bot[k], LABEL_BASE_PX + 2);
+    }
+
+    // The admissible offset interval on one axis at scale s, or null when no offset fits every box.
+    function offsetRange(s, pad, axisY, extent) {
+      var lo = -Infinity, hi = Infinity;
+      for (var i = 0; i < N; i++) {
+        var q = ( axisY ? nodes[i].y : nodes[i].x ) * s;
+        var before = axisY ? top[i] : lft[i], after = axisY ? bot[i] : rgt[i];
+        var l = pad + before - q;                      if ( l > lo ) { lo = l; }
+        var h = extent - pad - after - q;              if ( h < hi ) { hi = h; }
+      }
+      return lo <= hi ? [lo, hi] : null;
+    }
+
+    // PADDING IS A PREFERENCE; CONTAINMENT IS THE PROPERTY. On a narrow canvas one long name can be most
+    // of the width — `_get_altered_foo_together_operations` measures ~200 px against a 430 px figure — so
+    // the proportional pad plus that label can be wider than the frame, at which point NO scale fits and
+    // the graph would fall back to the old clipping fit. Give the pad up before giving up containment:
+    // halve it until a fit exists. The generous margin survives wherever there is room for it, which is
+    // every full-width figure, and a cramped thumbnail loses air rather than losing a symbol's name.
+    var pad = fitPad();
+    while (pad > 0.5 && !(offsetRange(0.05, pad, false, W) && offsetRange(0.05, pad, true, H))) { pad /= 2; }
+    if (pad <= 0.5) { pad = 0; }
+    function fits(s) { return offsetRange(s, pad, false, W) !== null && offsetRange(s, pad, true, H) !== null; }
+
+    var loS = 0.05, hiS = 2.0;
+    if (!fits(loS)) {
+      // Even the floor cannot hold the drawn boxes (a canvas smaller than one label, say). Fall back to
+      // the centre-box fit rather than emitting a NaN camera, and let the picture overflow visibly.
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (var j = 0; j < N; j++) {
+        var n = nodes[j];
+        if (n.x < minX) minX = n.x;  if (n.x > maxX) maxX = n.x;
+        if (n.y < minY) minY = n.y;  if (n.y > maxY) maxY = n.y;
+      }
+      scale = loS;
+      ox = (W - scale*(minX+maxX))/2;
+      oy = (H - scale*(minY+maxY))/2;
+      return;
+    }
+    if (!fits(hiS)) {
+      for (var it = 0; it < 24; it++) {                 // 2.0 halved 24 times resolves scale to ~1e-7
+        var mid = (loS + hiS)/2;
+        if (fits(mid)) { loS = mid; } else { hiS = mid; }
+      }
+    } else {
+      loS = hiS;                                       // a tiny graph: the 2.0 ceiling is the binding limit
+    }
+    scale = loS;
+    var rx = offsetRange(scale, pad, false, W), ry = offsetRange(scale, pad, true, H);
+    ox = (rx[0] + rx[1])/2;                            // centre the DRAWN content, not the centres
+    oy = (ry[0] + ry[1])/2;
   }
 
   // --- simulation ---
@@ -1217,7 +1303,7 @@ static const char kScriptDraw[] = R"JS(
     // rather than estimated from the character count (an estimate that runs short reserves less than it
     // draws, which is the same collision by a second route).
     var labelCells = new Set();
-    var CELL_W = 8, CELL_H = 16, LABEL_H = 13;
+    var CELL_W = 8, CELL_H = 16;                          // LABEL_H is hoisted — fitView reserves with the same number
     // placeTextAt is the whole placement rule — cull, reserve, halo, draw — with no idea what the text
     // is FOR. It was placeLabel(i) and nothing else until the hulls needed names too; a second copy for
     // hull labels would have been a second occupancy grid's worth of behaviour that could disagree with
@@ -1251,7 +1337,7 @@ static const char kScriptDraw[] = R"JS(
     }
     function placeLabel(i) {
       var n = nodes[i], rpx = nodeRadiusPx(n);              // rpx is already a SCREEN radius
-      return placeTextAt(n.label, n.x*scale + ox + rpx + 3, n.y*scale + oy + 4,
+      return placeTextAt(n.label, n.x*scale + ox + rpx + LABEL_GAP_PX, n.y*scale + oy + LABEL_BASE_PX,
                          '#e6e9ee', (hl && !hl.has(i)) ? 0.25 : 0.95);
     }
     // Hull names go in FIRST, through the same grid: a region's name outranks any single symbol's,

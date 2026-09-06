@@ -105,7 +105,7 @@ the top 10 on **58.3%** of instances — the best alternative lands 40.0% — wh
 
 ### See the map — not just the numbers
 
-<p align="center"><img src="docs/assets/graph-cx.png" alt="ripwire --html on Django's migration autodetector: 120 symbols, 183 call edges, arrows pointing caller to callee, nodes coloured by cyclomatic complexity on a five-stop blue-to-yellow scale, module outlines drawn as translucent regions, and low-confidence call edges drawn with dashed shafts" width="880"></p>
+<p align="center"><img src="docs/assets/graph-cx.png" alt="ripwire --html on Django's migration autodetector: 120 symbols, 183 call edges, arrows pointing caller to callee, nodes coloured by cyclomatic complexity on a five-stop scale running deep blue, mid blue, amber, orange, pale yellow, module outlines drawn as translucent regions, and low-confidence call edges drawn with dashed shafts" width="880"></p>
 
 <p align="center"><sub><b>Django's migration autodetector, coloured by complexity.</b> Thresholds are fixed, so the colour means the same thing on every repo you point it at.</sub></p>
 
@@ -120,7 +120,7 @@ ripwire path/to/django/db/migrations --rank-by=rrf --top-k=120 --color-by=cx --h
 </tr>
 <tr>
 <td><sub><b>The same graph, re-coloured by git churn.</b> 76% of these nodes move to a different band — structure and history disagree, and one run shows you both.</sub></td>
-<td><sub><b>A dashed shaft is a guess.</b> 40 of 183 edges here fall below the resolver's confidence bar. No other tool marks which of its arrows it is unsure about.</sub></td>
+<td><sub><b>A dashed shaft is a guess.</b> 31 of 183 edges here are one arm of a split the resolver could not choose between. No other tool marks which of its arrows it is unsure about.</sub></td>
 </tr>
 </table>
 
@@ -132,7 +132,7 @@ One self-contained HTML file (`--html[=FILE]`), no server, no CDN, no external a
 Read from the figures above, which state their own rules in a sidecar saved beside each image:
 
 - **arrow points caller → callee** — the graph is directed, and the page draws it that way.
-- **`40 of 183 shafts dashed = resolver confidence below 0.20`** — per *edge*, not per symbol. A symbol-level "this function makes some ambiguous calls" would mark every one of its edges, which would be a lie about most of them.
+- **`31 of 183 shafts dashed in this view = the resolver could not choose between same-name definitions and split the call over all of them`** — per *edge*, not per symbol. A symbol-level "this function makes some ambiguous calls" would mark every one of its edges, which would be a lie about most of them.
 - **labels: top 24 by in-view degree, one per name** — one label per distinct name, so a picture of a container class stops crowding out the functions you asked about.
 - **shapes: ● fn ■ cls ✚ var** — kind is nominal data on a nominal channel; complexity never uses shape.
 - **module outlines: `7 of 12 modules with 3+ nodes in view (cap 12; 3 dropped as too thin to read as a region; 2 dropped as enclosing mostly other modules)`** — three separate truncations, each with its own count and its own reason.
