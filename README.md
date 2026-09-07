@@ -11,34 +11,43 @@
 
 ## Give your coding agent a map before it reads the repo.
 
-**ripwire is the ripgrep of AI context.** Point it at any repository and your agent gets a ranked,
-deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
-around and reading whole files.
+**ripwire is a local code-navigation CLI for coding agents.** It parses source files and ranks
+symbols and call relationships, helping an agent find relevant code, inspect callers, and choose
+tests before making a change. It returns structured output rather than a prose summary of your code.
+
+It runs offline as one self-contained binary: no API key, embeddings, or index server required.
+Use the CLI from any shell-capable agent, or connect through the optional [MCP server](#set-it-up-in-your-coding-agent).
+
+**Start here:** [Install or build](#quickstart) · [Agent setup](#set-it-up-in-your-coding-agent) ·
+[Command reference](docs/COMMANDS.md) · [Measurements](#measured) · [Known limits](#the-honesty-contract)
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
 JavaScript · Java · Ruby · PHP · Lua · Elixir · Bash · C# · JSON · TOML · YAML · Markdown — see
 [language support and limits](#languages).
 
-### No API key. No embeddings. No index server. No daemon.
+### Try it on your repository
 
-One self-contained binary on your own machine, offline, installed in one line — and the same line
-installs *and activates* the task-shaped skills that teach your agent *when* to reach for it, not
-just how, for every agent it finds on the machine. If your
-agent can run shell commands — Claude Code, Codex, Cursor, Windsurf, Gemini, opencode, aider — it is
-set up the moment the install finishes; [the MCP server is the optional second
-interface](#set-it-up-in-your-coding-agent). Install it and ask it something before you finish
-reading this page:
+[Install ripwire](#quickstart), then run these from your repository's root:
 
 ```bash
-RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
-export PATH="$HOME/.local/bin:$PATH"      # where it installed; the installer prints this line if you need it
-cd your-repo
-ripwire . --for="<the change you are about to make, in words>"
+ripwire . --max-tokens=3000                       # ranked overview — start here
+ripwire . --for="incremental cache invalidation"  # find code relevant to a task
+ripwire . --callers=someFunction                  # inspect a function's callers
 ```
+
+Replace the task text and `someFunction` with a change and a function from your own code.
+The output is minified XML for your agent, with file paths, line numbers, and a legend explaining
+the attributes. The overview uses an estimated token budget; a task query can return more context.
+For a known symbol, use a targeted command such as `--callers` rather than repeating a broad task query.
+
+Call resolution and language coverage have [limits](#languages). Treat the map as a navigation aid,
+not proof that every caller or test has been found.
+
+### Example: a task query on ripwire itself
 
 One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks, and
 the tests that reach them. The task is yours to phrase — ask about *your* code, not ours. Run on this
-repository (2026-08-30) with `--for="incremental cache invalidation"`, that last line answers in about
+repository (2026-08-30) with `--for="incremental cache invalidation"`, the task query answers in about
 4.3K tokens with:
 
 *This is what the output looks like, not the token-savings recipe.* A bare `--for` on every question
