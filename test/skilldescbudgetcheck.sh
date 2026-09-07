@@ -12,6 +12,7 @@
 # reads; bench/skilldesc_budget.py is the measurement and this gate's body.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 fail=0
 ok()  { echo "  ok   $*"; }
 no()  { echo "  FAIL $*"; fail=1; }
@@ -39,6 +40,14 @@ lens="$( python3 "$ROOT/bench/skilldesc_budget.py" "$tmp/a" --limit=320 | awk 'N
 [ "$lens" = "18 " ] \
     && ok "block-scalar and inline descriptions measure identically (18 chars, marker excluded)" \
     || no "measurement disagrees between block-scalar and inline forms: '$lens'"
+
+# the binary's own skill discovery must see the same set the measurement measured: --eval-skills reports
+# K = candidate skills (ripwire-router excluded); a stub or stale binary, or a SKILL.md the binary cannot
+# parse, breaks the agreement here rather than passing on the Python arm alone
+k="$( "$BIN" "$ROOT/skills" --eval-skills="$ROOT/test/skillevalfix/prompts.tsv" --no-cache 2>/dev/null | sed -n 's/.*over K=\([0-9]*\) candidate skills.*/\1/p' | head -1 )"
+[ -n "$k" ] && [ -n "$count" ] && [ "$k" -eq $(( count - 1 )) ] \
+    && ok "the binary discovers K=${k} candidate skills = ${count} SKILL.md minus the router" \
+    || no "the binary's --eval-skills sees K=${k:-?} candidate skills but the tree holds ${count:-?} SKILL.md (router excluded expects $(( ${count:-1} - 1 )))"
 
 [ "$fail" -eq 0 ] && echo "skilldescbudgetcheck: ALL PASS" || echo "skilldescbudgetcheck: FAILURES"
 exit "$fail"

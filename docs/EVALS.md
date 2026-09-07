@@ -2411,12 +2411,12 @@ listing budget and ~26% of a 272K-window Codex budget. `test/skilldescbudgetchec
 - **C1** — the rewritten set, same 17 routable skills + router, every description ≤ 320. **D1** (C1
   head-cut at 350) is C1 by construction; equality is verified mechanically, not measured twice.
 - **C2** — C1 with `ripwire-efficient` folded into `ripwire-orient` (K = 16): a measurement copy only
-  (`bench/skilldesc_arms.py --fold=ripwire-efficient:ripwire-orient`; the corpus copy gets the
+  (`bench/skilldesc_arms.py`, fold mode `ripwire-efficient:ripwire-orient`; the corpus copy gets the
   mechanical label map efficient→orient, permitted sets collapse duplicates); built for real only if
   it wins.
 
 **Held-out set.** `test/skillevalfix/prompts.tsv`, split=test ∩ provenance=judged, **n = 85 positive
-rows**, plus the 53 split=test negatives for the fire rate (`bench/skilldesc_arms.py --heldout`).
+rows**, plus the 53 split=test negatives for the fire rate (`bench/skilldesc_arms.py`, heldout mode).
 Corpus sealed at sha256 `16b1c84724a15d41717c588663db36c8569bd7b753701732cf5566560e798b7d` (also in
 `test/skillevalfix/PROVENANCE.md`); no row is added, edited or relabeled for measurement.
 
@@ -2558,7 +2558,7 @@ where growth buys routing. The landed set is exactly the rated text: C1's 16 des
 its body is `skills/ripwire-orient/map-before-you-read.md`, `compress-ladder.md` moved beside it, the
 router's four rows and `--help-task`'s `compact-legend` intent name orient, the corpus's 12 rows carry the
 mechanical relabel (RELABEL log; new seal `9262a1b6…` in `test/skillevalfix/PROVENANCE.md`), the count
-sites read seventeen, and the source-build installer clears its staged skills dir before `cmake --install`
+sites read seventeen, and the source-build installer clears its staged skills dir before cmake's install step
 (the stale-directory hole the audit found). **Final size: 17 skills, 5,127 chars (−72%), every one ≤ 320,
 ≈1,280 tokens.** Lexical arm on the landed set: bm25-desc split=test **62.3% / 0.898** (dev 79.4% / 0.925,
 judged 97/152, for-routed 91/152); held-out judged bm25-desc **44/85** (today's full 51, today's head-cut
