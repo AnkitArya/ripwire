@@ -41,6 +41,10 @@ the tests that reach them. The task is yours to phrase — ask about *your* code
 repository (2026-08-30) with `--for="incremental cache invalidation"`, that last line answers in about
 4.3K tokens with:
 
+*This is what the output looks like, not the token-savings recipe.* A bare `--for` on every question
+is the most expensive way to use this tool — see [Where it pays most](#where-it-pays-most-and-where-it-does-not)
+and the three controls below it.
+
 - **The ranked symbols, in rank order** — the cache-header constant `kCacheMagic` first (with its doc
   comment quoted in place and the one `next=` call that opens it), then `spanTierMemoPath` (the
   cache-path composer), `ingestCommitTree`, … `ingest` — each row with its file, line, and signature.
@@ -524,12 +528,20 @@ to do with it.** Two shapes get the most out of it, and one gets nothing.
   was needed, so a narrow lookup in a file you can already name is cheaper without it. `--help-task`
   exists to make that call, and a flat ranking says `confidence="low"` rather than pretending.
 
-**What is measured and what is not, stated plainly.** The per-question figures above and in
-[Measured](#measured) are single-agent measurements. The claim that the saving grows with the number
-of cold orientations is **reasoning from the fixed-cost mechanism, not a published result** — it is
-[pre-registered and not yet run](docs/EVALS.md). An independent third-party A/B on six read-only
-localization tasks found ripwire at 83.5% of baseline overall but *more* expensive on three of the
-six, which is exactly what the third bullet predicts. Until the scaling round runs, treat the
+**Getting the saving takes three things, and a bare `--for` is none of them.**
+
+1. **A budget.** `--token-budget=N` caps the bundle; `--top-k=N` caps the rows. Unbudgeted `--for` returns
+   a rich terminal bundle by design — right when it ends the question, wasteful when it does not.
+2. **Routing.** `ripwire . --help-task="<task>"` names the ONE command the task actually wants, and
+   abstains when the evidence is thin. It is advice, it never runs anything. An answer of "just grep
+   for it" is a correct answer and the tool will give it.
+3. **The skills.** `skills/install.sh` teaches an agent *when* to reach for which verb. Without them
+   an agent has 175 flags and no map of which moment each is for, and it will reach for the map every
+   time — including the times it should not.
+
+**What is measured and what is not.** The per-question figures above and in [Measured](#measured) are
+single-agent measurements. That the saving grows with the number of cold orientations follows from the
+fixed-cost mechanism but is **not a published result** — it is pre-registered and unrun. Treat the
 single-agent numbers as the measured ones.
 
 ### Better Code: It automates the review judgments nobody has time to make — every lens from published research
