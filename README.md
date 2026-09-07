@@ -508,6 +508,30 @@ warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessin
 
 </details>
 
+### Where it pays most, and where it does not
+
+**A map is a fixed cost paid once per context, so it pays in proportion to what that context goes on
+to do with it.** Two shapes get the most out of it, and one gets nothing.
+
+- **Orienting a context that does not know the repository.** This is the strongest case, and it is
+  strongest of all under an orchestrator that matches tasks to models: every lane it spawns starts
+  cold on the same tree, and each one would otherwise re-derive the same structure from scratch. The
+  map is the one artifact that does not have to be rediscovered per agent.
+- **The checking pass at the end.** `--quality-delta`, `--test-gate` and `--edit-check` answer
+  questions — *what did I make worse, which tests must run, did I change a contract* — that an agent
+  cannot answer by reading more source, at any budget.
+- **It does not pay on a question one `grep` already answers.** The map is charged whether or not it
+  was needed, so a narrow lookup in a file you can already name is cheaper without it. `--help-task`
+  exists to make that call, and a flat ranking says `confidence="low"` rather than pretending.
+
+**What is measured and what is not, stated plainly.** The per-question figures above and in
+[Measured](#measured) are single-agent measurements. The claim that the saving grows with the number
+of cold orientations is **reasoning from the fixed-cost mechanism, not a published result** — it is
+[pre-registered and not yet run](docs/EVALS.md). An independent third-party A/B on six read-only
+localization tasks found ripwire at 83.5% of baseline overall but *more* expensive on three of the
+six, which is exactly what the third bullet predicts. Until the scaling round runs, treat the
+single-agent numbers as the measured ones.
+
 ### Better Code: It automates the review judgments nobody has time to make — every lens from published research
 
 `--quality-panel` runs the calls a good reviewer makes by hand — is this function too tangled, is it
