@@ -181,6 +181,23 @@ run_install "$EH1" "$TMP/prefix-e1"
     && ok "(E6) a second run is clean and leaves the activation in place" \
     || no "(E6) re-running the installer broke the activation (rc=$E_RC)"
 
+# (E7) Hermes present -> its skills are ACTIVE via $HERMES_HOME (the install block's detection signal).
+# Mirrors (E1)/(E2): Hermes home created in an isolated HOME, the release installer must activate the
+# ripwire skills there, and must NOT invent a Claude dir for an agent that is not installed.
+EH7="$TMP/home-hermes"; mkdir -p "$EH7/.hermes"
+run_install "$EH7" "$TMP/prefix-e7" HERMES_HOME="$EH7/.hermes"
+[ "$E_RC" -eq 0 ] && ok "(E7) install succeeds with Hermes present (HERMES_HOME=$EH7/.hermes)" \
+    || no "(E7) install failed with Hermes present: $( tail -1 "$TMP/e.err" )"
+[ -e "$EH7/.hermes/skills/ripwire-router" ] \
+    && ok "(E7) Hermes skills are ACTIVE after the one-liner, not merely staged" \
+    || no "(E7) Hermes was detected but its skills were left staged"
+grep -qi 'Hermes' "$TMP/e.out" \
+    && ok "(E7) the run reports the Hermes activation on the receipt line" \
+    || no "(E7) the run did not print a Hermes activation receipt"
+[ ! -d "$EH7/.claude/skills" ] \
+    && ok "(E7) an agent that is NOT installed is not given a Claude skills directory" \
+    || no "(E7) the installer created ~/.claude/skills for an agent that is not installed"
+
 # ── (F) THE UPGRADE PATH LEAVES A BINARY THAT RUNS ──────────────────────────────────────────────────
 # (E6) above re-ran the installer over an existing prefix and called it "clean" on the strength of an
 # exit code and a symlink. On 2026-09-06 that exact upgrade -- 0.3.8 to 0.4.0 into /opt/homebrew/bin on
