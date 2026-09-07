@@ -911,14 +911,14 @@ inline std::string renderFileTailJson( const FileTail& t, std::size_t shownCap )
 // dialect subtracts EXACTLY the bytes the clause adds (the kForAutoBundleLegend pattern). No "--" anywhere:
 // it rides inside an XML comment where "--" is ill-formed (G4).
 inline constexpr std::string_view kForFileTailLegend =
-    "; tail: file-grain tail, WEAKER evidence than the ranked rows (paths only): the remaining candidate "
-    "files with a positive score, best-symbol rank order; rows are t p=file; total=candidate files, "
+    "; tail: file-grain tail, WEAKER evidence than the ranked rows (paths only): every positive-score file "
+    "NOT among the shown sigs rows — the files of trimmed rows first, best-symbol rank order; rows are t p=file; total=such files, "
     "shown=printed, capped=1 when they differ. r= on a ranked row is its 1-based rank in this lens ranking, "
     "rows in r= order, p= the file (a gap = a budget-trimmed row)";
 // P1 (L7): the same two definitions for the compact dialect (verbs_for.h appendCompactForLegend) — nothing dropped,
 // the sentences shortened: the tail is file-grain and weaker, its counts are total/shown/capped, r= is the rank.
 inline constexpr std::string_view kForFileTailLegendCompact =
-    "; tail: file-grain tail (paths only, WEAKER than the ranked rows): <t p=> rows, total=/shown=/capped=1 when cut; "
+    "; tail: file-grain tail (paths only, WEAKER than the ranked rows): every positive-score file not among the shown sigs rows, trimmed rows' files first; <t p=> rows, total=/shown=/capped=1 when cut; "
     "r= = a ranked row's 1-based lens rank, rows in r= order, p= the file (a gap = a budget-trimmed row)";
 
 // Explicit-budget row fit: the largest shown count whose rendered XML fits `budgetBytes` (0 rows always
@@ -3400,6 +3400,26 @@ inline void trimSigLadder( std::vector<EntryT>& entries, std::vector<FileT>& fil
 // test/fixedbufsweep.sh's population sweep instead: a new sig/body emitter shows up there as an
 // unclassified site. Reordering the parameter list is the real fix and belongs to a round that owns all four
 // files at once.
+// H2H-Graft lane 2 (2026-09-07): the ids of the sigs rows a packer actually EMITTED, in emitted order — ONE
+// mapping for both dialects (globalRank is 1-based into the packer's (score desc, id asc) `order`). The file-grain
+// tail used to exclude every file of the 40-candidate SURFACE, so a row the byte ladder trimmed (rank 5..40)
+// appeared in neither section: on rocksdb three single-file answers at candidate rank 5/10/5 were served
+// nowhere. The tail now excludes only the files of these rows (computeFileTail's headIds).
+inline void resetShownSigIds( std::vector<NodeId>* shownIdsOut )
+{
+    if( shownIdsOut )
+    {
+        shownIdsOut->clear();
+    }
+}
+inline void pushShownSigId( std::vector<NodeId>* shownIdsOut, const std::vector<NodeId>& order, std::uint32_t globalRank )
+{
+    if( shownIdsOut && globalRank >= 1 && globalRank <= order.size() )
+    {
+        shownIdsOut->push_back( order[ globalRank - 1 ] );
+    }
+}
+
 inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                             int topN, std::size_t budgetBytes,
                             bool metrics = false, const std::vector<std::uint32_t>* fanIn = nullptr,
@@ -3424,7 +3444,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                             bool hasRelevanceFloor = false,  // LB-A: drop the zero-score TAIL of the kept head rather
                                                              //   than padding the quota with it (relevanceFlooredKeep
                                                              //   above). Off ⇒ byte-identical to the pre-LB-A path.
-                            std::size_t* droppedPositiveOut = nullptr )   // A2 (survey card, 2026-09-03): how many
+                            std::size_t* droppedPositiveOut = nullptr,   // A2 (survey card, 2026-09-03): how many
                                                              //   POSITIVE-scored candidates (rank>0) within the kept
                                                              //   head never reached the emitted <sigs> — cut either
                                                              //   by the collection-phase byte budget or by the H1
@@ -3432,11 +3452,15 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                              //   (no extra cost). Only meaningful on the rank-adaptive
                                                              //   ladder path below; left at 0 on every other path —
                                                              //   see droppedPositiveCount above for the shared arithmetic.
+                            std::vector<NodeId>* shownIdsOut = nullptr )   // lane 2 (2026-09-07): the ids of the rows this call
+                                                             //   EMITTED, emitted order — see pushShownSigId. nullptr ⇒ not
+                                                             //   wanted. Filled on the flat lens path only.
 {
     if( droppedPositiveOut )
     {
         *droppedPositiveOut = 0;   // default: unset until the ladder path (below) computes the real count
     }
+    resetShownSigIds( shownIdsOut );
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F1): the MCP `for` verb has no byte budget, and 0 must never mean
     // "cap at zero bytes" (the cap fired before the first signature and emitted a bare <sigs></sigs>).
     // Matches buildRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
@@ -3769,6 +3793,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             {
                 continue;
             }
+            pushShownSigId( shownIdsOut, order, e.globalRank );   // lane 2
             w.write( e.head.c_str() );
             if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
             w.write( escapeXml( e.sig, esc ) );
@@ -7197,8 +7222,9 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
                                 bool hasRelevanceFloor = false,            // LB-A: the XML sibling's own admission rule,
                                                                            //   shared through relevanceFlooredKeep so the
                                                                            //   two dialects cannot select differently.
-                                std::size_t* droppedPositiveOut = nullptr ) // A2: the XML sibling's own out-param —
+                                std::size_t* droppedPositiveOut = nullptr, // A2: the XML sibling's own out-param —
                                                                            //   see packSignatures for the full contract.
+                                std::vector<NodeId>* shownIdsOut = nullptr ) // lane 2: the emitted rows' ids — see packSignatures
 {
     const bool rankAdaptivePayload = lens.rankAdaptivePayload;
     if( outCapped )
@@ -7209,6 +7235,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     {
         *droppedPositiveOut = 0;
     }
+    resetShownSigIds( shownIdsOut );
     if( outNotes )
     {
         *outNotes = JsonSigNoteCounts {};
@@ -7314,6 +7341,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         {
             continue;
         }
+        pushShownSigId( shownIdsOut, order, e.globalRank );   // lane 2: same mapping as the XML twin
         if( !first )
         {
             w.write( "," );

@@ -1767,6 +1767,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // once flushed to `mem`, cannot be edited retroactively (the same reason the CLI twin's degrade path
     // never gets the attribute). Byte-for-byte the same content this call always produced.
     std::size_t mcpDroppedPositive = 0;
+    std::vector<rw::NodeId> mcpShownIds;   // lane 2: the sigs rows actually emitted — the tail excludes these files, not the whole surface
     std::string sigsStr = renderToString( [ & ]( std::FILE* m2 )
     {
         packSignatures( m2, ing, lensRank, forTopN, 0 /* no byte budget in MCP (0 = unlimited) */, true, &fanIn, &impure, redact,
@@ -1776,7 +1777,8 @@ inline std::string forTaskText( const std::string& root, const std::string& task
                         notesPtr,                             // L3: field-notes surfacing (inert when null)
                         flRootArg,                            // R-E: root-relative p=, same argument the CLI twin passes
                         /*hasRelevanceFloor=*/true,           // LB-A: shrink past the zero-score tail, never pad
-                        &mcpDroppedPositive );                // A2: exact count, see droppedPositiveCount (serialize.h)
+                        &mcpDroppedPositive,                  // A2: exact count, see droppedPositiveCount (serialize.h)
+                        &mcpShownIds );                       // lane 2: see verbs_for.h shownSigIds
     } );
     // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
     // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare
@@ -1809,7 +1811,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // and the ranked head above stays byte-identical to a tail-less bundle.
     {
         std::vector<char> tailEsc;
-        const std::string tailStr = renderFileTailXml( computeFileTail( ing, lensRank, lensSurfaceIds, flRootArg ),
+        const std::string tailStr = renderFileTailXml( computeFileTail( ing, lensRank, mcpShownIds, flRootArg ),
                                                        kForFileTailShownCap, tailEsc );
         std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
     }
