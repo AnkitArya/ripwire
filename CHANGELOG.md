@@ -15,6 +15,30 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — every skill description rewritten under the client budget, and one skill folded away
+
+Reported and **measured** by [@jmangs](https://github.com/jmangs) in #49: Codex silently shortens skill
+descriptions to fit its context budget, keeping the first ~350 characters of each. All eighteen ripwire
+descriptions were over that budget — **18,455 characters authored, 6,300 retained, 12,155 discarded**,
+fifteen of them cut mid-token. What the truncation removed was the routing boundaries: the "NOT for X,
+that's skill Y" clauses, the secondary triggers, the misuse warnings. His diagnosis is the one this round
+acted on, and it is worth quoting: the shortened descriptions "do not become literally identical — the
+problem is semantic: related skills lose the clauses that distinguish them."
+
+That reframed the task. Eighteen skills whose boundaries need a thousand characters each to explain are
+eighteen skills whose boundaries are not carrying their own weight; the budget did not create the routing
+problem, it exposed it by deleting the prose that was compensating. So the round asked what set of skills
+has boundaries an agent can tell apart *in* 350 characters, rather than how to compress the existing ones.
+
+Pre-registered before any description was touched (`docs/EVALS.md`), with a truncation-aware A/B whose
+baseline was today's descriptions **truncated** — the thing users actually have — not today's full text.
+The registered set-total ceiling was amended 4,800 → 5,400 and a third blind rater added, both **before**
+measurement rather than after. Three LLM raters, sealed held-out set. The result was a **REJECT on the
+registered band**, published as such; the parts that stood were kept, including folding
+`ripwire-efficient` into `ripwire-orient` — the one boundary all three raters independently could not
+distinguish. `test/skilldescbudgetcheck.sh` now pins every description under the budget, with a
+binary-backed arm reading the binary's own skill discovery, so this cannot drift back silently.
+
 ### Added — Bash, Lua, Ruby and Elixir get import/dependency edges (parser version 81)
 
 Four languages that emitted **no dependency record on any tree** now emit one per directive. Each spells a
