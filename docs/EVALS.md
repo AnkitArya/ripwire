@@ -2324,6 +2324,144 @@ already S1's surviving hypothesis; (b) making `subtokens()` keep an all-caps run
 tokenizer that every lexical surface in the tool depends on, so it is a ranking round with a full
 recall-lane re-measure, not a skills edit.
 
+### Skill descriptions under a client budget — PRE-REGISTERED 2026-09-07 (before any description edit)
+
+**Why this round exists.** Issue #49 (jmangs, 2026-09-07) reports that Codex shortened all 18 ripwire
+skill descriptions to their first 350 characters. Reproduced in-tree with `bench/skilldesc_budget.py`:
+18 skills, **18,455** characters of description, **6,300** kept at a 350-character head cut, **12,155
+lost (66%)**, every skill over, 15 of 18 cut mid-token. (A regex that keeps the YAML `>` fold marker
+reports 18,491 — two characters per skill too many; the reporter's 18,455 is the correct figure.)
+
+**What the budget actually is (sourced 2026-09-07, `codex-rs/ext/skills/src/render.rs`,
+`loader/mod.rs`; code.claude.com/docs/en/skills; cursor.com/docs/context/skills).** There is no 350
+constant anywhere. Codex renders the skill catalog under a TOTAL budget — 2% of the model's context
+window in tokens, or 8,000 characters when the window is unknown, user-cappable at 10,000 tokens —
+and when the catalog overflows it hands out description characters **round-robin, one per skill per
+pass**, so every over-long description ends at the same count; 350 was the equilibrium the reporter's
+install (18 ripwire skills plus their own) landed on. Codex's loader also carries a hard
+`MAX_DESCRIPTION_LEN = 1024` that rejects a skill outright — six of ours exceed it (change-check 1,722,
+quality-bar 1,974, fresh-eyes 1,600, orient 1,386, before-you-build 1,171, security-scan 1,059); the
+reporter's session did not reject them, so that path is either not enforced on their version or newer,
+and it is recorded here as an unresolved discrepancy, not a claim. Claude Code lists skills under **1%
+of the context window** (`skillListingBudgetFraction`, or `SLASH_COMMAND_TOOL_CHAR_BUDGET`), caps one
+entry at **1,536** characters (`skillListingMaxDescChars`) and, on overflow, drops descriptions
+starting with the least-invoked skills; three ripwire descriptions are visibly cut at 1,536 in this
+repo's own Claude Code session. Cursor's trimming is silent and undocumented (staff-acknowledged, forum
+thread 163761; ~80 characters reported on cloud agents). The arithmetic that turns this from "one user
+with a crowded context" into a ripwire defect: 18,455 characters ≈ 4,600 tokens is ~85% of a
+272K-window Codex budget and 2.3× a 200K-window Claude Code listing budget **before the user installs
+anything else**. The target is therefore the set's total mass and what each description says in its
+head, not a per-skill 350.
+
+**Taxonomy reading (the evidence, fixed before any edit).** Sources: the 18 `SKILL.md` files,
+`skills/CONSOLIDATION.md`, the router's moment map, the four prior routing rounds in this file, the
+reporter's collision list, and the bm25-desc per-skill and aggregated want→got tables on today's
+descriptions full (arm A) and head-cut (arm B) — never a test-split judged prompt's text or its miss
+list. Boundaries that are REAL (a different artifact is in the agent's hand): find-bug (a symptom),
+perf-target (a profile), write-tests (untested existing code), handoff (a recipient), security-scan
+(an untrusted artifact or input path), opt-remarks (a compiler remark, contributor-only), mcp (setup, or
+"is the tool's answer trustworthy"), graph-query (a filtered graph question), layers (architecture
+health with rules to enforce), reuse-first vs before-you-build (one symbol vs a feature — the 2026-07
+moment pass drew it and it held under LLM raters), navigate (a named symbol) vs orient (no symbol yet).
+Under the head cut these mostly fail for one reason: the "NOT for X → skill Y" clauses and the
+2026-08-11 content-gap facts sit in the tails (mcp's first 350 characters are a verb inventory; the
+tool-health moment is past character 700; per-skill wins A→B: navigate 7→3, change-check 12→7,
+before-you-build 11→6, mcp 10→6, fresh-eyes 9→6, perf-target 9→6). Boundaries that are ARTIFACTS:
+(1) **ripwire-efficient** — by its own description "a DISCIPLINE for ANY read, not a moment" that
+"fires ALONGSIDE the moment skills, never instead of them", yet it is a routing destination with 12
+corpus rows and the largest lexical magnet in both arms (13 false fires, stealing from eight different
+skills; the router itself lists it as a leaking reflex, and its distinctive content already lives in a
+companion file); (2) **fresh-eyes ↔ quality-bar on "diagnose the shape" vs "name the fix"** — two steps
+of one activity, legible at full length only through the two boundary sentences the 2026-08-11 round
+added (both past character 350 today), and 3 of arm A's judged misses are quality-bar→fresh-eyes.
+(3) change-check ↔ quality-bar share a moment (before you push) but ask different questions (merge
+safety vs quality); the corpus permits both on 2 rows; a by-question boundary is legible in one clause
+each and is kept. This round restructures (1) as a measured arm and leaves (2) as a legibility test:
+moving the shape→refactor playbook between skills would relabel held-out rows, which only a blind
+two-rater consensus may do (RELABEL log precedent), so if (2) still fails per-skill it is the next
+structural round's pre-named candidate, not this one's.
+
+**Design rules (fixed now).** Every description ≤ **320** normalized characters (a ceiling with
+30 under the observed 350 and 1,216 under Claude Code's cap), set total ≤ **4,800** (≈1,200 tokens);
+trigger first, boundary second, stop-rule marker inside the ceiling (`agentloopcodexcheck.sh`'s
+frontmatter markers stay), the evidence and philosophy move to bodies; the 18-fold identical
+"Backed by ripwire (deterministic, on PATH)" tail is dropped (identical text in every candidate has
+zero discriminative value and costs 720 characters of shared budget). Wording may be iterated against
+the **dev split only** (bm25 arms), and the rater harness may be dry-run **once** on the dev split to
+validate its format (reported, not decisive). Nothing about the held-out rows is read as text.
+
+**Arms.**
+- **A** — today's descriptions, full (the ideal no budgeted client renders).
+- **B** — today's descriptions, first 350 characters (what the reporter's Codex renders; the real
+  baseline and, being the same size as D, the matched-cost control METHODOLOGY §8 requires).
+- **E** — a seeded random contiguous 350-character window of today's descriptions (placebo for the
+  head window itself; bm25 arms only).
+- **C1** — the rewritten set, same 17 routable skills + router, every description ≤ 320. **D1** (C1
+  head-cut at 350) is C1 by construction; equality is verified mechanically, not measured twice.
+- **C2** — C1 with `ripwire-efficient` folded into `ripwire-orient` (K = 16): a measurement copy only
+  (`bench/skilldesc_arms.py --fold=ripwire-efficient:ripwire-orient`; the corpus copy gets the
+  mechanical label map efficient→orient, permitted sets collapse duplicates); built for real only if
+  it wins.
+
+**Held-out set.** `test/skillevalfix/prompts.tsv`, split=test ∩ provenance=judged, **n = 85 positive
+rows**, plus the 53 split=test negatives for the fire rate (`bench/skilldesc_arms.py --heldout`).
+Corpus sealed at sha256 `16b1c84724a15d41717c588663db36c8569bd7b753701732cf5566560e798b7d` (also in
+`test/skillevalfix/PROVENANCE.md`); no row is added, edited or relabeled for measurement.
+
+**Baselines (measured at this commit's binary, before any edit).** bm25-desc held-out judged hit@1:
+**A 51/85, B 40/85, E 39/85** (the head window is not special on the lexical proxy: B ≈ E). Full corpus
+bm25-desc: A split=test 73.1% / sep-auc 0.957, dev 69.1% / 0.887, judged 98/152, for-routed 92/152;
+**B split=test 60.0% / 0.910, dev 57.4% / 0.854, judged 79/152, for-routed 87/152** — i.e. the set as
+Codex users actually read it today already fails the committed 63.0% floor by 3pp.
+
+**Primary instrument.** Two blind LLM raters (one Opus, one Sonnet subagent; the 2026-08-11 ceiling
+protocol), a fresh rater per (arm, rater). Each receives only `bench/skillrater/prepare.py`'s packet:
+the alphabetical skill list (name + description exactly as that arm renders it) and the 138 held-out
+prompts in one seeded shuffle under opaque ids — never a label, a split, this registration, or another
+arm's answers — and returns top-1 (or `none`) and top-2 per id. `bench/skillrater/score.py` scores
+top-1 ∈ permitted set. **Primary metric: rater hit@1 on the 85 positives, mean of the two raters,
+paired on identical rows.** One measurement per (arm, rater); a rater is re-asked only for ids it
+left missing or unparseable (logged in the result).
+
+**Accept band (C1).** ACCEPT iff **mean-rater hit@1(D1) − hit@1(B) ≥ +8 rows** (≈ +9.4pp; the smallest
+net that is not one rater's noise on a paired n = 85 where one row is 1.18pp), AND each rater
+individually shows D1 ≥ B + 4, AND negative fires(D1) ≤ fires(B) + 5 of 53, AND bm25-desc held-out
+judged hit@1(C1) ≥ B's 40/85 (the lexical proxy may not regress against what clients read today), AND
+`test/agentloopcodexcheck.sh` and `test/skilltruthcheck.sh` are green on the rewritten set. **Flag:**
+D1 > A + 4 rows on the primary is a leakage suspect (a rewrite should not beat the full text it was
+compressed from by more than noise) — audit the derivation record before landing. Otherwise **REJECT**:
+the descriptions are not landed, this registration stays, the negative result is recorded below, and
+the finding becomes "the taxonomy, not the prose".
+
+**C2 decision.** C2 replaces C1 iff C2 passes the same band against B AND, on the **71** positive rows
+whose permitted set touches neither orient nor efficient (the merge-inflation control: rows the label
+map cannot make easier), **mean-rater hit@1(C2) − hit@1(C1) ≥ +4 rows**. Otherwise C1 lands and
+efficient stays a destination with the rewritten description. If C2 wins, the real fold is a content
+change (bodies, router, `src/taskroute.h`'s `compact-legend` route, corpus relabel via the same
+mechanical map logged in the RELABEL block, count sites, `codexplugincheck.sh`, CMake stale-dir prune)
+landed after the verdict, with every gate green.
+
+**Committed bm25 floors.** `skillevalcheck.sh` (63.0 / 0.89 test, 59.0 / 0.75 dev) and
+`skillroutingjudgedcheck.sh` (60% / 55% judged) were calibrated against full-length descriptions that
+no budgeted client renders whole. Rule fixed now: if the primary ACCEPTs and C1 breaches a floor, that
+floor is re-derived per its file's own header rule (~10pp under the newly measured value) in a
+**separate recalibration commit** citing this section — the gate protects the landed set against
+future drift, and its absolute value was never the claim; if C1 breaches no floor, nothing moves. A
+breach is reported either way. On REJECT nothing changes.
+
+**Gates landing with an ACCEPT.** `test/skilldescbudgetcheck.sh` (every description ≤ 320 normalized
+characters, set total ≤ 4,800; body = `bench/skilldesc_budget.py --limit=320`), listed in
+`test/regression.sh`; `skilltruthcheck.sh` is not weakened — a claim that cannot be true in 320
+characters is dropped from the description, never bent. Count sites move together if the count moves.
+
+**Secondary, reported not decisive.** hit@2; per-rater numbers and rater-vs-rater agreement; per-skill
+won/false-fire tables; bm25 all arms on the full corpus and both splits; E; the size table (characters
+and tokens per skill, total); the C1 set against Codex's 1,024 and Claude Code's 1,536 caps.
+
+**Scope guard.** This measures a routing PROXY under Claude raters; Codex production routing is a GPT
+model reading the same text, and neither is task success (S2's substitution meter remains the behavior
+metric). A verdict here is a hypothesis to cross-read against the meter and against #49's reporter.
+
 ### Subtoken acronym shredding — PRE-REGISTERED 2026-08-19 (before the fix is measured)
 
 **The defect.** The shared subtoken tokenizer shreds an all-caps run into single characters, which
