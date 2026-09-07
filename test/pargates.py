@@ -195,6 +195,9 @@ GATE_BUDGET_SEC = {
     "estchargecheck.sh":          900,   # ~26 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "pagingsweepcheck.sh":        900,   # ~34 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "slicediffcheck.sh":          900,   # replays 57 labelled commits (checkout + --slice --since each); ~80 s local
+    "mcpframehonestycheck.sh":    900,   # 2026-09-07 (first sharded CI run 34145918269): rc=124 at 300.1 s on three of
+                                         # four Linux legs' shard 2 -- "exactly the cap" again. ~150 s local; a shard
+                                         # job hands it fewer neighbours to hide behind than the whole suite did.
     "knownitemcheck.sh":          900,   # 2026-09-05: --eval-retrieval stopped sampling 150 symbols in PATH order and
                                          # now grades its whole population exhaustively (the sampler measured the corpus,
                                          # not the ranker -- docs/EVALS.md section 7). The gate runs it twice on src/ for
