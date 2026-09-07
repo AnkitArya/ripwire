@@ -133,6 +133,23 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 #     lose the refusals) or ~25,000 (that, plus 45% of the routing text, with the routing score as the
 #     receipt). Also recorded for the owner in the round's local plan notes, which are never tracked here.
 #
+# RE-MEASURED 2026-09-07 (issue #48), CEILING UNMOVED at 41,000 — recorded because this file's rule is that
+# the arithmetic gets written down, not because anything was spent. The fix that removed exemplar's
+# top-level `anyOf` (the Anthropic tool-schema validator refuses oneOf/allOf/anyOf at the top level of a
+# tool input schema, so that one stanza made the server un-registerable in opencode and every other
+# strict client) lands NET NEGATIVE. Attributed tool by tool against a build of the pre-fix head
+# (93b7525a), on this gate's own metric:
+#   exemplar     +28 = +96 B of description prefix (the requiredness the keyword used to express, now on
+#                      each of the two members — see src/mcprefusal.h anyOfDescriptionPrefix, and it is
+#                      the ONLY surface a strict client can still read it from) −54 B keyword −14 B
+#                      empty `required`
+#   nine verbs   −14 each = −126 B: analyze situational_awareness owners quality_delta quality_baseline
+#                      stray_content flags doc_drift (and exemplar, counted above) now OMIT `required`
+#                      instead of emitting `[]` — identical meaning from draft-06 on, and the empty array
+#                      is what draft-04-strict validators reject
+#   TOTAL        40,986 -> 40,902 B; nothing else moved. Raw wire bytes (this gate measures json.dumps
+#                      with ensure_ascii, which spends 6 for each em dash instead of 3): 40,901 -> 40,811.
+# Headroom goes back UP, 14 B -> 98 B. That is item 5 below working, not a new allowance.
 CEILING = 41000
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )

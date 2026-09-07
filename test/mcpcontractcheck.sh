@@ -143,10 +143,30 @@ badReq   = [ t[ "name" ] for t in rltools if "path" not in t[ "inputSchema" ].ge
 check( not badReq, "(B/M4) truly rootless server (cwd=/): `path` in every verb's required (%d missing)" % len( badReq ) )
 rootless.close()
 
-exemplar = [ t for t in tools if t[ "name" ] == "exemplar" ][ 0 ][ "inputSchema" ]
-anyOf    = exemplar.get( "anyOf", [] )
-check( sorted( sorted( a[ "required" ] ) for a in anyOf ) == [ [ "kind" ], [ "task" ] ],
-       "(B/M4) exemplar's kind-or-task is expressed as anyOf: %s" % anyOf )
+# M4's second half, AS AMENDED BY ISSUE #48. It used to render as a top-level JSON Schema `anyOf`. The
+# Anthropic tool-schema validator refuses oneOf/allOf/anyOf at the top level of a tool input schema, so
+# that one stanza made the whole server un-registerable in opencode and every other strict client. The
+# CONTRACT did not change and this arm still checks the same thing M4 cared about — the kind-or-task
+# requirement is STATED in the schema a client reads — but the statement now lives in the two members'
+# own descriptions. Group parsed out of the source, like every other expectation in this file.
+anyOfRows = {}
+for line in REFUSAL_H[ REFUSAL_H.index( "kMcpRequiredFields[] = {" ) : ].splitlines():
+    if line.startswith( "};" ): break
+    if "FieldRule::AnyOf" not in line: continue
+    m = re.match( r'\s*\{\s*"([a-z_]+)"\s*,\s*"([a-z_]+)"\s*,', line )
+    if m: anyOfRows.setdefault( m.group( 1 ), [] ).append( m.group( 2 ) )
+check( anyOfRows, "(B/M4+#48) AnyOf rows parsed out of kMcpRequiredFields: %s" % anyOfRows )
+stated, keyword = [], []
+for verb, members in anyOfRows.items():
+    schema = [ t for t in tools if t[ "name" ] == verb ][ 0 ][ "inputSchema" ]
+    keyword += [ "%s.%s" % ( verb, k ) for k in ( "oneOf", "allOf", "anyOf" ) if k in schema ]
+    for f in members:
+        d = schema[ "properties" ][ f ][ "description" ]
+        if "REQUIRED" not in d or any( s not in d for s in members if s != f ):
+            stated.append( "%s.%s: %r" % ( verb, f, d[ :80 ] ) )
+check( not keyword, "(B/M4+#48) no AnyOf verb carries a top-level union keyword (%s)" % keyword )
+check( not stated,  "(B/M4+#48) each AnyOf member's description states the requirement and names its "
+                    "alternatives (%s)" % stated )
 srv.close()
 
 # the ROOTED server is the other half of the same claim: a schema that declared `path` required
