@@ -80,12 +80,18 @@ awk '$1=="overlap"{found=1} END{exit !found}' "$TMP/a" \
 # in docs/EVALS.md §4.
 h1=$(  awk '$1=="split=test" && $2=="bm25-desc"{gsub("%","",$3); print $3}' "$TMP/a" )
 auc=$( awk '$1=="split=test" && $2=="bm25-desc"{print $6}' "$TMP/a" )
-awk -v v="$h1"  'BEGIN{exit !(v+0 >= 63.0)}' \
-    && ok "bm25-desc hit@1 (split=test) = ${h1}% (floor 63.0%)" \
-    || no "bm25-desc hit@1 (split=test) = ${h1}% fell under the 63.0% floor — a skill description likely broke routing"
-awk -v v="$auc" 'BEGIN{exit !(v+0 >= 0.89)}' \
-    && ok "bm25-desc sep-auc (split=test) = ${auc} (floor 0.89 — negatives stay quiet)" \
-    || no "bm25-desc sep-auc (split=test) = ${auc} fell under 0.89 — positives/negatives no longer separate"
+# 2026-09-07 (description-budget round, docs/EVALS.md "Skill descriptions under a client budget", landed on the
+# owner's decision): the descriptions shrank 18,455 → 5,127 chars and the efficient skill folded into orient; the
+# lexical arm measures 62.3% / 0.898 on the landed set (three blind LLM raters: 82.3–84.3 / 85 for the rewrite,
+# identical to the full text — the bm25 arm tracks vocabulary, not the reader). Floors re-derived per the header
+# rule from the landed measurement: hit@1 52.0 (10pp under), sep-auc 0.83 (~0.07 under). What Codex users read
+# before this round (the same descriptions cut at 350) measured 60.0% / 0.910 and would have failed the old floor.
+awk -v v="$h1"  'BEGIN{exit !(v+0 >= 52.0)}' \
+    && ok "bm25-desc hit@1 (split=test) = ${h1}% (floor 52.0%)" \
+    || no "bm25-desc hit@1 (split=test) = ${h1}% fell under the 52.0% floor — a skill description likely broke routing"
+awk -v v="$auc" 'BEGIN{exit !(v+0 >= 0.83)}' \
+    && ok "bm25-desc sep-auc (split=test) = ${auc} (floor 0.83 — negatives stay quiet)" \
+    || no "bm25-desc sep-auc (split=test) = ${auc} fell under 0.83 — positives/negatives no longer separate"
 
 # ── 6) the actionable diagnostics exist: per-skill table + per-provenance split ──────────────────────
 { grep -q 'per-skill (bm25-desc)' "$TMP/a" && grep -q 'provenance hit@1' "$TMP/a" && grep -q 'router-magnet' "$TMP/a"; } \
