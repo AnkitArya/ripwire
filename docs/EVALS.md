@@ -12382,8 +12382,11 @@ TypeScript/Python full-fidelity tier; wall time contaminated by two concurrent s
 
 1. The legend is 23–29% of a `--for` compact bundle — a density lane with its own band.
 2. The compact route's `sigs shown="4"` for multi-file gold (S1/S4) — quota under the same budget.
-3. One shared git-log walker for the five miners (the Round C F1 debt; the one quality-delta ack this round is
-   the rename artifact of the pre-existing `gitFileCommitCountsInDayWindow` | decayed-miner clone).
+3. One shared git-log walker for the five miners (the Round C F1 debt). Measured against the round's base,
+   `--quality-delta` reported the decayed miner as a new duplication of `gitFileCommitCountsInDayWindow`; it
+   is the PRE-EXISTING type-3 clone of that pair (504 tokens, similarity 0.83 on the base, verified with
+   `--clones` on a clean worktree) under the miner's new name, grown by 49 tokens of epoch tracking. No ack
+   is carried: against the branch tip the row does not exist, and the shared walker is the real fix.
 4. `test/mcpattrparitycheck.sh` fails in THIS working checkout on `cochange`/`for`/`analyze`/`slice` rows —
    and passes ALL PASS on a clean checkout of `5726d4d9` with the pre-round binary, with the `7dae6522`
    binary, and with the final binary of this round. The failures are the checkout's untracked local files
