@@ -1191,6 +1191,7 @@ inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncl
         if( b.kind == LocalBindKind::JsExport )
         {
             const std::string key = jsImportKey( b.fileId, b.var );
+            if( b.var == "default" && !exported[ key ].spans.empty() ) { exported[ key ].ambiguous = true; }
             exported[ key ].spans.push_back( { b.spanStart, b.spanEnd } );
             byLocal[ jsImportKey( b.fileId, b.importedName.empty() ? b.var : b.importedName ) ].push_back( key );
         }
