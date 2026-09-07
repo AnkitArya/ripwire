@@ -1980,9 +1980,13 @@ struct RecentFile
 };
 
 // F3: the single-root map's file-level <recent> rows from ONE mining pass — the SAME weights the churn-decay
-// teleport is built from (churnPriorFromDecayed on m.weights), cut to `keep` rows by weight desc then path;
-// age is measured on HEAD's clock, the anchor the decay itself uses. `outOf` receives the number of files any
-// mined commit touched. Empty when the walk found no history.
+// teleport is built from (churnPriorFromDecayed on m.weights), cut to `keep` rows by NEWEST commit first (age
+// ascending), then weight desc, then path. Age first, not weight: "what changed recently" asks for the files
+// the newest commits touched, and a weight-first cut lists the files churned MOST over the half-life instead —
+// measured on rocksdb: a question whose gold was touched 9 days before the pin was missed by the weight-first
+// top 40 (its 40th row was 21 days old) and is named by the age-first one. Age is measured on HEAD's clock, the
+// anchor the decay itself uses. `outOf` receives the number of files any mined commit touched. Empty when the
+// walk found no history.
 inline std::vector<RecentFile> recentRowsFromDecayed( const std::string& root, const IngestResult& ing, const DecayedChurnMined& m,
                                                       std::size_t keep, std::size_t* outOf )
 {
@@ -2001,7 +2005,11 @@ inline std::vector<RecentFile> recentRowsFromDecayed( const std::string& root, c
         *outOf = rows.size();
     }
     std::sort( rows.begin(), rows.end(), [ & ]( const RecentFile& a, const RecentFile& b )
-               { return a.weight != b.weight ? a.weight > b.weight : ing.files[a.fileId] < ing.files[b.fileId]; } );
+               {
+                   if( a.ageDays != b.ageDays ) { return a.ageDays < b.ageDays; }
+                   if( a.weight != b.weight )   { return a.weight > b.weight; }
+                   return ing.files[a.fileId] < ing.files[b.fileId];
+               } );
     if( rows.size() > keep )
     {
         rows.resize( keep );

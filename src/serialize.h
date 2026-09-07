@@ -1631,9 +1631,9 @@ inline constexpr const char* kChurnDecayRankLegend =
     "k= is PageRank re-run with the teleport biased by this decayed prior instead of the uniform one "
     "rank_by=pagerank uses, or the undecayed one rank_by=churn uses; top ranks can coincide with either "
     "sibling when structure and recent churn agree, and diverge where a stale-but-central symbol meets a "
-    "fresh, sparsely-called one. recent: the file-level answer to what changed recently, FIRST — the n= files with "
-    "the largest decayed weight of the of= files any commit touched, as rc p= age_d= (days since the file's newest "
-    "commit, at HEAD's clock) w= (its decayed weight), weight desc then path; absent under multi-root -->";
+    "fresh, sparsely-called one. recent: the file-level answer to what changed recently, FIRST — the n= files the "
+    "NEWEST commits touched, of the of= files any commit touched, as rc p= age_d= (days since the file's newest "
+    "commit, at HEAD's clock) w= (its decayed weight), age_d asc then w desc then path; absent under multi-root -->";
 
 // Which churn legend belongs to which churn ranker — the table-driven form the sibling rankBy lookup uses,
 // so a third churn variant adds a row and not a branch.
