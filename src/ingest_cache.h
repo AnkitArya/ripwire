@@ -192,7 +192,7 @@ constexpr std::uint32_t kCacheVersion = 16;           // 16: RawBind gains impor
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 79;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 80;           // bump on any grammar/.scm/extraction change
                                                       // 78 = 2026-09-07 (Elixir, test/elixircheck.sh): a
                                                       //    twenty-second grammar (.ex/.exs) whose defs and call
                                                       //    edges are extracted through the keyword/head filters in
@@ -213,6 +213,22 @@ constexpr std::uint32_t kParserVer    = 79;           // bump on any grammar/.sc
                                                       //    main.cpp's A4-P4 split gives lean and rich SEPARATE cache
                                                       //    FILES, so a lean-79 blob can never reach a rich-78 reader.
                                                       //    main's own history is 74->75->76->77, four consecutive +1.
+                                                      // 80 = 2026-09-07 (Ruby scope + setters, PR #47 rebased,
+                                                      //    test/rubyscopecheck.sh, test/rubysettercheck.sh): two Ruby
+                                                      //    extraction FACTS moved. (a) every Ruby def records its
+                                                      //    enclosing class/module as `scope` (rubyEnclosingScopeOf),
+                                                      //    so Ruby rows gain id= and same-named methods in different
+                                                      //    classes stop folding into one overloads= row; (b) the
+                                                      //    (setter) node is accepted by queries/ruby/tags.scm, so
+                                                      //    `def name=` is indexed, and a call captured as the `left:`
+                                                      //    of an (assignment) is renamed `name=` so a WRITE stops
+                                                      //    edging the getter. Record shapes unchanged, kCacheVersion
+                                                      //    stays 16; the def and ref FACTS changed for every Ruby
+                                                      //    file → parserVer moves. The fork carried 79, which the
+                                                      //    Elixir + ES-import bumps had already taken: RE-BUMPED to
+                                                      //    the next free number over the merged tip, per the rule
+                                                      //    above. quality.h's kIngestParserVerMirror moved in the
+                                                      //    SAME commit.
                                                       // 77 = 2026-09-03 (Phase 5, docs/EVALS.md): two Python
                                                       //    ingest FACTS — (a) a `super()` call receiver classifies
                                                       //    RecvKind::SuperObj (appended) instead of None, so

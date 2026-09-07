@@ -1398,11 +1398,14 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 16;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 79;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 80;   // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 78 = 2026-09-07 (Elixir): a twenty-second grammar and its
                                                           //    definition/call filters.
                                                           // 79 = 2026-09-07 (ES import facts): named import aliases and
                                                           //    `export { f }` clause exports. See ingest_cache.h's note.
+                                                          // 80 = 2026-09-07 (Ruby scope + setters): every Ruby def carries
+                                                          //    its enclosing class/module as scope, and `def name=` is
+                                                          //    indexed with `obj.name = v` renamed to it.
                                                           // 77 = 2026-09-03 (Phase 5): Python super() receiver kind +
                                                           // import-name bindings. See ingest_cache.h's kParserVer note.
                                                           // 74 = 2026-08-30 (objc-sniff lane): looksObjC masks comments

@@ -2311,7 +2311,28 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             std::size_t bestShare = 0;
             for( NodeId c : tier )
             {
-                const std::size_t sh = sharedLocality( callerCanon, g.localityKey[c] );   // path-scoped even for a free function
+                // The caller's OWN def scores a full match against itself (its localityKey IS callerCanon) and
+                // would win alone — and emission then drops it as a self-loop, leaving NOTHING. Ruby found it
+                // (test/rubyscopecheck.sh, facade arm): `def publish_event; notifier.publish_event(e); end`
+                // lost every real target the moment Ruby defs gained a scope. Score it ZERO so it can never be
+                // the strict winner; the survivors decide.
+                //
+                // NOT Ruby-specific, and measured that way: the same shape in Python went 0 edges → an honest
+                // 2-way split (test/lpincheck.sh arm (I), which is the language-agnostic pin — revert this
+                // line and that arm goes red before any Ruby gate does). Across eight Ruby-FREE corpora the
+                // line is provably edge-ADDITIVE — 0 edges lost, symbols/unresolved/external unchanged, edges
+                // +0.03%..+0.4% and locality_pinned up (rocksdb 141→587, cpython 556→709). The numbers and the
+                // method are in CHANGELOG.md's entry for this change.
+                //
+                // STATED FLOOR, deliberately NOT closed here (test/lpincheck.sh arm (I) pins it so it stays a
+                // decision): this fixes the tie-break only. One layer UP, tier 1 admits SAME-FILE candidates
+                // and stops if any exist — so when the caller is the ONLY same-file candidate, tier 1 selects
+                // it alone, the ladder never widens to tier 2, and emission still drops the self-loop to
+                // nothing (`def prerelease=; set.prerelease = v; end` in one file, the real `prerelease=` in
+                // another — rubygems' composed_set.rb). Widening tier 1 past the caller would invent a
+                // cross-file edge the SAME-FILE tier already outranked, and `other.each` on a second instance
+                // of the caller's own class is a genuine self-loop, so the honest nothing stands.
+                const std::size_t sh = ( c == r.fromSymbol ) ? 0 : sharedLocality( callerCanon, g.localityKey[c] );   // path-scoped even for a free function
                 locShare.push_back( sh );
                 if( sh > bestShare )
                 {

@@ -34,6 +34,17 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-07, RUBY SCOPE + SETTERS (PR #47 rebased onto the langs integration branch,
+#   test/rubyscopecheck.sh, test/rubysettercheck.sh): kParserVer 79 -> 80 and kIngestParserVerMirror -> 80,
+#   landing ON TOP of the Elixir (78) and ES-import (79) bumps above. Two Ruby extraction FACTS moved:
+#   (a) every Ruby def now records its enclosing class/module as `scope` (rubyEnclosingScopeOf), so Ruby
+#   rows gain id= and same-named methods in different classes stop folding into one overloads= row;
+#   (b) queries/ruby/tags.scm accepts the (setter) node, so `def name=` is indexed, and a call captured as
+#   the `left:` of an (assignment) is renamed `name=` so a WRITE stops edging the getter. The fork branch
+#   carried 79 with the usual "skip the rich family" rationale refuted above; on the merged tree 79 was
+#   already taken by the ES-import bump, so the next free number over the tip is 80 — the RE-BUMP rule in
+#   ingest_cache.h's kParserVer note, applied for the third time this day. Record shapes unchanged, so
+#   kCacheVersion stays 16; no Snapshot-side function changed, kQSnapCacheScheme stays 8.
 # 2026-09-07, ELIXIR (test/elixircheck.sh): kParserVer 77 -> 78 and kIngestParserVerMirror -> 78 for the
 #   new grammar (.ex/.exs), its definition/call capture filters and its metrics. The fork proposed 83,
 #   reasoning that 78 must be skipped as "77's rich value"; it must not be. parserVerFor() derives the rich

@@ -1714,6 +1714,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 // A defimpl row's own name is already absolute (`P.For`), so no enclosing module scopes it.
                 d.scope = elixirImplName( roleNode, src ).empty() ? elixirScope( roleNode, src ) : std::string{};
             }
+            else if( le.lang == Lang::Ruby )
+            { // enclosing class/module → id= addressability, per-class overload sets, editCheckImplicitReceiver
+                d.scope = rubyEnclosingScopeOf( nameNode, src );   // (test/rubyscopecheck.sh)
+            }
             defs.push_back( std::move( d ) );
             if( kind == SymKind::Class || kind == SymKind::Struct || kind == SymKind::Interface )
             {
@@ -1763,6 +1767,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                             r.qualifier = std::string( nodeTextOf( receiver, src ) );
                         }
                     }
+                }
+                else if( le.lang == Lang::Ruby && rubyCallIsAssignmentTarget( nameNode ) )
+                {
+                    r.name.push_back( '=' );   // `obj.name = v` calls `name=`, never the getter `name` (test/rubysettercheck.sh)
                 }
                 if( le.lang == Lang::Cpp )
                 {

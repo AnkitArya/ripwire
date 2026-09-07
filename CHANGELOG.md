@@ -15,6 +15,79 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — Ruby: definitions carry their enclosing class/module, and `def name=` is indexed and called
+
+Landed from PR #47 (Andriy Tyurnikov), rebased onto the Elixir and ES-import work. Two Ruby extraction
+defects, plus one resolver defect that turned out not to be Ruby's at all.
+
+**A Ruby `def` had no scope.** `src/ingest_sidecap.h` set a definition's `scope` for C++, Python and Rust
+only, so no Ruby row ever carried an `id=`: a `Scope::name` selector (`--expand=B::initialize`,
+`--callers=A::helper`) could not address a Ruby method, same-named methods in different classes of one file
+folded into a single `overloads=N` row, and `editcheck.h`'s implicit-receiver exemption — which keys on a
+non-empty Python/Ruby scope — never fired for Ruby. `rubyEnclosingScopeOf` (`src/ingest_names.h`) records
+the nearest enclosing `class`/`module`: it walks THROUGH `class << self`, skips the definition's own node
+(a `class Widget` inside `module Outer` scopes to `Outer`, never to itself) and takes the last segment of a
+`class Foo::Bar` name, matching the contract C++'s `qualifierOf` already keeps. A top-level `def` still has
+no scope and no `id=` — a file is not a scope.
+
+**`def name=(v)` was never indexed, and `obj.name = v` called the getter.** tree-sitter-ruby names a setter
+with a `(setter)` node, which `queries/ruby/tags.scm`'s method pattern did not accept. And `obj.name = v`
+parses as `(assignment left: (call method: (identifier)))` — the same `(call)` shape as the read
+`obj.name` — so the call rule captured a reference to `name` and the resolver handed a WRITE to the getter:
+a false edge, not a floor. The setter is now named `name=` on both sides: the definition from the
+`(setter)` node's own text, the call site by reading the assignment parent (`rubyCallIsAssignmentTarget`).
+`self.name = v` inside the class pins to `Class::name=` through Rule 1, and `--callers=name=` answers.
+
+Three resolver-side changes ride along so the new scope adds precision without losing edges: Ruby call
+receivers are classified (`src/ingest_binds.h` — `self.m` is `ThisObj`, `x.m` is `NamedVar`, a receiver-less
+`m(args)` stays bare); Rule 1 (`src/resolve.h`) treats a bare Ruby paren call as the implicit-self send it
+is, so `helper(2)` inside `class A` pins to `A::helper` as a FACT rather than as a disclosed locality guess
+(`lpin=`); and the S6-C locality tie-break (`src/graph.h`) no longer lets the caller's own definition win.
+
+**The tie-break fix is not Ruby's, and is disclosed as such.** A candidate that IS the caller matched itself
+on every locality segment, won alone, and was then dropped at emission as a self-loop — the site produced no
+edge at all, silently. Ruby's facade idiom surfaced it, but the shape is language-agnostic: the same fixture
+in PYTHON goes from `edges=0` to an honest 2-way split with `amb="1"` (`test/lpincheck.sh` arm (I), the
+language-agnostic pin — revert that one line and it goes red before any Ruby gate does). Measured across
+eight Ruby-FREE corpora (rocksdb, duckdb, ugrep, django, ccxt, mlflow, cpython, canyonraid48 —
+`--no-cache --top-k=100000`, every row and every edge compared): the change is **edge-ADDITIVE, 0 edges lost
+anywhere**, `symbols=`, `unresolved=` and `external=` unchanged, `edges=` +0.02% (ccxt) to +0.33% (rocksdb),
+and `locality_pinned=` up where an edge that used to vanish is now emitted as a disclosed guess (rocksdb
+141 → 587, duckdb 171 → 575, cpython 556 → 709, canyonraid48 100 → 237). A control binary carrying every
+other change with only that line reverted is BYTE-IDENTICAL to the pre-merge tip on all eleven Ruby-free
+corpora — so nothing else in this change moves any other language.
+
+Measured on Ruby 2.6's own stdlib (833 `.rb` files, `--no-cache --top-k=100000`, byte-identical across runs,
+`xmllint --noout` clean): `symbols=` 14220 → 14476 (250 setter rows, 253 definitions, where none were
+indexed before); rows carrying `id=` 97 → 13191; rows carrying `overloads=` 649 → 194; call edges naming a
+setter 0 → 534; `ambiguous=` 5872 → 5544; `edges=` 29077 → 28840 — a NET DROP, because a write against a
+setter the tree does not define no longer invents an edge to the getter. **The `id=` attribute is what a
+scoped row costs**: the full map's `est_tokens` rose 504107 → 816226 on that corpus and the default 200-row
+map's 8796 → 12313 (+40%), the same price Python already pays. Non-Ruby corpora pay ~1% (rocksdb 14652 →
+14826).
+
+**Stated floors, each pinned by a gate arm so it stays a decision.** `rubyCallIsAssignmentTarget` reads a
+plain `(assignment)` only, so a compound `w.count += 1` and a conditional `w.count ||= 1` (both
+`operator_assignment`: they read AND write, and one capture carries one name) and a multiple assignment
+`a.count, b.count = 1, 2` (a `left_assignment_list`, one level deeper) all keep the getter edge only.
+`attr_accessor` / `attr_writer` / `attr_reader` generate their methods at load time and define nothing in
+the source text, so they are not symbols and a write against one resolves to an honest NOTHING — unchanged
+by this work, and now asserted. And the tie-break fix is the tie-break only: one layer up, tier 1 admits
+same-FILE candidates and stops if any exist, so a caller that is the only same-file candidate is still
+selected alone and still dropped to nothing (`def prerelease=; set.prerelease = v; end` in one file with the
+real `prerelease=` in another). Widening tier 1 past the caller would mint a cross-file edge the same-file
+tier already outranked, so the honest nothing stands.
+
+`kParserVer` 79 → 80 with `quality.h`'s `kIngestParserVerMirror` in the same commit (the fork carried 79,
+which the Elixir and ES-import bumps had already taken — re-bumped to the next free number over the merged
+tip, per the rule in `src/ingest_cache.h`); `kCacheVersion` stays 16, no record shape moved. Gates:
+`test/rubyscopecheck.sh` (scope shapes, the `Scope::name` selector, the overload split, facade delegation,
+Rule 1 pins, a hoist mutation, determinism), `test/rubysettercheck.sh` (definitions, write vs read edges,
+the explicit `w.name=(4)` and chained `w.inner.name = 5` spellings, four stated floors, `--callers` on both
+names, a write-to-read mutation, determinism) and `test/lpincheck.sh` arm (I). Both new gates were run
+against the PRE-fix binary and fail there (18 and 12 failing assertions), which is what makes them evidence.
+
+
 ## [0.4.0] — 2026-09-06
 
 **This section spans everything since 0.2.2, not since the last tag.** v0.3.0 through v0.3.8 were cut
