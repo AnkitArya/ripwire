@@ -2550,6 +2550,24 @@ budgeted client renders.
 model on real prompts. The cross-read that could still move this verdict is the reporter's own
 experience with the C1 set installed (#49), and the substitution meter's Codex rows.
 
+**LANDED 2026-09-07 on the owner's decision — budget grounds, plus the fold.** The owner read the REJECT
+and the ceiling finding and chose to land the rewrite for the budget defect it removes, and to do the
+efficient→orient fold the raters had already drawn — with the explicit note that a description may grow
+where growth buys routing. The landed set is exactly the rated text: C1's 16 descriptions plus C2's orient
+(no restoration of a trimmed clause fit under 320, so none came back); `skills/ripwire-efficient/` is gone,
+its body is `skills/ripwire-orient/map-before-you-read.md`, `compress-ladder.md` moved beside it, the
+router's four rows and `--help-task`'s `compact-legend` intent name orient, the corpus's 12 rows carry the
+mechanical relabel (RELABEL log; new seal `9262a1b6…` in `test/skillevalfix/PROVENANCE.md`), the count
+sites read seventeen, and the source-build installer clears its staged skills dir before `cmake --install`
+(the stale-directory hole the audit found). **Final size: 17 skills, 5,127 chars (−72%), every one ≤ 320,
+≈1,280 tokens.** Lexical arm on the landed set: bm25-desc split=test **62.3% / 0.898** (dev 79.4% / 0.925,
+judged 97/152, for-routed 91/152); held-out judged bm25-desc **44/85** (today's full 51, today's head-cut
+40). `skillevalcheck.sh`'s split=test floors were re-derived in their own commit (63.0 / 0.89 → 52.0 /
+0.83, ~10pp / ~0.07 under the landed measurement); every other skill gate held without change. Rater
+numbers for this exact text: C2 = 85 / 84 / 84 (Opus / Sonnet / Fable), 0 negative fires. What this landing
+claims is "no routing loss under three LLM readers and one artifact boundary removed", not the decisive win
+the band asked for — the record above stands as written.
+
 ### Subtoken acronym shredding — PRE-REGISTERED 2026-08-19 (before the fix is measured)
 
 **The defect.** The shared subtoken tokenizer shreds an all-caps run into single characters, which
