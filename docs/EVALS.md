@@ -12208,3 +12208,183 @@ shape, not a broken window, and it is not fixed here.
 churn lens now carries real churn where it previously carried none, which is the anchoring change doing its job
 and is paid for in bytes. S3 and S5 are byte-identical before and after. Cold and warm remain byte-identical on
 all 30 questions.
+
+## Head-to-head vs Graft (trailhq/Graft 0.17.0) — REGISTERED, RUN, LOSSES CONVERTED TO CODE, RE-RUN (2026-09-07)
+
+Runs `prompts/head-to-head.md` on the Round C instrument, unchanged: the same corpus at the same pin, the same
+30 frozen questions, the same `scorer.py`, the same placebo construction under the amended tie rule. Harness:
+`bench/graft-h2h/` (`arms_graft.py` the frozen verb map, `run_graft.py`, `check_axis.py`, `readout.py`;
+`results.json` the pre-fix run, `results_post.json` the post-fix run, `results_check_pre.json` /
+`results_check.json` the check axis). The owner's brief for this round: measure first, every loss becomes a
+fix, fold every good idea from the competitor, re-measure, publish only after. That order was kept.
+
+### The competitor's own numbers — audited BEFORE any run, and unusable
+
+The precondition from the eval-retrieval session (how does each arm build ITS OWN sample?) was applied to
+Graft's README first. Its 162-run sweep harness was committed as `bench/` and deleted in `821b12f`
+(CHANGELOG: "no longer part of the published repo"); the questions are vendor-written; the raw results were
+never committed; a third corpus in its task table (`new-website`, 10 tasks) was excluded with no recorded
+reason; its second corpus is a private repository. Its SWE-bench Verified 27/50 vs 33/50 has no harness, no
+instance manifest and no selection code anywhere — the sample GREW 20 → 36 → 50 across three README-only
+commits. Its PocketBase table lists questions and PRs with no rubric or transcripts. Its README hero table
+blends the sweep's token/time numbers with SWE-bench's correctness after the caption disclosing that was
+deleted (`f23b358`). Its "tokens saved" statusline is an estimate against a whole-file-read counterfactual
+(`src/context/savings.ts`), not a measurement. **Not one Graft-published number is quoted beside a ripwire
+number anywhere in this section.** The full audit is in the round's local report.
+
+### Arms, pins, cache state
+
+| arm | pin | posture |
+| --- | --- | --- |
+| ripwire cold / warm | this branch, dev build (never Release); pre-fix `5726d4d9`, post-fix `f139025e` | Round C's frozen verb map: S1 `--for=<subject>`, S2 `--situ=<file>`, S3 `--affected=<file>`, S4 `--for=<question>`, S5 `--rank-by=churn-decay`; cold = `--no-cache` (parse inside the window) |
+| graft-ask | trailhq/Graft `05760b07` (release 0.17.0), built from source, node v26.4.0, WARM (graph pre-built: 13.09 s, 46,305 nodes / 53,157 edges, 141 MB; its refresh-first stat inside the window) | `graft ask "<question verbatim>"` on every shape, default `--limit 8` — the plain-words posture |
+| graft-expert | same | per-shape verb frozen from `--help` before any score: S1 `ask "<subject>"`, S2 `callers <PascalCase(stem)> --depth 2`, S3 `grep "<stem>" --fixed`, S4 `callers <PascalCase(stem)> --direction out --depth 2`, S5 `ask` (Graft has no history verb; identical to graft-ask by construction) |
+| rg floor | ripgrep 15.1.0 | `rg -l --sort path --fixed-strings` then whole-file reads (cap 200) |
+| placebo | random rank at ripwire-warm's matched byte budget, seeded by qid | mandatory; mutually-incomplete rows are TIES |
+
+Graft's `[graft] tokens saved ≈ N …` banner lines — which also instruct the reading agent to report the
+saving to the user — are part of what it emits and are counted. Every Graft call ran under `env -i` with an
+allowlist and `DO_NOT_TRACK=1`, in its own worktree of the corpus (its build appends `/graft/` to the corpus
+`.gitignore` and writes `.ignore`, so no other arm may share that checkout). Its LLM layer (`--deep`,
+summaries, crux) needs an API key and was not measured; no dollars were spent by any arm. Cold ripwire pays
+~2.0 s of parse inside its window; graft's graph is built before its window opens — the asymmetry is
+declared, not smoothed. Two other sessions were live on this machine, so every millisecond is an upper bound.
+
+### RESULT — the pre-fix run (`results.json`, ripwire `5726d4d9`)
+
+| arm | complete | gold files named | median TTCA | median wall |
+| --- | ---: | ---: | ---: | ---: |
+| ripwire cold | 9/30 | 29/129 = 22% | 5,846 B | 1,270 ms |
+| ripwire warm | 9/30 | 29/129 = 22% | 5,846 B | 544 ms |
+| graft-ask, warm | 5/30 | 18/129 = 13% | 1,350 B | 788 ms |
+| graft-expert, warm | 5/30 | 15/129 = 11% | 1,429 B | 620 ms |
+| `rg` floor | 22/30 | 99/129 = 76% | see note | 29 ms |
+| placebo | 4/30 | 40/129 = 31% | 5,854 B | — |
+
+Paired, ripwire-warm vs: graft-ask **5 wins / 20 ties / 5 losses**; graft-expert 7 / 20 / 3; placebo
+**9 / 17 / 4**. **The placebo stop condition fires (9 < 16): no ranking claim.** Cold and warm are
+byte-identical on all 30 questions; graft-ask and graft-expert reproduced byte-for-byte on 30/30 across the
+two full runs.
+
+**A defect in the committed instrument, found by this run.** `bench/roundc-h2h/README.md` records that the
+floor must run with `rg --sort path` (Round C measured ×276 without it) — the committed `arms.py` did not
+pass it, and the floor moved on 4 of 30 rows between two otherwise byte-identical runs. Fixed in `arms.py`;
+the pre-fix table's floor column is therefore not quoted; the post-fix run's floor median (117,211 B)
+reproduces Round C's published value exactly and re-ran stable on the four rows that had moved.
+
+### Losses, bucketed, before any win
+
+- **L1 — density where both arms complete (q02, q12, q13, q17, q22 vs graft-ask; q10 vs both).** Graft's
+  answer is an 8-row `file:line` list of 1.1–1.5 KB; ripwire's bundle is 5–6 KB, of which the fixed legend is
+  1,434–1,810 B (23–29%), the four signature rows ~1–1.5 KB, one-hop edge rows ~0.55 KB and the 24-file tail
+  ~1 KB. On q10 Graft answered "which tests cover `cache/tiered_secondary_cache.cc`" in **167 B** — a lexical
+  hit on the query word "tests" against `DBTieredSecondaryCacheTest` — where ripwire's `--affected` never
+  named that file at all (see L3). The legend is the honesty contract, not padding, and the task echo inside it
+  is pinned by `test/taskechocheck.sh`; a legend-density lane needs its own pre-registered band and is
+  registered below, not done here.
+- **L2 — "which tests cover F" missed the test named after F (q10) and buried the one it found (q12).**
+  `cache/tiered_secondary_cache_test.cc` builds the object through `NewTieredCache()`, a factory edge the
+  name-based walk cannot see, so it was absent; `db/write_batch_test.cc` was present at row ~60 of 127
+  because rows were path-sorted. **Converted to code** (`7dae6522`): every tests-to-run row now carries why —
+  `changed=1` (the test file is in the change set), `partner=1` (named after a changed file by convention),
+  `hops=N` (caller-walk depth) — in that order, on `--affected`, `--situ` and `--test-gate`. Dogfooding the
+  gate found a silent zero on the way: a change set of `{src, its test}` exited `--test-gate` with **0 and no
+  obligation**, the test's own symbols skipped as "the change". Graft's blast verb keeps exactly this
+  distinction (`changed` / `stale`), and it is the idea taken.
+- **L3 — "what changed recently in `<dir>`" (S5, 0/6 for every real arm; the placebo names 24/30).**
+  ripwire's frozen verb emitted a question-independent 35 KB symbol map on all six; a random path list at
+  that budget covers 76% of the corpus. **Converted to code** (`c7688421`, `f139025e`): `--rank-by=churn-decay`
+  now emits `<recent n= of=>` FIRST — the 40 files the newest commits touched, `<rc p= age_d= w=/>`, age in
+  days at HEAD's clock, from the same mining pass the teleport already ran. The first cut ordered rows by
+  decayed weight and named none of the S5 gold; the age analysis showed q25's gold at 9 days and the
+  weight-first 40th row at 21 days, so the order became newest-first — and q25 completes at 4,562 B where it
+  was 37,845 B incomplete. The other five S5 rows carry gold aged 26–484 days (the questions are
+  stride-sampled from a 1,200-commit window, so their "recently" is not recent): no recency verb can serve
+  them, the placebo wins three of them on budget alone, and that is the honest shape.
+- **L4 — "where is `<commit subject>` implemented" (S1: 1/6 ripwire, 0/6 graft-ask, 4/6 floor) and "how
+  does A reach B" (S4: 1/6 and 1/6).** Both arms are weak; the floor's breadth wins. ripwire's compact route
+  serves `sigs shown="4" total="40"` — four signatures for a 21-file gold (q21) — and `--for` returns a set,
+  not a path. Question-shape losses; registered as follow-ups (raise the compact sig quota under the same
+  budget; a file-level `--path`). Not fixed here.
+- **L5 — the placebo (post-fix 11 / 14 / 5).** Fourteen mutually-incomplete ties and five placebo wins
+  (q08, q20 and three S5 rows) on the rows where ripwire's byte budget is largest. The stop condition stands.
+
+Graft's own losses, for the record: `graft-expert`'s `callers <PascalCase(stem)>` emitted **0 bytes** on q02,
+q04 and q15 (`BlockBasedTableReader`, `Stringappend`, `WalManager` are not how those classes are spelled — a
+measurement of the frozen rule, disclosed); its `grep` on S3 emits 24–27 KB and completes 2/6; its `ask`
+routes every C++ question `(lexical)` with no graph re-rank engaged; and on the check axis below its `blast`
+found "no indexed dependents outside the changed files themselves" on 6 of 6 real changes — its C/C++ "broad
+tier" resolves no cross-file call for them.
+
+### RESULT — the post-fix run (`results_post.json`, ripwire `f139025e`; foreign columns re-run and byte-identical)
+
+| arm | complete | gold files named | median TTCA | median wall |
+| --- | ---: | ---: | ---: | ---: |
+| ripwire cold | **11/30** | **34/129 = 26%** | 5,650 B | 1,301 ms |
+| ripwire warm | **11/30** | **34/129 = 26%** | 5,650 B | 543 ms |
+| graft-ask, warm | 5/30 | 18/129 = 13% | 1,350 B | 761 ms |
+| graft-expert, warm | 5/30 | 15/129 = 11% | 1,429 B | 633 ms |
+| `rg` floor (sorted) | 22/30 | 99/129 = 76% | 117,211 B | 42 ms |
+| placebo | 5/30 | 41/129 = 31% | 5,854 B | — |
+
+| paired, ripwire-warm vs | before | after |
+| --- | ---: | ---: |
+| graft-ask (wins / ties / losses) | 5 / 20 / 5 | **6 / 19 / 5** |
+| graft-expert | 7 / 20 / 3 | **8 / 19 / 3** |
+| `rg` floor | 8 / 8 / 14 | 9 / 8 / 13 |
+| placebo | 9 / 17 / 4 | **11 / 14 / 5** |
+
+Per shape, complete / gold named, post-fix: S1 ripwire 1/6 · 7/43 (graft-ask 0/6 · 3/43) · S2 4/6 · 5/14
+(2/6 · 3/14) · S3 **4/6 · 9/11** (2/6 · 2/11) · S4 1/6 · 7/31 (1/6 · 5/31) · S5 **1/6 · 6/30** (0/6 · 5/30).
+The rows that flipped: q10 (S3, the stem partner, 1,814 B incomplete → 2,095 B complete), q25 (S5, `<recent>`,
+37,845 B incomplete → 4,562 B complete); q12 went 6,233 → 2,073 B. The cost: +281 B of legend on every
+rows-bearing `--affected`/`--situ`/`--test-gate` document (`testgatelegendbudgetcheck` re-pinned 2260 → 2540
+with the measurement), and +2.6 KB on every `--rank-by=churn-decay` map for the 40 `<rc>` rows.
+
+**The stop condition still fires (11 < 16) and no ranking claim is published.** The tool is measurably
+better on the two axes the losses named and it does not clear the bar the registration set.
+
+### The CHECK axis — "I have a change in my working tree, which tests must run?" (N = 6, `check_axis.py`)
+
+A worktree at `c~1` with the SOURCE half of `c`'s own diff applied uncommitted; gold = the test files `c`
+touched, which are not in the applied diff. Graft's graph built once (9.1 s / 7.9 s) then its refresh-first
+posture; ripwire cold on every checkout.
+
+| arm | pre-fix complete · gold | post-fix complete · gold |
+| --- | ---: | ---: |
+| ripwire `--test-gate` | 4/6 · 9/11 | **5/6 · 10/11** |
+| ripwire `--situ` | 2/6 · 5/11 | **3/6 · 6/11** |
+| graft `blast` | 0/6 · 3/11 | 0/6 · 3/11 |
+
+This is the axis the owner predicted, and the prediction held: Graft has no counterpart to
+`--quality-delta`, `--edit-check`, `--lint`, `--clones`, `--merge-scout` or `--hotspots` as complexity ×
+churn (its `map` hotspots are in-degree), and its `blast` — the one verb it does have here — found no
+dependents on any of the six real C++ changes. Recorded as ABSENT on Graft's side, never as a numeric win.
+
+### Ideas taken from Graft, and the ones declined with the reason
+
+Folded: the four-valued test signal (`changed`/`stale`) → `changed=`/`hops=`; the MCP `instructions` string
+as the deferral-proof channel → `kMcpServerInstructions` now tells a schema-deferring host's agent to load the
+verbs in one lookup. `docs/LINEAGE.md` §3a carries the row. Declined or deferred, each with its reason in the
+round's local ideas report: query-aware test de-rank (measured: 0 test rows in any of the 4-signature compact
+bundles on this instrument — nothing to demote); monorepo scope fusion, worktree index seeding, edge-line
+quoting on `--uses`, pooled file ranking, file-first round-robin, reviewer ranking across the blast radius,
+the >60% map split, the cluster-naming ladder, the prompt-time novelty gate — real, structural, and each a
+lane of its own with a band to pre-register; the LLM crux is out of scope by G3.
+
+### What this comparison does NOT show
+
+One corpus, one language, one commit; N = 30 + 6; localization gold only; no agent-outcome measurement;
+Graft's LLM layer unmeasured; Graft's C/C++ is its generic "broad tier", so nothing here transfers to its
+TypeScript/Python full-fidelity tier; wall time contaminated by two concurrent sessions.
+
+### Registered follow-ups (not funded here)
+
+1. The legend is 23–29% of a `--for` compact bundle — a density lane with its own band.
+2. The compact route's `sigs shown="4"` for multi-file gold (S1/S4) — quota under the same budget.
+3. One shared git-log walker for the five miners (the Round C F1 debt; the one quality-delta ack this round is
+   the rename artifact of the pre-existing `gitFileCommitCountsInDayWindow` | decayed-miner clone).
+4. `test/mcpattrparitycheck.sh` fails in THIS working checkout on `cochange`/`for`/`analyze`/`slice` rows —
+   and passes ALL PASS on a clean checkout of `5726d4d9` with the pre-round binary, with the `7dae6522`
+   binary, and with the final binary of this round. The failures are the checkout's untracked local files
+   (plan directories, `ccdb/`, `compile_commands.json`), not code; the gate's ROOT is the tree it lives in.
