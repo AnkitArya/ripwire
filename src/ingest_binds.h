@@ -24,23 +24,30 @@ namespace
 // The two shapes whose receiver we inspect: C++/ObjC `field_expression` (`.argument` / `.field`) and
 // Python `attribute` (`.object` / `.attribute`). Named here rather than re-spelled per call site because
 // the depth-2 chain walk below applies exactly the same three questions twice, one level apart.
+// Ruby: tree-sitter-ruby has no member-access node of its own — `recv.m(args)` IS the `call` node, with
+// `receiver:` / `method:` fields, and a receiver-less `m(args)` is the same node kind with no `receiver:`
+// field. So `call` is the member-access node for Ruby and a null receiver is the bare shape — receiverOf's
+// existing null-receiver return already reads that as RecvKind::None (test/rubyscopecheck.sh, Rule 1 arms).
 inline bool isMemberAccessNode( const char* t, Lang lang ) noexcept
 {
     if( lang == Lang::Cpp || lang == Lang::ObjC ) { return std::strcmp( t, "field_expression" ) == 0; }
     if( lang == Lang::Python )                    { return std::strcmp( t, "attribute" ) == 0; }
+    if( lang == Lang::Ruby )                      { return std::strcmp( t, "call" ) == 0; }
     return false;
 }
 
 inline TSNode memberAccessReceiver( TSNode access, Lang lang ) noexcept
 {
-    return ( lang == Lang::Python ) ? ts_node_child_by_field_name( access, "object",   6 )
-                                    : ts_node_child_by_field_name( access, "argument", 8 );
+    if( lang == Lang::Python ) { return ts_node_child_by_field_name( access, "object",   6 ); }
+    if( lang == Lang::Ruby )   { return ts_node_child_by_field_name( access, "receiver", 8 ); }
+    return ts_node_child_by_field_name( access, "argument", 8 );
 }
 
 inline TSNode memberAccessField( TSNode access, Lang lang ) noexcept
 {
-    return ( lang == Lang::Python ) ? ts_node_child_by_field_name( access, "attribute", 9 )
-                                    : ts_node_child_by_field_name( access, "field",     5 );
+    if( lang == Lang::Python ) { return ts_node_child_by_field_name( access, "attribute", 9 ); }
+    if( lang == Lang::Ruby )   { return ts_node_child_by_field_name( access, "method",    6 ); }
+    return ts_node_child_by_field_name( access, "field", 5 );
 }
 
 // The classified receiver of one call site. `var` is set for NamedVar / FieldOfVar, `field` for
@@ -63,6 +70,10 @@ inline RecvShape classifyReceiver( TSNode node, Lang lang, std::string_view src,
     if( std::strcmp( rt, "this" ) == 0 )
     {
         return { RecvKind::ThisObj, {}, {} }; // C++ `this`
+    }
+    if( lang == Lang::Ruby && std::strcmp( rt, "self" ) == 0 )
+    {
+        return { RecvKind::ThisObj, {}, {} }; // Ruby `self` — its own node kind, not an identifier
     }
     if( std::strcmp( rt, "identifier" ) == 0 )
     {

@@ -1958,7 +1958,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             std::size_t bestShare = 0;
             for( NodeId c : tier )
             {
-                const std::size_t sh = sharedLocality( callerCanon, g.localityKey[c] );   // path-scoped even for a free function
+                // The caller's OWN def scores a full match against itself and would win alone — and emission
+                // then drops it as a self-loop, leaving NOTHING. Ruby found it (test/rubyscopecheck.sh, facade
+                // arm): `def publish_event; notifier.publish_event(e); end` lost every real target the moment
+                // Ruby defs gained a scope (ActiveSupport 7.2: --callers=publish_event 2 → 0 with 3 sites still
+                // in --uses). Score it ZERO so it can never be the strict winner; the survivors decide.
+                const std::size_t sh = ( c == r.fromSymbol ) ? 0 : sharedLocality( callerCanon, g.localityKey[c] );   // path-scoped even for a free function
                 locShare.push_back( sh );
                 if( sh > bestShare )
                 {

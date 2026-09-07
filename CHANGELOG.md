@@ -15,6 +15,39 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — Ruby definitions now carry their enclosing class/module as `scope`
+
+Until now `src/ingest_sidecap.h` set a definition's `scope` for C++, Python and Rust only. A Ruby `def`
+therefore never had one, with three visible consequences: no Ruby row ever carried an `id=`, so a
+`Scope::name` selector (`--expand=B::initialize`, `--callers=A::helper`) could not address a Ruby method;
+same-named methods in different classes of one file folded into a single `overloads=N` row (ActiveSupport
+7.2.3.2 `lib/`, 282 files: `as_json` overloads="26", `initialize` overloads="13" — unrelated methods, not
+overloads); and `editcheck.h`'s implicit-receiver exemption, which keys on a non-empty Python/Ruby scope,
+never fired for Ruby. `rubyEnclosingScopeOf` (`src/ingest_names.h`) now records the nearest enclosing
+`class`/`module` — walking through `class << self`, skipping the definition's own node, and taking the last
+segment of a `class Foo::Bar` name — and the Ruby arm of the sidecap fills `scope` from it.
+
+Three resolver-side changes ride along so the new scope adds precision without losing edges:
+
+- Ruby call receivers are classified (`src/ingest_binds.h`): `self.m` is `ThisObj`, `x.m` is `NamedVar`, a
+  richer receiver is a member access; a receiver-less `m(args)` stays bare. Rule 1 (`src/resolve.h`) now
+  treats a bare Ruby paren call as the implicit-self send it is, so `helper(2)` inside `class A` pins to
+  `A::helper` as a fact rather than a locality guess (`lpin=`).
+- The S6-C locality tie-break (`src/graph.h`) no longer lets the caller's own definition win: it scored a
+  full match against itself, survived alone, and was then dropped as a self-loop — every real target gone.
+  Ruby's facade idiom (`def publish_event; notifier.publish_event(e); end` beside other classes' `publish_event`)
+  surfaced it; the caller is now scored zero and the survivors decide.
+
+Measured on ActiveSupport 7.2.3.2 `lib/` (`--top-k=100000`, `--no-cache`, byte-identical across runs,
+`xmllint --noout` clean): rows carrying `overloads=` 111 → 21; rows carrying `id=` 0 → 2468; header
+`ambiguous=` 451 → 417; `edges=` 3651 → 3592 (the difference is same-file self-loops that used to be
+counted against the folded row); `--callers=publish_event` 2 → 2 with the fold gone. The `id=` attribute
+is what a scoped row costs: the full map's `est_tokens` rose 82806 → 161813 on that corpus and the default
+200-row map's 9375 → 15717, the same price Python already pays. `kParserVer` 77 → 78 (extraction changed; caches re-ingest). Gate:
+`test/rubyscopecheck.sh` (scope shapes, selector, overload split, facade delegation, Rule 1 pins, a
+hoist mutation, determinism).
+
+
 ## [0.4.0] — 2026-09-06
 
 **This section spans everything since 0.2.2, not since the last tag.** v0.3.0 through v0.3.8 were cut

@@ -444,6 +444,51 @@ inline std::string enclosingScopeOf( TSNode node, std::string_view src )
     return {};
 }
 
+// Ruby: the enclosing `class` / `module` of a definition — the Ruby arm of the P2-D Rule-1 scope that
+// enclosingScopeOf gives C++ and Python. Kept separate rather than folded into enclosingScopeOf because
+// tree-sitter-ruby's kinds are bare words (`class`, `module`) that several other grammars also spell — JS
+// has a named `class` expression — and enclosingScopeOf is shared; a Ruby-only walker cannot collide.
+// Three shapes the shared walker would get wrong (every one pinned by test/rubyscopecheck.sh):
+//   * `class << self … end` is a `singleton_class` with NO name field — it is walked THROUGH, so a def
+//     inside it scopes to the class that owns the singleton (the reading `def self.m` already gets);
+//   * the definition's OWN node is skipped — `class Widget` inside `module Outer` scopes to "Outer", not
+//     to itself (enclosingScopeOf's Python arm does report a class as its own scope; that quirk is not
+//     copied here — a scope is what ENCLOSES a def);
+//   * `class Foo::Bar` names itself with a scope_resolution — the IMMEDIATE scope is its final segment
+//     ("Bar"), the same contract C++'s qualifierOf keeps for `A::B::m`.
+// Returns "" at file level, so a top-level `def` keeps no scope and no id= (the file is not a scope).
+inline std::string rubyEnclosingScopeOf( TSNode nameNode, std::string_view src )
+{
+    for( TSNode p = ts_node_parent( nameNode ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    {
+        const char* t = ts_node_type( p );
+        if( std::strcmp( t, "class" ) != 0 && std::strcmp( t, "module" ) != 0 )
+        {
+            continue;
+        }
+        TSNode nm = ts_node_child_by_field_name( p, "name", 4 );
+        if( ts_node_is_null( nm ) )
+        {
+            return {};   // anonymous → no usable scope (the grammar always names these; guard, don't assert)
+        }
+        if( ts_node_eq( nm, nameNode ) )
+        {
+            continue;    // this IS the definition being scoped — its scope is what encloses it
+        }
+        if( std::strcmp( ts_node_type( nm ), "scope_resolution" ) == 0 )
+        {
+            const TSNode last = ts_node_child_by_field_name( nm, "name", 4 );
+            if( !ts_node_is_null( last ) )
+            {
+                nm = last;
+            }
+        }
+        const std::uint32_t a = ts_node_start_byte( nm ), b = ts_node_end_byte( nm );
+        return ( a <= b && b <= src.size() ) ? std::string( src.substr( a, b - a ) ) : std::string{};
+    }
+    return {};
+}
+
 // F5: a Swift LOCAL binding — `let a = f()` / `var b = ...` inside a function/closure body — parses to the
 // same `property_declaration` node as a real stored/computed MEMBER property, so the @definition.var pattern
 // captures it as a spurious top-level `var` symbol AND (being the nearest enclosing symbol above the body's

@@ -1689,6 +1689,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             { // H4: `impl Widget { fn new() }` → "Widget" — see rustEnclosingScopeOf
                 d.scope = rustEnclosingScopeOf( nameNode, src, /*includeModules=*/true );
             }
+            else if( le.lang == Lang::Ruby )
+            { // enclosing class/module → id= addressability, per-class overload sets, editCheckImplicitReceiver
+                d.scope = rubyEnclosingScopeOf( nameNode, src );   // (test/rubyscopecheck.sh)
+            }
             defs.push_back( std::move( d ) );
             if( kind == SymKind::Class || kind == SymKind::Struct || kind == SymKind::Interface )
             {

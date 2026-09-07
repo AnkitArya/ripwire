@@ -370,8 +370,9 @@ inline EditCheckVerdict editCheckVerdict( const EditCheckContract& contract, std
 // counted 1 param).
 //
 // Recognised instead from the structural fact ingest DOES record: Python/Ruby capture the enclosing class as
-// the definition's `scope` (P2-D Rule 1), so a non-empty scope in one of those languages means an implicit
-// `self`/`cls`. The test is deliberately made HERE rather than on `arityExact`, which is also graph.h's
+// the definition's `scope` (P2-D Rule 1 for Python; rubyEnclosingScopeOf for Ruby — until that arm landed,
+// 2026-09-07, no Ruby def carried a scope and this Ruby branch was dead), so a non-empty scope in one of
+// those languages means an implicit `self`/`cls`. The test is deliberately made HERE rather than on `arityExact`, which is also graph.h's
 // call-resolution arity filter — moving it there would move edge counts corpus-wide, which is the qualified-
 // call round's agenda and not this one's. graph.h needs no equivalent change: its filter drops a candidate
 // only when `argCount > params`, and the implicit receiver errs the other way (0 args vs 1 param), so that
