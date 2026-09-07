@@ -1,20 +1,10 @@
 ---
 name: ripwire-orient
 description: >
-  Understand an unfamiliar codebase or subsystem FAST, before editing. Use the moment you land cold in a
-  repo (new to the team, about to pick up a ticket), need the lay of the land, main subsystems and entry
-  points, are asked "how does X work / where is Y / what matters here", or need an architecture OVERVIEW
-  (structure: what's here, how it's organized) or a nested module map — or a gotcha worth remembering for
-  the next session (--note-add) — or resuming cold after a context compaction, when the task survived but
-  the reasoning did not. Runs ripwire (the deterministic
-  "ripgrep of AI context", on PATH) to MAP the code — an escalation ladder from a one-screen report up to
-  communities, nested zoom, and a rendered diagram — instead of blind grep + whole-file reads. Prefer this
-  over reading many files when orienting. The map's own disclosure moments live here too: `--doctor`
-  checks the setup's health, and `--skipped` lists exactly which files the index dropped (e.g. too big to
-  index) when the map comes back looking short. A NAMED symbol's deep-dive (its own contract/callers/callees, not
-  the whole subsystem) → ripwire-navigate instead. For architecture HEALTH/enforcement (propagation cost,
-  layering violations, CI gates) → ripwire-layers instead. Stop at the first rung that answers — the
-  one-screen report usually does; climb the ladder only while the question is still open.
+  Landing COLD in an unfamiliar repo or subsystem, or about to open several files for one question:
+  map first, read only the files it ranks highest. Main subsystems and entry points, 'how does X work
+  / where is Y'; compacted mid-task, rebuild what you knew. A NAMED symbol → navigate. Stop at the
+  first rung that answers.
 allowed-tools: Bash, Read
 ---
 
@@ -24,7 +14,7 @@ allowed-tools: Bash, Read
 > • Tracing one call graph / locating a literal → **ripwire-navigate**.
 > • Vetting your OWN diff before you push → **ripwire-change-check**.
 > • Risk in code you did NOT write / an unfamiliar subsystem → **ripwire-fresh-eyes**.
-> • Map-before-you-read token discipline (any info need, mid-task) → **ripwire-efficient**.
+> • Map-before-you-read token discipline (any info need, mid-task) → this skill's companion **[`map-before-you-read.md`](map-before-you-read.md)** (folded in from the former `efficient` skill, 2026-09-07).
 > • Deep architecture-health read (deps metrics, layering rules, --arch gate) → **ripwire-layers**.
 > • Not sure which skill? → **ripwire-router**.
 
@@ -209,3 +199,12 @@ not. When you are deep in a task and learn something non-obvious, pin it *then* 
 Orientation summary: the 3–5 most important files (from god-files + hotspots), the main architectural
 modules (from `--communities` / `--zoom`), any cycles (from `--report`), and one sentence on overall shape.
 Use it to decide where a change belongs and which boundary a refactor should respect.
+
+## Mid-task: about to open several files for one question
+
+The same skill, a different rung: run the cheapest verb that answers the question (`--for`, `--grep`, `--expand`,
+`--pack-task` under a `--token-budget`), then read only the 2-3 files it ranks highest. Less context is measurably
+MORE accurate, not just cheaper. The full discipline — the read ladder, `--pack-task --partition=N` for fan-out,
+whole-symbol edits without a whole-file Read, the portable `--cache=FILE` one-liner — is
+**[`map-before-you-read.md`](map-before-you-read.md)**; the detail/token squeeze once you are reading a body is
+**[`compress-ladder.md`](compress-ladder.md)**. Both load on demand; neither is a separate skill.

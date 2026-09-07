@@ -1,24 +1,11 @@
----
-name: ripwire-efficient
-description: >
-  A token + accuracy DISCIPLINE for ANY read, not a moment: map before you open files. Reach for it the
-  instant you catch yourself about to open more than ~2 files to figure something out — anywhere in a task.
-  Also the moment you catch yourself typing "let me search the codebase", "let me read that file", or
-  "let me look at a few files first": that sentence IS the trigger. File reads dominate an agent's token
-  cost, and less context is measurably MORE accurate, not just
-  cheaper; a small ranked map beats a fan-out of whole-file reads on both. Code-repair accuracy fell
-  29% → 3% as context grew 32K → 256K tokens (LongCodeBench), so "read a few more files to be safe" is
-  the instinct this replaces, not a safe default. The reflex is one line: run the
-  cheapest verb that answers the question, then read only the 2-3 files it ranks highest. Fires ALONGSIDE
-  the moment skills (orient, navigate, change-check…), never instead of them. Backed by ripwire
-  (deterministic, on PATH).
-allowed-tools: Bash, Read
----
+# Map before you read — the token + accuracy discipline (companion to ripwire-orient)
 
-# Be token-efficient with ripwire
+Folded into **ripwire-orient** on 2026-09-07: three blind rater models routed every prompt written for this
+discipline to orient anyway, so the moment lives there and this file is its full text (the former `efficient` skill) — load it when you
+catch yourself about to open more than ~2 files, or to paste whole files, to answer one question.
 
 > Routing — this is the cross-cutting discipline; for the specific MOMENT, use its skill:
-> • Cold-start / "how does X work / where is Y" (the understand moment) → **ripwire-orient**.
+> • Cold-start / "how does X work / where is Y" (the understand moment) → **ripwire-orient**'s SKILL.md itself.
 > • Tracing one call graph / locating a literal → **ripwire-navigate**.
 > • Not sure which skill at all → **ripwire-router**.
 

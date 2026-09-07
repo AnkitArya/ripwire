@@ -6,6 +6,7 @@ exceeds the agent harness time ceiling. This runs the same scripts concurrently 
 full verification fits in one window. It does NOT modify regression.sh.
 
 usage: pargates.py <repo-root> <ripwire-bin> [-j N] [--only substr] [--json out.json]
+                   [--shard K/N] [--shard-plan]
 """
 import concurrent.futures as cf
 import hashlib
@@ -22,6 +23,8 @@ binp = os.path.abspath(sys.argv[2])
 jobs = 6
 only = None
 jsonout = None
+shard = None          # (k, n): run only the k-th of n deterministic slices of the gate list
+shard_plan = False    # print every slice's membership and predicted weight, run nothing
 args = sys.argv[3:]
 for i, a in enumerate(args):
     if a == "-j":
@@ -30,6 +33,13 @@ for i, a in enumerate(args):
         only = args[i + 1]
     elif a == "--json":
         jsonout = args[i + 1]
+    elif a == "--shard":
+        k, n = args[i + 1].split("/")
+        shard = (int(k), int(n))
+        if not (1 <= shard[0] <= shard[1]):
+            sys.exit(f"--shard K/N needs 1 <= K <= N, got {args[i + 1]}")
+    elif a == "--shard-plan":
+        shard_plan = True
 
 testdir = os.path.join(root, "test")
 # item 7 (§B12 polish round): os.listdir returns dotfiles too (unlike a shell glob without dotglob), so a
@@ -75,6 +85,54 @@ def _load_timings(path):
 
 
 prior_timings = _load_timings(_timings_path())
+
+# --- sharding: one deterministic slice of the suite per CI job -------------------------------------
+# CI runs this suite on every release leg; at 560+ gates that is ~150 CPU-minutes, i.e. ~60 min wall at
+# -j 3 on a 4-vCPU runner, and the wall clock of the whole workflow IS one leg's suite. Splitting the
+# list across N runner jobs divides that. The split has to be (a) deterministic -- every job computes
+# the same partition from the same inputs, no shared state -- and (b) balanced by cost, or the shard
+# that draws binoverridecheck + pagingsweepcheck + knownitemcheck finishes last and nothing was gained.
+# So the weights come from a COMMITTED table (.github/pargates-shard-weights.json: median measured
+# seconds per gate, regenerated from the local timings file when the suite's shape moves), not from
+# the per-machine scratch timings above, and the assignment is longest-processing-time-first: gates
+# sorted by weight descending (name ascending on ties), each handed to the currently lightest shard.
+# A gate missing from the table gets the table's median -- unknown is not free, and it is not the
+# slowest thing in the batch either when the question is which shard, not which worker. The scheduler
+# below still orders the shard's own gates by the local scratch timings, exactly as before.
+def _shard_weights():
+    path = os.path.join(root, ".github", "pargates-shard-weights.json")
+    w = _load_timings(path) if os.path.isfile(path) else {}
+    if not w:
+        return {}, 1.0
+    med = sorted(w.values())[len(w) // 2]
+    return w, med
+
+
+def shard_plan_for(gate_names, n):
+    weights, median = _shard_weights()
+    order = sorted(gate_names, key=lambda g: (-weights.get(g, median), g))
+    buckets = [[] for _ in range(n)]
+    load = [0.0] * n
+    for g in order:
+        i = min(range(n), key=lambda j: (load[j], j))
+        buckets[i].append(g)
+        load[i] += weights.get(g, median)
+    return buckets, load
+
+
+if shard_plan:
+    n = shard[1] if shard else 4
+    buckets, load = shard_plan_for(gates, n)
+    for i, (b, w) in enumerate(zip(buckets, load), 1):
+        print(f"shard {i}/{n}: {len(b)} gates, predicted {w:.0f}s")
+    print(f"total {len(gates)} gates, predicted {sum(load):.0f}s; largest shard {max(load):.0f}s")
+    sys.exit(0)
+
+if shard:
+    buckets, load = shard_plan_for(gates, shard[1])
+    gates = buckets[shard[0] - 1]
+    print(f"shard {shard[0]}/{shard[1]}: {len(gates)} gates, predicted {load[shard[0] - 1]:.0f}s "
+          f"(largest shard {max(load):.0f}s)")
 
 # Sort longest-first using recorded durations. A gate with NO recorded duration is unknown, not
 # fast -- treat it as potentially the slowest thing in the batch (float('inf')) so it schedules
@@ -137,6 +195,9 @@ GATE_BUDGET_SEC = {
     "estchargecheck.sh":          900,   # ~26 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "pagingsweepcheck.sh":        900,   # ~34 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "slicediffcheck.sh":          900,   # replays 57 labelled commits (checkout + --slice --since each); ~80 s local
+    "mcpframehonestycheck.sh":    900,   # 2026-09-07 (first sharded CI run 34145918269): rc=124 at 300.1 s on three of
+                                         # four Linux legs' shard 2 -- "exactly the cap" again. ~150 s local; a shard
+                                         # job hands it fewer neighbours to hide behind than the whole suite did.
     "knownitemcheck.sh":          900,   # 2026-09-05: --eval-retrieval stopped sampling 150 symbols in PATH order and
                                          # now grades its whole population exhaustively (the sampler measured the corpus,
                                          # not the ranker -- docs/EVALS.md section 7). The gate runs it twice on src/ for

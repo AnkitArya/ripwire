@@ -21,10 +21,10 @@ licence in [`THIRD_PARTY.md`](../THIRD_PARTY.md). First-party code under `src/` 
 third-party code lives under `third_party/` and keeps its own licence. Citing a paper means the idea
 was read and applied, not that any of its text or code is here.
 
-**The counts, derived from the tables below:** **41 repositories** and **67 papers** are folded, and
+**The counts, derived from the tables below:** **42 repositories** and **67 papers** are folded, and
 a labelled survey of **237 tools** contributed nothing and says so. **The two sets are disjoint by
 construction, so they add rather than nest:** a tool that contributed a lesson gets a row in §3a and
-is never repeated in §3b, which makes the field study 41 folded *plus* 237 surveyed — not 41 picked
+is never repeated in §3b, which makes the field study 42 folded *plus* 237 surveyed — not 42 picked
 out of 237. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
 fails if the README's sentence disagrees, and proves the disjointness itself (arm E6) rather than
 taking this paragraph's word for it. Arm E9 checks this second restatement of the pair independently
@@ -197,6 +197,7 @@ shipped target links, and it is named in the near-miss paragraph below rather th
 
 | Repository | Lesson taken | Where it lives |
 | --- | --- | --- |
+| [Graft](https://github.com/trailhq/Graft) | A tests-to-run row says WHY it is one, and a test file that is itself in the diff is an obligation on its own evidence — Graft's blast verb keeps a four-valued per-area test signal (`changed` / `stale` / `none` / `na`, in its blast module); folded as `changed=` / `partner=` / `hops=` on every `<test>`/`<t>` row in evidence order, which also closed a silent zero (a diff of `{src, its test}` exited `--test-gate` with nothing to run). Second lesson: the MCP `initialize` `instructions` string is the one channel a schema-deferring host cannot strip (Graft's MCP instructions module), so it now tells the agent to load the verbs in one lookup. Taken from the 2026-09-07 head-to-head (`bench/graft-h2h/`), where Graft's plain lexical `ask` named the stem-partner test the graph walk missed. | `src/testmap.h` (`rankTestRows`, `isTestPartnerOf`, `kTestRowEvidenceLegend`), `src/situ.h`, `src/verbs_change.h`; `src/mcp.h` (`kMcpServerInstructions`); the `<recent>` rows of `--rank-by=churn-decay` (`src/gitmine.h::recentRowsFromDecayed`) answer the same head-to-head's "what changed recently" loss |
 | [tree-sitter](https://github.com/tree-sitter/tree-sitter) | Incremental parsing with a per-language query convention, so symbol extraction is inherited from maintained grammars instead of written per language. | The whole ingest stage (`src/ingest.cpp`); vendored grammars enumerated in [`THIRD_PARTY.md`](../THIRD_PARTY.md) |
 | [aider repo-map](https://aider.chat/2023/10/22/repomap.html) | Rank a whole-repository symbol map with PageRank over the reference graph, and hand an agent the map rather than the files. This is the direct ancestor of the default run. | The default ranked map; also the interpreted-versus-compiled comparison arm in the head-to-head ([`EVALS.md`](EVALS.md) §2) |
 | [ctags](https://ctags.io/) | The durable unit of code navigation is a tiny fixed record — name, kind, and where it is — not a document. | The `<s t= n= id= k=>` symbol row: kind, name, canonical id, and a rank, nested inside its `<f p=>` file element so the path is written once per file. Line numbers are the one part of the ctags record deliberately dropped from the map — a line number goes stale on the next edit, and the map is a thing an agent rebuilds per turn |

@@ -129,18 +129,25 @@ std::optional<int> runAffected( const MainDispatch& d )
                      "caller walk and its row carries seed_kind=\"test\" — it is listed because the argument matched it (it changed, run it), not because it reaches the change. "
                      "script_gates_unmodelled= counts test/*.sh runners in the corpus (a path count; not every one invokes the binary) — "
                      "script-to-binary edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=/reached=. "
-                     "%s-->%s", rw::kGraphCountFloorBriefLegend, rw::rootRelPathsLegend( afSingleRoot ) );
-        std::printf( "<affected changed=\"%s\" seeded_by=\"%s\" seeds=\"%zu\" seed_test_files=\"%zu\" tests=\"%zu\" reached=\"%zu\" script_gates_unmodelled=\"%zu\"%s%s>",
+                     "%.*s"   // H2H-Graft F1: the evidence-order clause, testmap.h's ONE wording (changed= is spelled seed_kind=\"test\" here: the argument matched it)
+                     "order=evidence says so on the root; partners= counts the partner rows. "
+                     "%s-->%s", int( rw::kTestRowEvidenceLegend.size() ), rw::kTestRowEvidenceLegend.data(),
+                     rw::kGraphCountFloorBriefLegend, rw::rootRelPathsLegend( afSingleRoot ) );
+        std::printf( "<affected changed=\"%s\" seeded_by=\"%s\" seeds=\"%zu\" seed_test_files=\"%zu\" tests=\"%zu\" reached=\"%zu\" script_gates_unmodelled=\"%zu\""
+                     " order=\"evidence\" partners=\"%zu\"%s%s>",
                      ex( cfg.affectedFiles ).c_str(), rw::affectedSeededBy( sel ), seeds.size(), sel.seedTestFiles.size(), testFiles.size(), reach.size(), scriptGatesUnmodelledCount( ing ),
+                     rw::testRowPartnerCount( answer.rows ),      // F1: how many rows stand on the name convention alone or as well
                      afRootAttr.c_str(),                          // M12: root= says what every <test p=> below is relative to
                      rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; tests=/reached= are a transitive-caller walk over the name-based CSR
         // §P11.4: run= where a REAL runner is derivable, absent where it is not. The index is constructed
         // here (not hoisted into MainDispatch) because it is lazy — a run with no test row reads no script.
         const rw::TestRunnerIndex runners( ing );
-        for( std::uint32_t f : testFiles )
+        for( rw::TestRow row : answer.rows )   // by value: a matched test file's changed= is spelled seed_kind="test" on this verb
         {
-            std::printf( "<test p=\"%s\"%s%s/>", ex( afPathRel( f ) ).c_str(), answer.isSeedTestFile[f] ? " seed_kind=\"test\"" : "",
-                         rw::runAttrDisclosed( runners, f, ex ).c_str() );
+            const std::uint32_t f = row.fileId;
+            row.changed           = false;
+            std::printf( "<test p=\"%s\"%s%s%s/>", ex( afPathRel( f ) ).c_str(), answer.isSeedTestFile[f] ? " seed_kind=\"test\"" : "",
+                         rw::testRowEvidence( row, rw::EvDialect::Xml ).c_str(), rw::runAttrDisclosed( runners, f, ex ).c_str() );
         }
         std::printf( "</affected>" );
         return 0;

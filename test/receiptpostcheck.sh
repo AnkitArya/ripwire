@@ -162,7 +162,7 @@ import sys, json, re
 rows = json.load(open(sys.argv[1]))["tests_to_run"]
 aff  = sys.argv[2]
 want = []
-for m in re.finditer(r'<test p="([^"]*)"(?: run="([^"]*)")?(?: run_unknown="1")?/>', aff):
+for m in re.finditer(r'<test p="([^"]*)"(?: (?:seed_kind|changed|partner|hops)="[^"]*")*(?: run="([^"]*)")?(?: run_unknown="1")?/>', aff):   # F1: evidence attrs ride between p= and run=
     want.append((m.group(1), m.group(2)))
 got = [ (t["p"], t.get("run")) for t in rows ]
 assert got == want, "receipt tests_to_run %r != --affected rows %r" % (got, want)

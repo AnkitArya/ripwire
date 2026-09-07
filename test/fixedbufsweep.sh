@@ -266,7 +266,7 @@ if not bad:
 # net new CALL is one. editcheck.h itself goes 4 -> 5 mentions, which is that same one call. sites/rows are
 # unmoved because the new call interpolates only %zu — it is not a string-interpolating site, so it neither
 # joins the 30 nor needs a TABLE row, and (S1)/(S2) both stayed green across the change.
-EXPECTED = { "mentions": 219, "calls": 197, "sites": 42, "rows": 29, "widthforms": 3 }
+EXPECTED = { "mentions": 223, "calls": 201, "sites": 42, "rows": 29, "widthforms": 3 }
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the
 #            H9 ` max_tokens="%d"` ceiling disclosure: a single %d of a caller-supplied INTEGER, no %s,
@@ -276,6 +276,7 @@ EXPECTED = { "mentions": 219, "calls": 197, "sites": 42, "rows": 29, "widthforms
 #            no change to its buffer, format or bound.
 #            2026-09-04 (capture-audit wave-1 merge, L4): +4 calls/+4 mentions, +1 site/+1 row — re-derived from `git diff ec5e3c3 -- src/`, not from the delta: (a) graphGaugeAttrXml/Json (graphlegend.h, M15): two %zu into a local buf, no %s; (b) serialize.h's rank-adaptive `<sigs shown=%zu total=%zu capped="1">` open tag (lens 4 F7): two %zu into open[], no %s; (c) pageview.h:293, the H8 floor marker appended after the paging half — the ONE new string-interpolating site, and the new TABLE row above (fixed literal, sized by the remaining capacity). L5's packLego hdr pair (the pin below) is unchanged.
 #            2026-09-04 (capture-audit L5, H6/F2): +1 call/+1 mention — packLego's iface start-tag snprintf became an if/else PAIR so the TARGETED form can carry defs= (serialize.h ~5460). Re-derived from the diff, not from the delta: one snprintf line became two, both into the SAME `char hdr[64]` (widened from 48 for the extra ` defs="%zu"`), and both interpolate only %zu — no %s, nothing escaped — so neither joins the string-interpolating population and sites/rows are unmoved. (S1)/(S2) stayed green across the change
+#            2026-09-07 (head-to-head vs Graft, F1+F3): +4 calls/+4 mentions, sites/rows/widthforms unmoved — re-derived from `git diff 5726d4d9 -- src/`, not from the delta: (a) testmap.h testRowEvidence: TWO snprintf into a local `char buf[48]`, formats from a per-dialect TABLE (one %s of a constant attribute NAME — never user text, nothing escaped — and one %u), so neither joins the string-interpolating population; (b) serialize.h writeRecentRows: TWO snprintf into `char rc[64]` — the <recent n=%zu of=%zu> open tag and the age_d=%u w=%.3g row tail — no %s. The path itself is written through XmlWriter after escapeXml, outside the buffer.
 #            2026-09-03 (Phase 5 external= round): +1 call/+1 mention — the JSON header's `"external":%zu,` snprintf into the existing hdr[256] (one %zu, ≤ 32 B, the `"locality_pinned":%zu,` twin beside it); no %s, nothing escaped — re-read and sized before this pin
 #            2026-09-03 (round 5 merge): mentions 213 -> 216 with calls/sites/rows UNCHANGED. Re-read, not re-counted:
 #            all three new mentions are DATA, not buffers -- src/externalnames.h lists "snprintf"/"vsnprintf" as C stdlib

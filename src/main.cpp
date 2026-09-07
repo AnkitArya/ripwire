@@ -968,7 +968,15 @@ inline std::optional<int> finishTokenBudgetGate( TokenBudgetBuffer& tb, std::FIL
 // makes stderr its ONLY disclosure — another reason for the note to live on this side of the return.
 // W2-F: `pr` rides along because churn ranking IS a PageRank run — a teleport variant, not a separate
 // method — so the map it produces owes the same pr_iters= / pr_converged= disclosure a uniform one does.
-struct ChurnRanking { std::vector<float> rank; std::string window; rw::RankDisclosure pr; };
+struct ChurnRanking
+{
+    std::vector<float>          rank;
+    std::string                 window;
+    rw::RankDisclosure          pr;
+    std::vector<rw::RecentFile> recent;       // F3: churn-decay, single-root only — the map's <recent> rows
+    std::size_t                 recentOf = 0; // files any mined commit touched (the of= the rows were cut from)
+};
+inline constexpr std::size_t kRecentRows = 40;   // F3: ~45 B a row; the file-level answer, not the file list
 
 // P0-4: the DEFAULT window label of each churn ranker, which is also the difference between them that a
 // reader has to see. Plain churn mines a bounded 18-month wall-clock window; churn-decay mines the whole
@@ -1018,11 +1026,18 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
     const bool       isScoped   = !d.cfg.since.empty() && sinceScope.active;   // the §P9 N7 rule, one verb over
     if( isDecay )
     {
-        rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnDecayTeleport( d.root, d.ing, d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
+        // F3: ONE mining pass feeds both the teleport prior (churnPriorFromDecayed, exactly what churnDecayTeleport
+        // builds) and the map's file-level <recent> rows — so the file-level answer costs no second git walk.
+        const std::string       windowArgs = isScoped ? sinceLogArgs( sinceScope, "" ) : std::string{};
+        const DecayedChurnMined mined      = gitLogDecayedFileMining( d.root, d.ing, windowArgs, 100 );   // same merge-bomb cap as churnTeleport
+        hasChurnEvidence                   = mined.anyHistory;
+        rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnPriorFromDecayed( d.ing, mined.weights, mined.anyHistory ) );
         std::string        window = churnWindowStamp( churnDecayWindowLabel( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "all-history" ) ),
                                                       hasChurnEvidence );
         discloseEmptyChurn( window );
-        return { std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
+        ChurnRanking cr{ std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
+        cr.recent = recentRowsFromDecayed( d.root, d.ing, mined, kRecentRows, &cr.recentOf );
+        return cr;
     }
     rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, "18 months ago", d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
     // F1: the DEFAULT window's stamp names the anchor that produced it ("18mo@HEAD"); an ACTIVE --since is
@@ -1132,6 +1147,8 @@ int runDefaultMap( const MainDispatch& d )
     std::string        queryRouteNote;   // leading routed comment for --query (empty under --no-route)
     std::size_t        mapDiffChanged = 0;      // D6: teleport-seed file count, only meaningful when mapDiffActive
     bool               mapDiffActive  = false;  // true only under --map-diff — gates the header's changed= attribute
+    std::vector<rw::RecentFile> recentFiles;   // F3: rank-by=churn-decay's file-level <recent> rows (empty = absent, byte-free)
+    std::size_t                 recentOf = 0;
     std::string        churnWindowLabel = rw::defaultWindowLabel( root, "18mo" );   // §A9.6: churn's window label (F1: "@HEAD" when anchored); an ACTIVE --since overrides it below
     if( !cfg.query.empty() )
     {
@@ -1212,6 +1229,8 @@ int runDefaultMap( const MainDispatch& d )
         rank             = std::move( cr.rank );
         rankDisclosure   = cr.pr;                    // W2-F: churn is a PageRank TELEPORT variant — it runs the power iteration too
         churnWindowLabel = std::move( cr.window );   // §B2.2: already carries "(no churn evidence)" when the window mined nothing
+        recentFiles      = std::move( cr.recent );   // F3: the <recent> rows (churn-decay, single-root; empty otherwise)
+        recentOf         = cr.recentOf;
     }
     else
     {
@@ -1300,7 +1319,9 @@ int runDefaultMap( const MainDispatch& d )
                                       cfg.rankBy == RankBy::ChurnDecay ? "churn-decay" : "churn",   // P0-4
                                       cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
                                       rankByLabel,                                   // §B2.1
-                                      rankDisclosure };                              // W2-F: pr_iters= / pr_converged=
+                                      rankDisclosure,                                // W2-F: pr_iters= / pr_converged=
+                                      recentFiles.empty() ? nullptr : &recentFiles,  // F3: <recent> rows, churn-decay single-root only
+                                      recentOf };
     // T3's auto-flip changes the order= spelling ("important-last(auto:fill)" is 11 bytes longer than
     // "important-first"), so it is a BYTE fact, not only an ordering one — the comment that used to sit here
     // claimed the search was "unaffected by emit order", and at N=20000 on src/ the flip fires. One value,

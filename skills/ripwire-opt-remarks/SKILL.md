@@ -2,12 +2,9 @@
 name: ripwire-opt-remarks
 audience: contributor
 description: >
-  Triage clang optimization remarks (-Rpass / -Rpass-missed / -fsave-optimization-record) while editing
-  ripwire's own C++. Use when a compiler remark says loop not vectorized, will not be inlined, load
-  clobbered, or LICM failed to hoist — and you must decide whether that remark is worth a diff. Covers
-  -DRIPWIRE_OPT_REMARKS=ON, the opt-record YAML triage, which remark classes are signal versus restated
-  algorithm, the build-level answers (RIPWIRE_LTO, RIPWIRE_PGO), and the A/B a remark-driven fix must
-  survive. Contributor-facing: it is about compiling this tool, never about running its verbs.
+  Triage clang optimization remarks (-Rpass, -Rpass-missed, opt-record YAML) while editing ripwire's
+  OWN C++: 'loop not vectorized', 'will not be inlined' — worth a diff, or is LTO/PGO the real fix?
+  Contributor-only: about compiling this tool, never about running it.
 allowed-tools: Bash, Read, Edit
 ---
 
