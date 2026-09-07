@@ -23,8 +23,12 @@ defects, plus one resolver defect that turned out not to be Ruby's at all.
 **A Ruby `def` had no scope.** `src/ingest_sidecap.h` set a definition's `scope` for C++, Python and Rust
 only, so no Ruby row ever carried an `id=`: a `Scope::name` selector (`--expand=B::initialize`,
 `--callers=A::helper`) could not address a Ruby method, same-named methods in different classes of one file
-folded into a single `overloads=N` row, and `editcheck.h`'s implicit-receiver exemption — which keys on a
-non-empty Python/Ruby scope — never fired for Ruby. `rubyEnclosingScopeOf` (`src/ingest_names.h`) records
+folded into a single `overloads=N` row, and `--edit-check=Widget::resize` answered "symbol not found".
+(PR #47 also listed `editcheck.h`'s implicit-receiver exemption as a dead branch the scope revives. It does
+revive it, and it is still inert: Ruby has no implicit receiver parameter to exempt, and the caller test
+short-circuits on `arityExact == 0` — which `cc_paramArityExact` gives every Ruby definition, since its
+language gate does not list Ruby. Measured `incompatible="0"` scoped and unscoped, before and after. The
+comment there now says so rather than implying a recovered signal.) `rubyEnclosingScopeOf` (`src/ingest_names.h`) records
 the nearest enclosing `class`/`module`: it walks THROUGH `class << self`, skips the definition's own node
 (a `class Widget` inside `module Outer` scopes to `Outer`, never to itself) and takes the last segment of a
 `class Foo::Bar` name, matching the contract C++'s `qualifierOf` already keeps. A top-level `def` still has

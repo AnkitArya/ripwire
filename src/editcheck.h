@@ -370,9 +370,21 @@ inline EditCheckVerdict editCheckVerdict( const EditCheckContract& contract, std
 // counted 1 param).
 //
 // Recognised instead from the structural fact ingest DOES record: Python/Ruby capture the enclosing class as
-// the definition's `scope` (P2-D Rule 1 for Python; rubyEnclosingScopeOf for Ruby — until that arm landed,
-// 2026-09-07, no Ruby def carried a scope and this Ruby branch was dead), so a non-empty scope in one of
-// those languages means an implicit `self`/`cls`. The test is deliberately made HERE rather than on `arityExact`, which is also graph.h's
+// the definition's `scope` (P2-D Rule 1 for Python; rubyEnclosingScopeOf for Ruby, 2026-09-07 — before that
+// arm no Ruby def carried a scope at all), so a non-empty scope in one of those languages means an implicit
+// `self`/`cls`.
+//
+// The Ruby half of that predicate is BELT AND BRACES, not a live exemption, and saying so here is the point:
+// Ruby's `def m(a)` has NO implicit receiver parameter — `params` and the call site's argument count already
+// agree — so there is nothing to exempt, and in any case Ruby never reaches this disjunct. The caller test
+// below short-circuits on `os.arityExact == 0` first, and `cc_paramArityExact`'s language gate
+// (src/ingest_metrics.h) does not list Ruby, so every Ruby definition carries arityExact 0 and no Ruby caller
+// is arity-flaggable at all. MEASURED both ways on a two-file Ruby repo whose method gained a parameter:
+// `incompatible="0"` for a SCOPED method and for a top-level one alike, before and after the scope arm. What
+// the scope arm actually bought --edit-check is the SELECTOR: `--edit-check=Widget::resize` answered
+// "symbol not found" before it and returns a full contract verdict after.
+//
+// The test is deliberately made HERE rather than on `arityExact`, which is also graph.h's
 // call-resolution arity filter — moving it there would move edge counts corpus-wide, which is the qualified-
 // call round's agenda and not this one's. graph.h needs no equivalent change: its filter drops a candidate
 // only when `argCount > params`, and the implicit receiver errs the other way (0 args vs 1 param), so that
