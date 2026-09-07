@@ -190,7 +190,16 @@ constexpr std::uint32_t kCacheVersion = 15;           // 15 (offset-table blob):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 77;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 78;           // bump on any grammar/.scm/extraction change
+                                                      // 78 = 2026-09-07 (Elixir, test/elixircheck.sh): a
+                                                      //    twenty-second grammar (.ex/.exs) whose defs and call
+                                                      //    edges are extracted through the keyword/head filters in
+                                                      //    ingest_elixir.h. The extracted SET grows on any tree
+                                                      //    holding Elixir, so v77 blobs must be rejected.
+                                                      //    quality.h kIngestParserVerMirror bumped in the SAME
+                                                      //    commit. Landed at 78 (not the 83 the fork carried) per
+                                                      //    the collision rule below: RE-BUMP to the next free
+                                                      //    number over main's 77, never keep a fork's value.
                                                       // 77 = 2026-09-03 (Phase 5, docs/EVALS.md): two Python
                                                       //    ingest FACTS — (a) a `super()` call receiver classifies
                                                       //    RecvKind::SuperObj (appended) instead of None, so

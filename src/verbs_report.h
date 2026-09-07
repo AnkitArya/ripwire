@@ -1843,6 +1843,7 @@ bool lessLangCount( const LangCount& a, const LangCount& b ) noexcept
     return std::tie( b.files, an ) < std::tie( a.files, bn );
 }
 
+/// Count indexed files and symbols by language and return rows ordered by file count and language name.
 std::vector<LangCount> computeLangCounts( const rw::IngestResult& ing )
 {
     using namespace rw;
@@ -1850,7 +1851,7 @@ std::vector<LangCount> computeLangCounts( const rw::IngestResult& ing )
     // grammar, Metal/CUDA's C++/CUDA-as-a-language routing included, so there is nothing to disambiguate
     // — the last write among a file's own symbols is the same value every earlier one already wrote).
     std::vector<Lang> fileLangOf( ing.files.size(), Lang::Unknown );
-    std::array<std::uint64_t, std::size_t( Lang::Lua ) + 1> symbolTally {};   // sized on the LAST enum member
+    std::array<std::uint64_t, std::size_t( Lang::Elixir ) + 1> symbolTally {};   // sized on the LAST enum member
     for( const Symbol& s : ing.symbols )
     {
         if( s.fileId < fileLangOf.size() )
@@ -1862,7 +1863,7 @@ std::vector<LangCount> computeLangCounts( const rw::IngestResult& ing )
             ++symbolTally[ std::size_t( s.lang ) ];
         }
     }
-    std::array<std::uint64_t, std::size_t( Lang::Lua ) + 1> fileTally {};     // sized on the LAST enum member
+    std::array<std::uint64_t, std::size_t( Lang::Elixir ) + 1> fileTally {};     // sized on the LAST enum member
     for( Lang l : fileLangOf )
     {
         if( l != Lang::Unknown && std::size_t( l ) < fileTally.size() )

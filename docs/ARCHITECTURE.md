@@ -112,11 +112,7 @@ loop that survives them.
 Concurrency: one tree-sitter parser per worker thread (parsers are not thread-safe), files
 dispatched as work items.
 
-Languages: C++, C, Objective-C/Objective-C++, Metal (parsed with the C++ grammar), CUDA (parsed
-with the vendored tree-sitter-cuda grammar, a generated superset of tree-sitter-cpp), Python,
-TypeScript, JavaScript, Java, Ruby, PHP (the `php/` sub-grammar, so a `.php`/`.phtml` file whose
-first byte is markup still indexes), Lua, Bash, Go, Rust, Swift, C#, plus JSON, TOML and YAML
-configuration keys.
+Supported languages and formats are listed in [README.md](../README.md#languages).
 
 Two of those carry a stated floor rather than a silence. **PHP**: dynamic dispatch — `$fn()`,
 `$obj->$name()`, `call_user_func`, `__call` magic, `new $class` — names its callee at run time, so
@@ -127,6 +123,26 @@ over an ordinary table, so a Lua corpus correctly reports no inheritance edges a
 is a plain function call rather than an import directive (as in Ruby), so a `.lua` file is never a
 node in the `--deps`/`--arch` graph. Both floors are asserted from the outside by
 `test/phpcheck.sh` and `test/luacheck.sh` so they stay decisions rather than drift.
+
+<a id="elixir-extraction"></a>
+
+Elixir's grammar models definitions as calls. Its tags query selects candidate shapes; the small
+`ingest_elixir.h` capture filter checks definition keywords, excludes declaration-head/pattern references, module attributes and
+quoted AST, and locates block/keyword bodies. `defimpl P, for: T` is indexed as the module Elixir itself
+generates — `P.T`, an ABSOLUTE name that nesting inside a `defmodule` does not qualify — so an implementation
+clause that shares a name with the enclosing module's function is a second row with its own canonical id,
+not a dropped definition. Macros, guards and literal ExUnit tests are parsed `fn` symbols. Local and
+remote calls, executable default expressions and pipes produce references; module scope qualifies definitions.
+Default-expression edges are syntactic possibilities; they are not narrowed by which arguments a caller supplies. Alias/import/use
+resolution, macro expansion, dynamic dispatch and protocol implementation DISPATCH remain outside this
+initial port: implementations are indexed, but a call through a protocol is not narrowed to them. Bare identifiers outside pipes are omitted because they may be variables or
+zero-arity calls. Metrics count syntactic controls, clause arms and boolean joins, not expanded macros;
+arity narrowing is deliberately disabled (default arguments and pipes change call arity).
+`test/elixircheck.sh` covers extraction, call-site mutation, metrics and cold/warm determinism.
+
+Elixir extraction landed at revision 78 (rich 79) — `kParserVer` in `src/ingest_cache.h`, mirrored by
+`kIngestParserVerMirror` in `src/quality.h`. The required `qschemetrip` source-change pin is refreshed
+for this extraction change; snapshot scheme 8 is unchanged.
 
 The three config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
 `langCompatible` keeps a config key from ever resolving a same-spelled code symbol. They differ in

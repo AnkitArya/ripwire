@@ -760,13 +760,14 @@ inline void printPlanLanesUsage( std::FILE* out ) noexcept
         "                               55.5%% shared, largest gains on weaker lane models — and wall clock got WORSE).\n" );
 }
 
+/// Print the authoritative CLI usage and flag catalog to the caller-provided output stream.
 inline void printUsage( std::FILE* out ) noexcept
 {
     std::fprintf( out,
         "ripwire — the \"ripgrep of AI context\": parse a codebase, rank symbols by Personalized PageRank,\n"
         "stream a deterministic minified XML map to stdout. Zero runtime deps. Languages: C++, C, ObjC/ObjC++,\n"
         "Metal (MSL, .metal — C++ grammar), CUDA (.cu/.cuh — tree-sitter-cuda, <<<>>> launches are call edges),\n"
-        "Python, TypeScript, JavaScript, Java, Ruby, PHP (.php/.phtml), Lua, Bash, Go, Rust, Swift, C#;\n"
+        "Python, TypeScript, JavaScript, Java, Ruby, PHP (.php/.phtml), Lua, Elixir (.ex/.exs), Bash, Go, Rust, Swift, C#;\n"
         "JSON, TOML, YAML (config keys); Markdown (.md/.markdown — headings are section symbols with spans).\n\n"
         "usage: ripwire <dir> [flags]            # default = the ranked map of <dir> on stdout\n"
         "       ripwire <dir1> <dir2> ... [flags] # multi-root workspace: ONE merged graph over 2..16 checkouts\n"

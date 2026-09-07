@@ -57,7 +57,7 @@ struct LangEntry
 // `std::array<bool, kLangTable.size()> present` (the grammar-prewarm set,
 // below) exact too, and it turns "added a row and forgot the extent" into a compile error rather than a
 // silent drop.
-constexpr std::array<LangEntry, 40> kLangTable = {{
+constexpr std::array<LangEntry, 42> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -145,6 +145,8 @@ constexpr std::array<LangEntry, 40> kLangTable = {{
     // as one. Both extensions therefore share one row shape; no separate template tier exists or is needed.
     { ".php",  Lang::Php,        &tree_sitter_php,        "php"        },   // PHP — classes/interfaces/traits/enums/functions/methods + calls
     { ".phtml", Lang::Php,       &tree_sitter_php,        "php"        },   // PHP template (markup + <?php ?> islands) — same grammar, same query
+    { ".ex",   Lang::Elixir,     &tree_sitter_elixir,     "elixir"     },
+    { ".exs",  Lang::Elixir,     &tree_sitter_elixir,     "elixir"     },
     // Lua: no classes, no imports. The five function-definition spellings and the one call node are the
     // whole extractable structure (queries/lua/tags.scm states the metatable/dynamic-dispatch floor).
     { ".lua",  Lang::Lua,        &tree_sitter_lua,        "lua"        },   // Lua — function/method defs (5 shapes) + calls
@@ -341,7 +343,7 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
 }
 
 // ---- the DEF-name policy: which captured names get finalSegment's scope split, and which are whole ----
-// Every code language wants the split — `ns::f` / `pkg.F` must key on the bare `f` that byName resolves.
+// Most code languages want the split — `ns::f` / `pkg.F` must key on the bare `f` that byName resolves.
 // The DATA-CONFIG languages want the opposite, because there a `.` is part of the NAME and not a scope
 // separator: a TOML table header IS its dotted spelling, so `[tool.ruff.lint]` must be findable as
 // `tool.ruff.lint` rather than as `lint` — a name that collides with every other `lint` in a repo and makes
@@ -353,15 +355,19 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
 // Covering all three is the sibling-completeness rule docs/METHODOLOGY.md §3 calls the dominant
 // defect class here — fixing the instance and leaving its sibling broken is the failure it names.
 //
-// Widening a name here cannot widen the CALL GRAPH: the data-config languages emit zero @reference
-// captures, and graph.h's langCompatible already keeps each lang-isolated from every code language.
+// For data-config languages, preserving dots cannot widen the call graph: they emit no @reference
+// captures, and graph.h's langCompatible isolates them from code languages.
+// Elixir DOES emit call references. Its module/protocol names retain their dotted spelling here;
+// function-definition captures are already bare names. captureTagsFacts still applies finalSegment
+// to reference names, so preserving Elixir definition captures does not create a byName mismatch.
 //
 // This lives beside finalSegment rather than inside captureTagsFacts on purpose — the caller is a very
 // large function already over the complexity bar, and a policy branch buried in it is both invisible and
 // a measured regression (--quality-delta scored the inline ternary at +3 ccx).
+/// Return an owned definition lookup name, preserving config keys and Elixir module names verbatim.
 std::string defNameFromCapture( Lang lang, std::string_view raw )
 {
-    if( lang == Lang::Json || lang == Lang::Toml || lang == Lang::Yaml )
+    if( lang == Lang::Json || lang == Lang::Toml || lang == Lang::Yaml || lang == Lang::Elixir )
     {
         return std::string( raw );
     }

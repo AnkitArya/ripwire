@@ -157,22 +157,22 @@ inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
     return ( o == "&&" || o == "||" || o == "and" || o == "or" ) ? o : std::string_view{};
 }
 
-// Myers' &&/|| extension for CYCLOMATIC counting: does this `binary_expression` join two conditions?
+// Myers' &&/|| extension for CYCLOMATIC counting: does this binary operator join two conditions?
 // Extracted from cc_walk rather than written inline — the PHP/Lua port needed a second spelling family
 // (the WORD operators), and the inline form scored a measured +12 cx / +13 LOC on cc_walk, which is a
 // --quality-delta regression on a function already at the top of this file's complexity distribution.
 //
 // Two spelling families, and the Lang gate is what keeps the second from touching any other grammar:
-//   * `&&` / `||`  — C/C++/ObjC, TS/JS, Java, C#, Swift, Rust, Go, PHP. Two bytes.
-//   * `and`/`or`/`xor` — Lua (its ONLY spelling) and PHP (its low-precedence alternative). `or` is also
-//     two bytes, so the Lang test, not the length test, is what makes this sound: without it a
-//     hypothetical grammar spelling some non-boolean operator `or` would start scoring.
+//   * `&&` / `||` — symbolic joins in the binary-expression nodes visited by cc_walk.
+//   * `and`/`or` — Lua, PHP and Elixir; `xor` — PHP only. `or` is also two bytes, so the Lang test,
+//     not the length test, keeps a grammar's non-boolean spelling from accidentally scoring.
 // Python is deliberately absent from both: its `and`/`or` parse to a `boolean_operator` NODE, which
 // isDecisionType already names, so counting it here too would double it.
+/// Recognize short-circuit boolean joins, including word operators supported by the given language.
 inline bool cc_isBooleanJoin( TSNode n, std::string_view src, Lang lang ) noexcept
 {
     const std::string_view o        = cc_operatorText( n, src );
-    const bool             wordLang = ( lang == Lang::Lua || lang == Lang::Php );
+    const bool             wordLang = ( lang == Lang::Lua || lang == Lang::Php || lang == Lang::Elixir );
     return    o == "&&" || o == "||"
            || ( wordLang && ( o == "and" || o == "or" ) )
            || ( lang == Lang::Php && o == "xor" );
@@ -1002,6 +1002,8 @@ inline void ev_finalize( EvCtx& ctx, std::uint32_t& evOut, std::array<std::uint8
 
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
 // allowed to propagate to the per-file degrade catch, not turn into terminate().
+/// Accumulate syntactic complexity and nesting in one iterative walk from start.
+/// Update acc in place using the supplied initial depth/nesting; quoted Elixir AST is excluded.
 inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view src, CcAccum& acc, int startDepth,
                       bool countLocals,   // Phase 1: countLocals gates on lang (model.h localsCountedLang), C/C++ only
                       Lang lang, EvCtx* evCtx )   // essential complexity: nullptr outside model.h evCountedLang — zero work then
@@ -1043,7 +1045,15 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         const std::uint32_t ctrl = ( evCtx != nullptr && isNamed ) ? ev_noteNode( *evCtx, n, t, frame.ctrl, lang, src ) : frame.ctrl;
 
         // cyclomatic (flat decision count) accumulated in the SAME DFS as cognitive — one walk, both metrics.
-        if( isNamed && isDecisionType( t, lang ) )
+        // Elixir controls are ordinary calls whose target text supplies the keyword.
+        const auto elixirKeyword = lang == Lang::Elixir ? nodeFieldText( n, "target", 6, src ) : std::string_view{};
+        if( elixirKeyword == "quote" )
+        {
+            continue; // quoted AST is not executed control flow
+        }
+        const bool elixirDecision = elixirKeyword == "if" || elixirKeyword == "unless" || elixirKeyword == "for" || elixirKeyword == "with";
+        const bool elixirControl = elixirDecision || elixirKeyword == "case" || elixirKeyword == "cond" || elixirKeyword == "receive" || elixirKeyword == "try";
+        if( isNamed && ( isDecisionType( t, lang ) || elixirDecision || ( lang == Lang::Elixir && std::strcmp( t, "stab_clause" ) == 0 ) ) )
         {
             ++acc.cyclo;
         }
@@ -1063,12 +1073,12 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         {
             acc.locals += cc_countLocalDeclarators( n );
         }
-        else if( std::strcmp( t, "binary_expression" ) == 0 && cc_isBooleanJoin( n, src, lang ) )
+        else if( ( std::strcmp( t, "binary_expression" ) == 0 || ( lang == Lang::Elixir && std::strcmp( t, "binary_operator" ) == 0 ) ) && cc_isBooleanJoin( n, src, lang ) )
         {
             ++acc.cyclo;   // Myers' &&/|| extension — see cc_isBooleanJoin for the two spelling families
         }
 
-        if( isNamed && cc_isNestingControl( t, lang ) )
+        if( isNamed && ( cc_isNestingControl( t, lang ) || elixirControl ) )
         {
             const bool   isIf = ( std::strcmp( t, "if_statement" ) == 0 || std::strcmp( t, "if_expression" ) == 0 );
             const TSNode p    = ts_node_parent( n );
