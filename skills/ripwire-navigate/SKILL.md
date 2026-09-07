@@ -1,17 +1,10 @@
 ---
 name: ripwire-navigate
 description: >
-  Trace how code connects and understand ONE symbol in depth — who calls a function, what it calls, how one
-  symbol reaches another, the flow from A to B or a bounded neighborhood around one definition, a full-body
-  deep-dive of a named symbol with its callers/callees/design-docs, or
-  find a literal / regex / AST-shape with its enclosing symbol. Use when you know (or can name) the symbol
-  and need the call graph, its contract, or to locate code precisely — instead of grepping and guessing.
-  Also the answer to "is it safe to change X?" (blast radius, not just 1-hop callers). And the N-way
-  relate moment: a ticket names THREE OR MORE symbols or layers and you cannot see how they meet —
-  `--connect=A,B,C` returns the minimal subgraph tying them together, including the shared-caller join a
-  pairwise A-to-B path never sees. Run the ONE verb
-  that matches the question; when its answer is unambiguous, stop — don't stack callers + callees +
-  impact as a ritual. Backed by ripwire (deterministic, on PATH).
+  You can NAME the symbol: who calls it, what it calls, the path from A to B, its full body, or an
+  exact literal/regex match. 'Safe to change or rename X — what breaks downstream?' = the transitive
+  blast radius, not 1-hop callers. Three or more symbols → --connect. Run the one verb that fits, then
+  stop.
 allowed-tools: Bash, Read
 ---
 

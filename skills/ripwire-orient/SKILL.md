@@ -1,20 +1,10 @@
 ---
 name: ripwire-orient
 description: >
-  Understand an unfamiliar codebase or subsystem FAST, before editing. Use the moment you land cold in a
-  repo (new to the team, about to pick up a ticket), need the lay of the land, main subsystems and entry
-  points, are asked "how does X work / where is Y / what matters here", or need an architecture OVERVIEW
-  (structure: what's here, how it's organized) or a nested module map — or a gotcha worth remembering for
-  the next session (--note-add) — or resuming cold after a context compaction, when the task survived but
-  the reasoning did not. Runs ripwire (the deterministic
-  "ripgrep of AI context", on PATH) to MAP the code — an escalation ladder from a one-screen report up to
-  communities, nested zoom, and a rendered diagram — instead of blind grep + whole-file reads. Prefer this
-  over reading many files when orienting. The map's own disclosure moments live here too: `--doctor`
-  checks the setup's health, and `--skipped` lists exactly which files the index dropped (e.g. too big to
-  index) when the map comes back looking short. A NAMED symbol's deep-dive (its own contract/callers/callees, not
-  the whole subsystem) → ripwire-navigate instead. For architecture HEALTH/enforcement (propagation cost,
-  layering violations, CI gates) → ripwire-layers instead. Stop at the first rung that answers — the
-  one-screen report usually does; climb the ladder only while the question is still open.
+  Landing COLD in an unfamiliar repo or subsystem: the lay of the land, 'how does X work / where is
+  Y', an architecture overview — or compacted mid-task, rebuilding what you knew. A ladder from a one-
+  screen map upward; --skipped when the map looks short. A NAMED symbol → navigate. Stop at the first
+  rung that answers.
 allowed-tools: Bash, Read
 ---
 

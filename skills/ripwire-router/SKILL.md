@@ -1,14 +1,9 @@
 ---
 name: ripwire-router
 description: >
-  Start HERE when you're not sure which ripwire skill to use, or you're asked "which ripwire skill / how do I
-  use ripwire / where do I start with ripwire". A moment→skill map: it names the ONE skill for each moment an
-  agent recognizes itself in — cold-start, understand-X, planning-a-feature, about-to-write-a-symbol,
-  mid-implementation, reviewing-my-diff, debugging, refactoring, perf, security, handoff — plus the two
-  reflexes that leak most (before you write → --exemplar; before you call it done → --quality-delta) and the
-  moment after a measurement: which refactor a measured shape actually calls for, and the loop that proves
-  the fix landed. One
-  hop from here to the right skill. Backed by ripwire (the deterministic "ripgrep of AI context", on PATH).
+  Start HERE when unsure which ripwire skill fits, or asked 'how do I use ripwire / where do I start'.
+  A moment→skill map, cold start to handoff, plus the two reflexes that leak most: --exemplar before
+  you write, --quality-delta before you call it done. One hop to the right skill.
 allowed-tools: Bash, Read
 ---
 

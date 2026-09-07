@@ -1,17 +1,9 @@
 ---
 name: ripwire-efficient
 description: >
-  A token + accuracy DISCIPLINE for ANY read, not a moment: map before you open files. Reach for it the
-  instant you catch yourself about to open more than ~2 files to figure something out — anywhere in a task.
-  Also the moment you catch yourself typing "let me search the codebase", "let me read that file", or
-  "let me look at a few files first": that sentence IS the trigger. File reads dominate an agent's token
-  cost, and less context is measurably MORE accurate, not just
-  cheaper; a small ranked map beats a fan-out of whole-file reads on both. Code-repair accuracy fell
-  29% → 3% as context grew 32K → 256K tokens (LongCodeBench), so "read a few more files to be safe" is
-  the instinct this replaces, not a safe default. The reflex is one line: run the
-  cheapest verb that answers the question, then read only the 2-3 files it ranks highest. Fires ALONGSIDE
-  the moment skills (orient, navigate, change-check…), never instead of them. Backed by ripwire
-  (deterministic, on PATH).
+  About to open more than ~2 files, or paste whole files into context, to answer one question: map
+  first, then read only the 2-3 files the map ranks highest. The token budget discipline for ANY read
+  — less context is measurably MORE accurate; fires alongside the moment skills.
 allowed-tools: Bash, Read
 ---
 
