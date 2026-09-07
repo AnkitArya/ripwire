@@ -2487,6 +2487,69 @@ and tokens per skill, total); the C1 set against Codex's 1,024 and Claude Code's
 model reading the same text, and neither is task success (S2's substitution meter remains the behavior
 metric). A verdict here is a hypothesis to cross-read against the meter and against #49's reporter.
 
+**RESULT (2026-09-07, the single held-out measurement; raw packets, sealed keys, answer files, lexical
+reports and the drafting log in `bench/skillrater/results/2026-09-07/`): REJECT on the registered band —
+and the instrument is at its ceiling.**
+
+| arm | Opus | Sonnet | Fable | **mean hit@1 / 85** | hit@2 (min rater) | neg fires / 53 | rater agreement (top-1, 138 rows) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A — today, full (18,455 chars) | 84 | 82 | 81 | **82.3** | 83 | 0 / 0 / 0 | 136 / 135 / 133 |
+| B — today, head-cut at 350 (6,300) | 84 | 81 | 82 | **82.3** | 84 | 0 / 0 / 0 | 135 / 135 / 132 |
+| C1 = D1 — rewrite, 17 + router (5,386) | 83 | 82 | 82 | **82.3** | 83 | 0 / 0 / 0 | 135 / 134 / 133 |
+| C2 — C1 with efficient folded into orient (16 + router, 5,124) | 85 | 84 | 84 | **84.3** | 85 | 0 / 0 / 0 | 137 / 137 / 136 |
+
+**Primary:** mean-rater hit@1(D1) − hit@1(B) = **82.3 − 82.3 = +0.0 rows** against the [+8, …] band →
+**REJECT**. Per rater: Opus −1, Sonnet +1, Fable 0 — none reaches the +4 per-rater condition. Negative
+fires: 0/53 in every arm and rater. Flag check: no arm exceeds A + 4. **C2 decision:** C2 − B = +2.0
+rows, below the band; on the 71 inflation-control rows (permitted set touching neither orient nor
+efficient) C2 − C1 = 70.7 − 70.3 = **+0.4 rows**, below the +4 condition → C2 is **not adopted by rule**.
+Lexical secondary, held-out judged bm25-desc: A 51, B 40, E 39, C1 42, C2 44 (/85); C1 ≥ B held. Full
+corpus C1: split=test bm25-desc **60.0% / 0.892** (committed floor 63.0 — breached; per the rule the
+floor is NOT recalibrated on a REJECT), dev 77.9% / 0.914, judged 94/152, for-routed 92/152;
+`skillroutingjudgedcheck.sh`, `skilltruthcheck.sh`, `agentloopcodexcheck.sh`, `skillinstallcheck.sh`,
+`codexplugincheck.sh`, `skilldescbudgetcheck.sh` green on C1; `skillevalcheck.sh` red on that one floor.
+
+**What the null actually says — this is the finding, not the band.** Three rater models route this
+corpus at 95–99% top-1 from **any** of the three texts: the full descriptions, the same descriptions
+with 66% of their characters removed, and a rewrite one-third their size. The reporter's mechanism
+("related skills lose the clauses that distinguish them") does not reproduce under an LLM reader on
+this corpus: the truncated set routes exactly as well as the full one (82.3 = 82.3), and so does the
+rewrite. Two readings, both recorded: (a) the held-out corpus has no headroom for a description-content
+instrument — 85 rows, ceiling ≈ 82–84, and the S1 ceiling check already found raters at 90%+ on the
+bm25 miss set; a future description round needs a harder corpus (adversarial paraphrases, prompts
+written against the *truncated* text, or real Codex transcripts) before it can measure anything; (b)
+the bm25 arm, which registered a 19-row loss from truncation (51 → 40), is measuring vocabulary, not
+routing — the fourth round in this file to find the lexical proxy moving where the reader does not.
+
+**The one signal that did survive, in every model and every arm.** Of the 8 / 7 / 7 rater misses in
+A / B / C1, **6 / 5 / 5 are `ripwire-efficient` rows routed to `ripwire-orient`** (the rest: one
+`quality-bar` row to change-check under Sonnet in all four arms, one `orient` row to navigate). Raters
+cannot see the efficient↔orient boundary from the full 977-character description, let alone a short
+one — the taxonomy reading above called it an artifact on lexical evidence; this is the reader-side
+confirmation. C2's +2.0 comes entirely from removing that boundary (its inflation control is flat),
+which is exactly what the merge-inflation rule was written to refuse as a *routing* win: the rows did
+not get easier for other skills, the label stopped being a distinction anyone can draw. **The fold is
+the pre-named candidate for the next structural round**, to be run with the RELABEL protocol (the 12
+efficient rows relabelled by the mechanical map, logged) and the content moves (body → companion file
+under orient, router rows, `src/taskroute.h`'s `compact-legend`, the count sites, a CMake stale-dir
+prune) — not landed here, because this round's rule says it is not.
+
+**What this round does NOT settle, and hands to the owner.** The budget defect is real and independent
+of routing: six descriptions exceed Codex's hard 1,024-character loader cap, the set is 2.3× a
+200K-window Claude Code listing budget, and every budgeted client shortens or drops ripwire entries
+before the user installs anything else. The rewrite (C1) removes all of that at **zero measured routing
+cost under three LLM raters** (82.3 = 82.3 = 82.3) and a lexical-proxy result between B and A. That is
+a "no regression" finding, not the "decisive win" this registration demanded, so by its own decision
+rule the descriptions stay on `lane/skills-budget-2026-09-07` (commits 9e1e9f90 + 2ee10e36, all gates
+green except the one bm25 floor) and are not merged by this round. Landing them on budget grounds is a
+separate decision, and if taken it carries the `skillevalcheck.sh` floor recalibration (63.0 → ~50 per
+the file's header rule) as its own commit citing this paragraph — the floor was calibrated on text no
+budgeted client renders.
+
+**Scope guard, restated.** Claude-family raters on an author-written corpus; Codex production is a GPT
+model on real prompts. The cross-read that could still move this verdict is the reporter's own
+experience with the C1 set installed (#49), and the substitution meter's Codex rows.
+
 ### Subtoken acronym shredding — PRE-REGISTERED 2026-08-19 (before the fix is measured)
 
 **The defect.** The shared subtoken tokenizer shreds an all-caps run into single characters, which
