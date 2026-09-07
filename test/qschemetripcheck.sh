@@ -34,8 +34,14 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
-# 2026-09-06, Elixir: kParserVer 77 -> 81 and kIngestParserVerMirror -> 81 for the new grammar,
-#   definition/call filters and metrics. Skip old rich 78 and intermediate development 79/80.
+# 2026-09-07, ELIXIR (test/elixircheck.sh): kParserVer 77 -> 78 and kIngestParserVerMirror -> 78 for the
+#   new grammar (.ex/.exs), its definition/call capture filters and its metrics. The fork proposed 83,
+#   reasoning that 78 must be skipped as "77's rich value"; it must not be. parserVerFor() derives the rich
+#   family as kParserVer+1, but the two families live in SEPARATE cache FILES (main.cpp A4-P4 suffixes the
+#   blob name with the class), so a lean-78 blob can never be served to a rich-77 reader. The project's own
+#   history is the proof: 74 -> 75 -> 76 -> 77 are four consecutive +1 bumps, each logged below. Rebasing a
+#   fork's parser version onto main means RE-BUMPING to the next free number over main's (the rule in
+#   ingest_cache.h's kParserVer note), which is 78 — never keeping the fork's development value.
 #   Extraction identity invalidates snapshots; no Snapshot-side semantics changed, scheme stays 8.
 # 2026-09-03, PHASE 5 — the external-name veto + the receiver MRO walk (test/externalvetocheck.sh, test/mrowalkcheck.sh,
 #   docs/EVALS.md "Phase 5"): kParserVer 76 -> 77 — three Python ingest FACTS moved: a `super()` call receiver
