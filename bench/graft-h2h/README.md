@@ -12,6 +12,7 @@ registration, both runs, the loss buckets and the check axis are in `docs/EVALS.
 | `readout.py` | per-arm totals, the three-way paired verdicts (win / tie / loss with mutually-incomplete rows as ties), per-shape completions, losses listed first. |
 | `results.json` | the pre-fix run (ripwire `5726d4d9`). Its floor column is nondeterministic — see below — and is not quoted. |
 | `results_post.json` | the post-fix run (ripwire `f139025e`), foreign columns re-run and byte-identical to the first run on 30/30. |
+| `rerun_ripwire.py`, `results_post2.json` | lane 2 (the tail fix, ripwire `9273f346`): ripwire cold/warm and the placebo re-run on the frozen 30, the foreign columns carried from `results_post.json` unchanged. |
 | `results_check_pre.json`, `results_check.json` | the check axis before and after. |
 
 The raw per-arm outputs are written to `raw/`, `raw_results_post/` and `raw_check*/` and are NOT tracked:

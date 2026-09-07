@@ -12378,10 +12378,42 @@ One corpus, one language, one commit; N = 30 + 6; localization gold only; no age
 Graft's LLM layer unmeasured; Graft's C/C++ is its generic "broad tier", so nothing here transfers to its
 TypeScript/Python full-fidelity tier; wall time contaminated by two concurrent sessions.
 
+### LANE 2 — the tail served ranks 5..40 nowhere; fixed, and the frozen 30 re-run (`results_post2.json`, ripwire `9273f346`)
+
+The owner asked whether more wins were reachable. The tied rows were probed instead of guessed: on the three
+"where is `<commit subject>` implemented" rows q19, q20 and q23 the single gold file sat at candidate rank 5, 10
+and 5 in ripwire's own `--format=candidates` ranking — and appeared nowhere in the served bundle. Cause: the
+compact bundle shows four signature rows of a 40-candidate surface, and the file-grain tail excluded every file
+of that SURFACE rather than the files of the rows actually shown, so the 36 rows the byte ladder trimmed fell
+into neither section. Reproduced on the deep-tail fixture (`test/deeptailcheck.sh` arm 9): at a 900-token
+budget the ladder keeps 9 of 40 rows from 2 files and the tail still claimed `total="4"` — six ranked files
+served nowhere. Fixed in `9273f346`: both signature packers report the rows they emitted, and the XML, JSON and
+MCP lenses build the tail from those files, trimmed rows first in rank order. Only ripwire and the placebo were
+re-run (`bench/graft-h2h/rerun_ripwire.py`, Round C's posture); the foreign columns are carried unchanged.
+
+| paired, ripwire-warm | pre-fix | post-fix (F1+F3) | lane 2 |
+| --- | ---: | ---: | ---: |
+| questions completed | 9/30 | 11/30 | **14/30** |
+| gold files named | 29/129 | 34/129 | **42/129 = 32%** |
+| vs graft-ask (wins / ties / losses) | 5 / 20 / 5 | 6 / 19 / 5 | **9 / 16 / 5** |
+| vs graft-expert | 7 / 20 / 3 | 8 / 19 / 3 | **11 / 16 / 3** |
+| vs `rg` floor | 8 / 8 / 14 | 9 / 8 / 13 | 11 / 8 / 11 |
+| vs placebo | 9 / 17 / 4 | 11 / 14 / 5 | **13 / 12 / 5** |
+
+The rows that flipped are exactly the three probed (q19 5,091 B incomplete → 3,586 B complete; q20 8,427 →
+7,124; q23 7,579 → 6,146); S1 goes 1/6 → 4/6 and S4's named gold 7 → 12 of 31 (q01 2 → 5, q06 1 → 3) as the
+trimmed surface files enter the tail. One row moved the other way: q24 (18-file gold) names 3 where it named 4,
+the tail's 24 slots now being taken by higher-ranked trimmed files. The five byte losses against graft-ask are
+untouched by design (they are the legend). **The stop condition still fires — 13 of 30 against a required 16
+— and no ranking claim is published.** The remaining tied rows are the shapes named above: stride-sampled S5
+gold, multi-file S4/S1 proxies, and two S3 graph-recall misses.
+
 ### Registered follow-ups (not funded here)
 
 1. The legend is 23–29% of a `--for` compact bundle — a density lane with its own band.
-2. The compact route's `sigs shown="4"` for multi-file gold (S1/S4) — quota under the same budget.
+2. The compact route's `sigs shown="4"` for multi-file gold (S1/S4) — lane 2 put the trimmed rows' files
+   into the tail, which is what flipped q19/q20/q23; showing more than four rows under the same budget is the
+   remaining half, and it needs a pre-registered band because it trades edge rows for signature rows.
 3. One shared git-log walker for the five miners (the Round C F1 debt). Measured against the round's base,
    `--quality-delta` reported the decayed miner as a new duplication of `gitFileCommitCountsInDayWindow`; it
    is the PRE-EXISTING type-3 clone of that pair (504 tokens, similarity 0.83 on the base, verified with
