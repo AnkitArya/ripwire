@@ -2435,6 +2435,19 @@ top-1 ∈ permitted set. **Primary metric: rater hit@1 on the 85 positives, mean
 paired on identical rows.** One measurement per (arm, rater); a rater is re-asked only for ids it
 left missing or unparseable (logged in the result).
 
+**Amendment 2026-09-07, after the dev-split dry run and before any held-out rater output was read.**
+A THIRD blind rater model (Fable) joins Opus and Sonnet at the owner's request — different models route the
+same descriptions differently, and a verdict that rests on two should not rest on their shared taste.
+The primary becomes the **mean over the three raters**; the per-rater condition applies to each of the
+three; the band is unchanged. The subagent harness selects a model family (opus / sonnet / fable), not a
+point version, so the record names families. One held-out rater (Opus, arm A) had been launched but
+not read when this was written; it is used as-is. Dev dry run (Sonnet, dev split, 68 positives, format
+validation only): A 65/68, C1 67/68, neg fires 0/15 and 1/15. Also recorded here: C1 was revised ONCE
+after its lexical held-out read (bm25-desc 43/85 → 42/85 after) and before any rater ran — orient
+regained `main subsystems and entry points` because `skillroutingjudgedcheck.sh`'s synthetic cold-start
+row had routed to handoff; the revision was driven by that gate row and the dev split, not by a
+held-out row.
+
 **Accept band (C1).** ACCEPT iff **mean-rater hit@1(D1) − hit@1(B) ≥ +8 rows** (≈ +9.4pp; the smallest
 net that is not one rater's noise on a paired n = 85 where one row is 1.18pp), AND each rater
 individually shows D1 ≥ B + 4, AND negative fires(D1) ≤ fires(B) + 5 of 53, AND bm25-desc held-out
