@@ -1222,7 +1222,7 @@ void streamSideCaptures( TSNode root, const SideArms& arms )
 void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawRef>& refs, std::vector<Include>& incs, std::vector<RawBind>& binds,
                        std::vector<BindingAlias>& ffis, std::vector<RouteDef>& routeDefs,
-                       std::vector<RawRouteUse>& routeUses, bool captureValueUses )
+                       std::vector<RawRouteUse>& routeUses, std::vector<ConstOpen>& constOpens, bool captureValueUses )
 {
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: side captures" );
@@ -1235,7 +1235,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
         }
 #endif
 
-        captureIncludes( root, le.lang, fileId, src, incs, refs, binds );   // physical deps + ABS-3 import-role use-sites + Phase 5 import bindings
+        captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens );   // physical deps + ABS-3 import-role use-sites + Phase 5 import bindings + Ruby class/module opens
         captureJsImportFacts( root, le.lang, fileId, src, binds );
 
         // A4-R5: cross-language FFI binding declarations (pybind11 / extern "C" / ctypes handle). Inert on a

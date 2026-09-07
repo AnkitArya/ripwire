@@ -5,7 +5,7 @@ require 'json'                     # a gem: outside the tree, no edge
 load 'tool.rb'                     # Kernel#load, same load-path rule
 require 'shared'                   # AMBIGUOUS: ./shared.rb AND lib/shared.rb both answer
 require some_variable              # not a string literal: nothing to read
-autoload :Late, 'lib/helper'       # DISCLOSED FLOOR: the path is argument TWO, not captured
+autoload :Late, 'lib/helper'       # parser version 82: Kernel#autoload's PATH is the dependency (was a stated floor through 81)
 
 module Wrapper
   require_relative 'nested/deep'   # inside a module body

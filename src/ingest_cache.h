@@ -116,7 +116,11 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 16;           // 16: RawBind gains importedName for ES named imports.
+constexpr std::uint32_t kCacheVersion = 17;           // 17: Include gains `bool isSymbolic` + `u32 byte` (Ruby constant
+                                                      //    directives, parser version 82) and the per-file record gains a
+                                                      //    ConstOpen family (Ruby class/module opens, model.h) after
+                                                      //    routeUses — a FORMAT change → reject v16 blobs.
+                                                      // 16: RawBind gains importedName for ES named imports.
                                                       // 15 (offset-table blob): the blob gains a RECORD OFFSET
                                                       //    TABLE and a 24-byte trailer, so a run deserialises only
                                                       //    the records for the files it actually crawled, and a
@@ -192,7 +196,13 @@ constexpr std::uint32_t kCacheVersion = 16;           // 16: RawBind gains impor
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 81;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 82;           // bump on any grammar/.scm/extraction change
+                                                      // 82 = 2026-09-07 (test/rubyconstcheck.sh): Ruby constant
+                                                      //    references are dependencies — superclass, include/
+                                                      //    extend/prepend, `autoload :Name` (constant) and
+                                                      //    `autoload :Name, "path"` (path) — resolved through the
+                                                      //    corpus's own class/module index by Ruby's lexical rule;
+                                                      //    class/module opens carry namespaceOnly.
                                                       // 81 = 2026-09-07 (four-language imports:
                                                       //    test/bashsourcecheck.sh, test/luarequirecheck.sh,
                                                       //    test/rubyrequirecheck.sh, test/eliximportcheck.sh,
@@ -1205,7 +1215,7 @@ inline std::pair<std::size_t, std::size_t> cacheEntryRange( const std::vector<Ca
 // not racy. ctimeNs is the one an unprivileged writer cannot restore (see ingest_crawl.h statSizeTimes),
 // so it is what makes a same-(mtime,size) edit visible for free. -1 ⇒ unknown (the file was unstatable at
 // hash time) → the gate always re-hashes, which is the safe direction.
-struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; };
+struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; std::vector<ConstOpen> constOpens; };
 
 // tiny native-endian binary (de)serializer (the cache is host-local, never shipped)
 struct ByteW
@@ -1514,11 +1524,12 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     // (B0.2) a RICH def record additionally carries at least dlWeighted + tokenCount (2×u32) — the pair
     // arrays themselves are bounded per record inside readDef.
     const std::size_t     kMinDefRecordBytes      = minDefRecordBytes( captureValueUses );   // F8: named + tripwire-pinned above
-    constexpr std::size_t kMinIncRecordBytes      =  6;   // 2×u8 (isAngle,isLazy) + 1×str(len u32, empty)
+    constexpr std::size_t kMinIncRecordBytes      = 11;   // 3×u8 (isAngle,isLazy,isSymbolic) + 1×u32 (byte) + 1×str(len u32, empty)
     constexpr std::size_t kMinBindRecordBytes     = 26;   // 3×u32 + 2×u8 + 3×str(len u32, empty)
     constexpr std::size_t kMinFfiRecordBytes      = 14;   // 2×u8 (kind,lowConf) + 3×str(len u32, empty)
     constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (line) + 1×u8 (method) + 2×str(len u32, empty)
     constexpr std::size_t kMinRouteUseRecordBytes = 13;   // B6.3: 2×u32 (startByte,line) + 1×u8 (method) + 1×str(len u32, empty)
+    constexpr std::size_t kMinConstOpenRecordBytes = 13;  // parser version 82: 2×u32 (startByte,endByte) + 1×u8 (namespaceOnly) + 1×str(len u32, empty)
     const auto countFits = [ &r ]( std::uint32_t recordCount, std::size_t minRecordBytes ) noexcept
     {
         if( recordCount <= std::size_t( r.end - r.p ) / minRecordBytes )
@@ -1595,9 +1606,11 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     ffOut.incs.reserve( ni );
     for( std::uint32_t j = 0; j < ni && r.ok; ++j )
     {
-        const bool isAngle = r.u8() != 0;
-        const bool isLazy  = r.u8() != 0;   // kParserVer 72: TS/JS function-body require/import marker
-        ffOut.incs.push_back( Include { 0, isAngle, isLazy, r.str() } );
+        const bool          isAngle    = r.u8() != 0;
+        const bool          isLazy     = r.u8() != 0;   // kParserVer 72: TS/JS function-body require/import marker; parser version 82: Ruby autoload
+        const bool          isSymbolic = r.u8() != 0;   // parser version 82: a Ruby constant target, resolved by index, never by path
+        const std::uint32_t byte       = r.u32();       // parser version 82: the directive's start byte (lexical nesting recovery)
+        ffOut.incs.push_back( Include { 0, isAngle, isLazy, isSymbolic, byte, r.str() } );
     }
     const std::uint32_t nb = r.u32();
     if( !countFits( nb, kMinBindRecordBytes ) )
@@ -1638,6 +1651,21 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     for( std::uint32_t j = 0; j < nru && r.ok; ++j )
     {
         ffOut.routeUses.push_back( readRouteUse( r ) ); // B6.3
+    }
+    const std::uint32_t nco = r.u32();
+    if( !countFits( nco, kMinConstOpenRecordBytes ) )
+    {
+        return false;
+    }
+    ffOut.constOpens.reserve( nco );
+    for( std::uint32_t j = 0; j < nco && r.ok; ++j )
+    {
+        ConstOpen co;                                   // parser version 82 (fileId re-labelled by the caller)
+        co.startByte     = r.u32();
+        co.endByte       = r.u32();
+        co.namespaceOnly = r.u8() != 0;
+        co.written       = r.str();
+        ffOut.constOpens.push_back( std::move( co ) );
     }
     return r.ok;
 }
@@ -1808,14 +1836,15 @@ struct CacheFileIndexes
 {
     std::vector<rw::SmallVec<std::uint32_t, 8>> defIndex;
     std::vector<std::vector<std::uint32_t>>     refIndex, bindIndex;
-    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex;
+    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex, constOpenIndex;
 };
 
 inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
                                                const std::vector<RawDef>& defs, const std::vector<RawRef>& refs,
                                                const std::vector<Include>& incs, const std::vector<RawBind>& binds,
                                                const std::vector<BindingAlias>& ffis,
-                                               const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses )
+                                               const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,
+                                               const std::vector<ConstOpen>& constOpens )
 {
     CacheFileIndexes ix;
     ix.defIndex.resize( fileCount );
@@ -1825,6 +1854,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
     ix.ffiIndex.resize( fileCount );
     ix.routeDefIndex.resize( fileCount );
     ix.routeUseIndex.resize( fileCount );
+    ix.constOpenIndex.resize( fileCount );
 
     // One generic grouping pass per family — an out-of-range fileId is DROPPED, never clamped, exactly as
     // the seven hand-written loops this replaces did.
@@ -1845,6 +1875,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
     group( ffis,      ix.ffiIndex );
     group( routeDefs, ix.routeDefIndex );   // B6.3
     group( routeUses, ix.routeUseIndex );   // B6.3
+    group( constOpens, ix.constOpenIndex ); // parser version 82
     return ix;
 }
 
@@ -1993,6 +2024,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                        const std::vector<RawDef>& defs, const std::vector<RawRef>& refs, const std::vector<Include>& incs,
                        const std::vector<RawBind>& binds, const std::vector<BindingAlias>& ffis,
                        const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,   // B6.3
+                       const std::vector<ConstOpen>& constOpens,                                             // parser version 82
                        bool captureValueUses )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: saveCache (serialize + write)" );
@@ -2006,7 +2038,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     }
 
     const std::size_t      F  = files.size();
-    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses );
+    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses, constOpens );
 
     // This header field is no longer the racy-rule reference — loadCache now derives that from
     // a fresh stat() of the cache file itself (same clock+granularity domain as the per-file mtimes it's
@@ -2165,8 +2197,10 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             w.u32( std::uint32_t( ix.incIndex[f].size() ) );
             for( std::uint32_t i : ix.incIndex[f] )
             {
-                w.u8( incs[i].isAngle ? 1 : 0 );
-                w.u8( incs[i].isLazy  ? 1 : 0 );
+                w.u8( incs[i].isAngle    ? 1 : 0 );
+                w.u8( incs[i].isLazy     ? 1 : 0 );
+                w.u8( incs[i].isSymbolic ? 1 : 0 );
+                w.u32( incs[i].byte );
                 w.str( incs[i].target );
             }
             w.u32( std::uint32_t( ix.bindIndex[f].size() ) );
@@ -2188,6 +2222,14 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             for( std::uint32_t i : ix.routeUseIndex[f] )
             {
                 writeRouteUse( w, routeUses[i] ); // B6.3
+            }
+            w.u32( std::uint32_t( ix.constOpenIndex[f].size() ) );
+            for( std::uint32_t i : ix.constOpenIndex[f] )
+            {                                        // parser version 82: span + own-body bit + written name (fileId is the record's)
+                w.u32( constOpens[i].startByte );
+                w.u32( constOpens[i].endByte );
+                w.u8( constOpens[i].namespaceOnly ? 1 : 0 );
+                w.str( constOpens[i].written );
             }
             table.push_back( CacheEntry{ row.pathHash, std::uint64_t( recOffset ),
                                          f < fileHash.size() ? fileHash[f] : 0,

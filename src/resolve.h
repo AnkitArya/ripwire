@@ -1302,6 +1302,259 @@ inline HashMap<std::string, std::uint32_t> buildElixirModuleIndex( const IngestR
     return modules;
 }
 
+// ─── Ruby constant index (parser version 82) ─────────────────────────────────────────────────────────────
+// The Ruby twin of the Elixir defmodule index, for the spellings a Rails codebase actually depends through:
+// `class X < Base`, `include M` / `extend M` / `prepend M`, and the path-less `autoload :Name` — captured
+// as Include records with isSymbolic set (ingest_relations.h) and resolved HERE, never by a path probe.
+// Two rules, both Ruby's own:
+//   * DEFINERS. Every class/module OPEN the corpus holds (ing.constOpens, model.h) is given its fully-
+//     qualified constant: an open's nesting is its enclosing opens by BYTE-SPAN containment (the same
+//     containment that attributes a Reference to its def), `::X` is absolute, and a compact `class A::B`
+//     nested in `module X` names X::A::B when the tree opens X::A anywhere, else ::A::B — Module.nesting
+//     first, then Object, which is what Ruby does. An open whose body holds nothing but nested opens
+//     (`namespaceOnly`) is a NAMESPACE WRAPPER: it nests, but it defines nothing and is not a definer.
+//     A constant is then indexed to the SORTED set of files that give it a body. One file — the common
+//     case, 2628 of 2633 constants on a 3532-file Rails app. Several — a genuine reopening (a monkey patch,
+//     a decorator, a core_ext) — and a reference edges to EVERY one of them: change any and the constant
+//     changes, which is what --deps measures. That is MULTIPLICITY (every answer is right), deliberately
+//     distinct from the specifier AMBIGUITY every other Step-A degrades on (`require "shared"` answered by
+//     two files: exactly one is right and this tool cannot tell which). Only the latter resolves to nothing.
+//   * REFERENCES. A written constant `Name::Sub` at a site whose lexical nesting is [A, A::B] is looked
+//     up as A::B::Name::Sub, then A::Name::Sub, then Name::Sub — innermost first, first hit wins. `::Name`
+//     skips the nesting. The site's nesting comes from Include::byte by containment; a superclass carries
+//     its CLASS's own start byte, which containment reads as outside that class — the superclass expression
+//     is evaluated in the enclosing scope, exactly as Ruby does.
+// FLOORS (test/rubyconstcheck.sh pins each): the ancestor half of Ruby lookup (a constant inherited from a
+// superclass or an included module) is not walked; `Point = Struct.new(…)` aliases are not opens and are
+// not indexed; `const_get` / string-built constants are never read.
+// Built ONLY when the corpus holds a symbolic directive, EMPTY otherwise: on any non-Ruby tree this is one
+// pass over ing.includes that finds nothing and allocates nothing.
+struct RubyOpenRec
+{
+    std::uint32_t startByte     = 0;
+    std::uint32_t endByte       = 0;
+    std::uint32_t parent        = kNoFile;   // index into the same file's opens; kNoFile at top level
+    bool          namespaceOnly = false;
+    std::string   written;
+    std::string   fqn;                       // the resolved fully-qualified constant
+};
+
+struct RubyConstantIndex
+{
+    std::vector<std::vector<RubyOpenRec>>                          opensByFile;   // per file, sorted by (startByte asc, endByte desc)
+    HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>>  spans;         // FQN → (offset, count) into `files` — SoA, one flat table
+    std::vector<std::uint32_t>                                     files;         // definer fileIds, sorted inside each span
+    bool empty() const noexcept { return spans.empty(); }
+};
+
+inline bool rubyConstIsAbsolute( std::string_view w ) noexcept
+{
+    return w.size() > 2 && w[0] == ':' && w[1] == ':';
+}
+
+// The innermost open of `opens` whose span contains `byte` STRICTLY after its start (kNoFile when none). The
+// last open that starts at or before `byte` is found by binary search; when it has already closed, the
+// containing open is on its parent chain (opens are properly nested), so the walk is ancestors only.
+inline std::uint32_t rubyInnermostOpen( const std::vector<RubyOpenRec>& opens, std::uint32_t byte ) noexcept
+{
+    const auto it = std::upper_bound( opens.begin(), opens.end(), byte,
+                                      []( std::uint32_t b, const RubyOpenRec& o ) noexcept { return b < o.startByte; } );
+    if( it == opens.begin() )
+    {
+        return kNoFile;
+    }
+    std::uint32_t i = std::uint32_t( it - opens.begin() ) - 1u;
+    while( i != kNoFile && !( opens[ i ].startByte < byte && byte < opens[ i ].endByte ) )
+    {
+        i = opens[ i ].parent;
+    }
+    return i;
+}
+
+inline RubyConstantIndex buildRubyConstantIndex( const IngestResult& ing )
+{
+    RubyConstantIndex ix;
+    bool anySymbolic = false;
+    for( const Include& inc : ing.includes )
+    {
+        if( inc.isSymbolic )
+        {
+            anySymbolic = true;
+            break;
+        }
+    }
+    if( !anySymbolic || ing.constOpens.empty() )
+    {
+        return ix;
+    }
+    const std::uint32_t F = std::uint32_t( ing.files.size() );
+    ix.opensByFile.resize( F );
+    for( const ConstOpen& co : ing.constOpens )
+    {
+        if( co.fileId < F )
+        {
+            ix.opensByFile[ co.fileId ].push_back( RubyOpenRec{ co.startByte, co.endByte, kNoFile, co.namespaceOnly, co.written, {} } );
+        }
+    }
+
+    // Pass 1 — per file: canonical order, parent links by containment, and the NAIVE constant of every open
+    // (nesting joined as written). The naive set is the existence oracle pass 2 consults.
+    HashMap<std::string, char> naive;
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        std::vector<RubyOpenRec>& opens = ix.opensByFile[ f ];
+        std::sort( opens.begin(), opens.end(), []( const RubyOpenRec& a, const RubyOpenRec& b ) noexcept
+                   { return a.startByte != b.startByte ? a.startByte < b.startByte : a.endByte > b.endByte; } );
+        std::vector<std::uint32_t> stack;
+        for( std::uint32_t i = 0; i < opens.size(); ++i )
+        {
+            while( !stack.empty() && opens[ stack.back() ].endByte <= opens[ i ].startByte )
+            {
+                stack.pop_back();
+            }
+            opens[ i ].parent = stack.empty() ? kNoFile : stack.back();
+            const std::string_view w = opens[ i ].written;
+            if( rubyConstIsAbsolute( w ) )
+            {
+                opens[ i ].fqn.assign( w.substr( 2 ) );
+            }
+            else if( opens[ i ].parent == kNoFile )
+            {
+                opens[ i ].fqn.assign( w );
+            }
+            else
+            {
+                opens[ i ].fqn = opens[ opens[ i ].parent ].fqn; opens[ i ].fqn += "::"; opens[ i ].fqn += w;
+            }
+            naive.try_emplace( opens[ i ].fqn, 1 );
+            stack.push_back( i );
+        }
+    }
+
+    // Pass 2 — the FINAL constant, top-down (a parent precedes its children in start-byte order, so every
+    // parent's fqn is final when a child reads it). Only a compact name nested in an open (`class A::B`
+    // inside `module X`) differs from its naive form: its head `A` is looked up Module.nesting-first against
+    // the naive set, then falls to Object (top level) — which is where Ruby's own lookup ends up.
+    std::vector<std::pair<std::string, std::uint32_t>> definers;
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        std::vector<RubyOpenRec>& opens = ix.opensByFile[ f ];
+        for( std::uint32_t i = 0; i < opens.size(); ++i )
+        {
+            RubyOpenRec&           o = opens[ i ];
+            const std::string_view w = o.written;
+            if( rubyConstIsAbsolute( w ) )
+            {
+                o.fqn.assign( w.substr( 2 ) );
+            }
+            else if( o.parent == kNoFile )
+            {
+                o.fqn.assign( w );
+            }
+            else if( const std::size_t sep = w.find( "::" ); sep == std::string_view::npos )
+            {
+                o.fqn = opens[ o.parent ].fqn; o.fqn += "::"; o.fqn += w;
+            }
+            else
+            {
+                const std::string_view head = w.substr( 0, sep );
+                std::string            probe;
+                bool                   found = false;
+                for( std::uint32_t k = o.parent; k != kNoFile; k = opens[ k ].parent )
+                {
+                    probe = opens[ k ].fqn; probe += "::"; probe += head;
+                    if( naive.find( probe ) != naive.end() )
+                    {
+                        o.fqn = opens[ k ].fqn; o.fqn += "::"; o.fqn += w;
+                        found = true;
+                        break;
+                    }
+                }
+                if( !found )
+                {
+                    o.fqn.assign( w );   // Object-level: the tree opens no X::A on the chain, so `A::B` is ::A::B
+                }
+            }
+            if( !o.namespaceOnly )
+            {
+                definers.emplace_back( o.fqn, f );
+            }
+        }
+    }
+
+    // The SoA span table: one flat, sorted list of definer fileIds; each constant owns a contiguous run.
+    std::sort( definers.begin(), definers.end() );
+    definers.erase( std::unique( definers.begin(), definers.end() ), definers.end() );
+    ix.files.reserve( definers.size() );
+    for( std::size_t i = 0; i < definers.size(); )
+    {
+        std::size_t j = i;
+        while( j < definers.size() && definers[ j ].first == definers[ i ].first )
+        {
+            ix.files.push_back( definers[ j ].second );
+            ++j;
+        }
+        ix.spans.emplace( definers[ i ].first, std::pair<std::uint32_t, std::uint32_t>{ std::uint32_t( i ), std::uint32_t( j - i ) } );
+        i = j;
+    }
+    return ix;
+}
+
+// Resolve one symbolic Ruby directive to its (offset, count) run in `ix.files` — {0,0} when nothing in the
+// tree defines it. `memo` is keyed by (innermost nesting constant, written target): two sites with the same
+// nesting and spelling — the whole of a Rails controller's `include`s, every model's `< ApplicationRecord`
+// — resolve once. Deterministic: a pure function of the index and the site.
+inline std::pair<std::uint32_t, std::uint32_t> resolveRubyConstant( const RubyConstantIndex& ix,
+                                                                    HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>>& memo,
+                                                                    std::uint32_t fileId, std::uint32_t byte, std::string_view written )
+{
+    static constexpr std::pair<std::uint32_t, std::uint32_t> kNone{ 0u, 0u };
+    if( written.empty() || ix.empty() || fileId >= ix.opensByFile.size() )
+    {
+        return kNone;
+    }
+    const std::vector<RubyOpenRec>& opens = ix.opensByFile[ fileId ];
+    const std::uint32_t             inner = rubyInnermostOpen( opens, byte );
+    std::string key = ( inner == kNoFile ) ? std::string{} : opens[ inner ].fqn;
+    key += '\x1f';
+    key += written;
+    if( const auto hit = memo.find( key ); hit != memo.end() )
+    {
+        return hit->second;
+    }
+    std::pair<std::uint32_t, std::uint32_t> result = kNone;
+    const auto lookup = [ &ix, &result ]( const std::string& fqn ) noexcept
+    {
+        const auto it = ix.spans.find( fqn );
+        if( it == ix.spans.end() )
+        {
+            return false;
+        }
+        result = it->second;
+        return true;
+    };
+    if( rubyConstIsAbsolute( written ) )
+    {
+        lookup( std::string( written.substr( 2 ) ) );
+    }
+    else
+    {
+        std::string cand;
+        bool        found = false;
+        for( std::uint32_t k = inner; k != kNoFile && !found; k = opens[ k ].parent )
+        {
+            cand = opens[ k ].fqn; cand += "::"; cand += written;
+            found = lookup( cand );
+        }
+        if( !found )
+        {
+            lookup( std::string( written ) );
+        }
+    }
+    memo.emplace( std::move( key ), result );
+    return result;
+}
+
 // Resolve ONE #include / import target to a concrete repo fileId by LEXICAL path semantics, dispatched on
 // the INCLUDER's language (its file extension). `fileIndex` maps each canonical `ing.files` path → its
 // fileId. `crateRootDir`/`hasCrateRoot` carry the Rust crate root (empty/false for non-Rust);
@@ -1528,6 +1781,8 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
 
     const HashMap<std::string, std::uint32_t> elixirModules = buildElixirModuleIndex( ing );
     const HashMap<std::string, std::uint32_t>* moduleIndex = elixirModules.empty() ? nullptr : &elixirModules;
+    const RubyConstantIndex                   rubyConsts    = buildRubyConstantIndex( ing );   // parser version 82; empty unless a symbolic directive exists
+    HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>> rubyMemo;
 
     std::vector<std::uint32_t> includeCountByFile( F, 0 );
     for( const Include& inc : ing.includes )
@@ -1546,6 +1801,26 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
     {
         if( inc.fileId >= F )
         {
+            continue;
+        }
+        if( inc.isSymbolic )
+        {
+            // A Ruby constant: index + lexical rule, and an edge to EVERY definer (multiplicity — see the
+            // RubyConstantIndex note). Self-includes are dropped exactly as on the path branch below.
+            const auto [ off, cnt ] = resolveRubyConstant( rubyConsts, rubyMemo, inc.fileId, inc.byte, inc.target );
+            for( std::uint32_t k = 0; k < cnt; ++k )
+            {
+                const std::uint32_t to = rubyConsts.files[ off + k ];
+                if( to == inc.fileId )
+                {
+                    continue;
+                }
+                adj[ inc.fileId ].push_back( to );
+                if( lazyPairsOut != nullptr )
+                {
+                    recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
+                }
+            }
             continue;
         }
         std::string_view crd    = crateRootDir;

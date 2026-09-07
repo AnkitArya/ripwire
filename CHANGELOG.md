@@ -15,6 +15,84 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — Ruby constant references are dependencies (parser version 82, cache format 17)
+
+A Zeitwerk application spells almost none of its dependencies with `require`: a controller depends on a
+model by **naming the constant**, and a Rails gem declares half its structure with `autoload :Name`. Parser
+version 81 gave Ruby `require`/`require_relative`/`load`; this round adds the constant spellings, so the
+file graph `--deps`/`--arch`/`--impact`/`--cochange` see is the one Ruby actually has:
+
+| Spelling | Directive | Resolution |
+| --- | --- | --- |
+| `class X < Base` | the superclass constant | index, lexical rule (below) |
+| `include M` / `extend M` / `prepend M` | one directive per constant argument | index, lexical rule |
+| `autoload :Name` (ActiveSupport::Autoload) | the constant | index, lexical rule; `isLazy` |
+| `autoload :Name, "path"` (Kernel#autoload) | the **path**, as one directive — never the constant beside it | the load-path rule, as a `require`; `isLazy` |
+
+**The rule is Ruby's own, not a convention.** Every `class`/`module` open in the corpus is recorded with its
+name as written (`Base`, `App::Audited`, `::Top`) and its byte span (`ConstOpen`, `src/model.h`). An open's
+nesting is its enclosing opens by span containment — the same containment that attributes a call to its
+def — and its fully-qualified constant follows: `::X` is absolute; a compact `class A::B` inside `module X`
+names `X::A::B` when the tree opens `X::A` anywhere, else `::A::B` (Module.nesting first, then Object). A
+reference `Name::Sub` at nesting `[A, A::B]` is looked up as `A::B::Name::Sub`, `A::Name::Sub`,
+`Name::Sub`; first hit wins. A superclass carries its class's own start byte, so it resolves in the
+**enclosing** scope, exactly as Ruby evaluates it. Constant targets are never probed as paths
+(`Include::isSymbolic`): `require "Foo"` is legal Ruby, and on a case-insensitive filesystem a path probe for
+`Trackable` lands on `lib/trackable.rb` — the fixture's decoy pins it.
+
+**Two kinds of "defined in many files", told apart structurally.** `module App` is opened by every file under
+`lib/app/`. An open whose body holds nested opens and **nothing else** is a *namespace wrapper*: it nests,
+but it defines nothing of `App` and is not a definer in the index (`ConstOpen::namespaceOnly`, read off the
+body's children — comments are extras and are skipped; an EMPTY open defines). A reopening **with** a body — a
+monkey patch, a decorator, a `core_ext` — is a real second definer, and a reference then edges to **every**
+definer: change any of them and the constant changes, which is what `--deps` measures. That is multiplicity
+(every answer is right), deliberately distinct from the specifier ambiguity every other Step-A degrades on
+(`require "shared"` answered by two files: exactly one is right, and this tool cannot tell which). Only the
+latter resolves to nothing. Measured with a Prism prototype of the same lexical rule on a 3532-file Rails
+app: 124 constants were "multiply defined" by opens, **5** by bodies, and treating wrappers as definers was
+what made 246 superclass references ambiguous there (0 after).
+
+**Measured** (`--deps --limit=100000 --no-cache`, both binaries from this tree; `importees` is the
+uncapped `<godfiles total=>` — files with at least one incoming edge — and `edge-bearing` is `<deps files=>`):
+
+| corpus | ccd | acd | nccd | shape | importees | edge-bearing files |
+| --- | --- | --- | --- | --- | --- | --- |
+| activesupport 7.2.3.2 `lib/` (282 files) | 3658 → 10450 | 13.0 → 37.2 | 1.82 → 5.19 | vertical → tangled | 194 → 241 | 194 → 206 |
+| activerecord 7.2.3.2 `lib/` (395) | 947 → 2714 | 2.4 → 6.9 | 0.31 → 0.90 | horizontal | 214 → 385 | 108 → 300 |
+| a Rails app, 4683 files / 3532 `.rb` | 5638 → 12740 | 1.5 → 3.3 | 0.14 → 0.31 | horizontal | 103 → 385 | 1154 → 2296 |
+| a second Rails app, 1957 / 1895 `.rb` | 5483 → 6258 | 2.9 → 3.3 | 0.29 → 0.33 | horizontal | 80 → 189 | 619 → 1066 |
+
+ActiveSupport turning `tangled` is `core_ext`: `String` is reopened with a body in 15 files, so every
+`< String` and `include`-of-a-patched-module depends on all of them — true, and the point of `core_ext`.
+The **default map** is byte-identical to the pre-change binary on four Ruby-free corpora (this repository
+and three others) and moves on Ruby ones only through the call graph's same-include tier: ActiveSupport
+`edges=` 3729 → 3715, `ambiguous=` 409 → 406; ActiveRecord 8397 → 8298, 1284 → 1105.
+
+**Floors, each pinned by an arm of `test/rubyconstcheck.sh`.** The ancestor half of Ruby's lookup (a
+constant inherited from a superclass or an included module) is not walked. `Point = Struct.new(…)` is an
+alias, not an open — `queries/ruby/tags.scm` skips CamelCase assignments and so does the index. `include
+Object.const_get(:X)`, `autoload :X, some_path`, `require some_variable` capture nothing. Constant
+**receivers** (`User.find`) are not this round: they are the bulk of a Zeitwerk app's edges and move every
+Ruby denominator again, so they land as their own change with their own table.
+
+**Record shape.** `Include` gains `isSymbolic` and `byte`; the per-file cache record gains the `ConstOpen`
+family after `routeUses` — `kCacheVersion` 16 → 17 (a format change; the parser-version bump re-ingests
+every cache anyway, so no extra cost). `Symbol::scope` stays the *immediate* enclosing name by design; the
+fully-qualified constant lives only where it is needed. `--impact`'s importer tier reports `lazy="1"` for
+an `autoload`, as it does for a function-body `require()`.
+
+**Expired floor.** `test/rubyrequirecheck.sh` arm 3(c) pinned "`autoload :Late, "lib/helper"` is not
+captured" since parser version 81. It now is (12 directives on that fixture, not 11; `lib/helper.rb`
+afferent 2 → 3), and the arm was inverted rather than deleted so the expiry is on the record.
+
+Gate: `test/rubyconstcheck.sh` + `test/rubyconstfix/` (27 files — nesting, compact and absolute names,
+lexical shadowing, the three mixin verbs, `autoload` plain / in `eager_autoload do` / in `autoload_under
+do` / with a path, a monkey-patched in-tree class, a patched core class, a namespace with 20 wrapper opens
+and one real body, a wrapper-only reopen, out-of-tree constants, a same-basename decoy, a same-file
+reference, root-spelling parity, determinism, warm == cold, well-formedness). Written red first: 24 arms
+fail against the parser-version-81 binary, every mutation-control and floor arm passes there. 557 → 558
+gate scripts.
+
 ## [0.5.0] — 2026-09-07
 
 **The first release carrying outside contributions.** Three people who do not work on this project

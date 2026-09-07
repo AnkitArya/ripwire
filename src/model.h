@@ -478,13 +478,53 @@ struct Include
                                     //   relative-to-includer) OR a non-C import. Path-precise resolution
                                     //   (resolve.h::resolvePreciseInclude) uses this to leave angle
                                     //   includes UNRESOLVED rather than basename-matching them.
-    bool          isLazy   = false; // TS/JS only: true ⇒ this `require("./x")` / `import("./x")` call sits
+    bool          isLazy   = false; // TS/JS: true ⇒ this `require("./x")` / `import("./x")` call sits
                                     //   inside a FUNCTION BODY (kJsFunctionContainers), not at module load
                                     //   time — the dependency is real (--impact's importer tier must still
                                     //   name the file) but semantically WEAKER: it fires only if and when
-                                    //   that function runs. false for every other directive kind and for a
-                                    //   top-level TS/JS require/import. See ingest.cpp::captureIncludes.
-    std::string   target;           // raw include path ("foo.h", <vector>) or module name
+                                    //   that function runs. Ruby (parser version 82): true for every `autoload`,
+                                    //   which is lazy by definition (the file loads on the constant's first
+                                    //   use). false for every other directive kind and for a top-level TS/JS
+                                    //   require/import. See ingest.cpp::captureIncludes.
+    bool          isSymbolic = false; // parser version 82: true ⇒ `target` names a language-level SYMBOL (a Ruby
+                                    //   constant: superclass, include/extend/prepend argument, path-less
+                                    //   `autoload :Name`), resolved through the corpus's OWN definition index
+                                    //   (resolve.h::RubyConstantIndex) and NEVER probed as a path. Spelling
+                                    //   cannot carry this bit: `require "Foo"` is legal Ruby and `Foo.rb` a
+                                    //   legal file, and on a case-insensitive filesystem a path probe for a
+                                    //   constant lands on the wrong file (test/rubyconstcheck.sh, decoy arm).
+    std::uint32_t byte     = 0;     // parser version 82: the directive's start byte in its file. A symbolic target
+                                    //   is resolved by Ruby's LEXICAL rule, and the lexical nesting at the
+                                    //   site is recovered from this byte by span containment against the
+                                    //   file's class/module symbols — the same containment that attributes a
+                                    //   Reference to its enclosing def, so the two sides cannot disagree.
+    std::string   target;           // raw include path ("foo.h", <vector>), module name, or (isSymbolic)
+                                    //   the constant AS WRITTEN (`Base`, `::App::User`, `ActiveRecord::Base`)
+};
+
+// A Ruby class/module OPEN (parser version 82): `class X < Y … end` / `module M … end`, one record per open, with
+// the name AS WRITTEN (`Base`, `App::Audited`, `::Top`). The Symbol model deliberately keeps only the
+// IMMEDIATE scope (`scope` — see ingest_sidecap.h), so a compact `class Api::V1::UsersController` cannot be
+// rebuilt into its full constant from symbols; this table is the carrier for what resolve.h's
+// RubyConstantIndex needs and nothing else: the open's byte span (nesting is recovered by containment, the
+// same way a Reference finds its enclosing def), whether the open has a body of its own, and the written
+// name. The fully-qualified constant is computed in resolve.h by Ruby's own lexical rule, where the whole
+// corpus is visible — a compact `class A::B` inside `module X` names X::A::B if the tree defines X::A, else
+// ::A::B — never here, where only one file is.
+//   namespaceOnly: the body holds nested class/module opens and NOTHING else (comments aside) — `module App
+//   … end` as every file under lib/app/ writes it. Such an open defines nothing of its constant and is not a
+//   DEFINER in the index (it still nests). An EMPTY open (`class Base; end`) is a definer, not a wrapper. Measured on a 3532-file Rails app: 124 constants were "defined
+//   in many files" by opens, 5 by bodies. A reopening WITH a body (a monkey patch) is a real second
+//   definer, and a reference then edges to every definer (test/rubyconstcheck.sh).
+// Ruby-only this round; the shape (span + written name + own-body bit) fits any language whose namespaces
+// reopen across files. Serialized in the cache (ingest_cache.h, kCacheVersion 17).
+struct ConstOpen
+{
+    std::uint32_t fileId        = 0;
+    std::uint32_t startByte     = 0;      // span of the class/module node
+    std::uint32_t endByte       = 0;
+    bool          namespaceOnly = false;
+    std::string   written;                // the name as written: `Base`, `App::Audited`, `::Top`
 };
 
 // P2-D Rule 2 LOCAL-VARIABLE TYPE BINDING (`var : typeName`) captured at ingest. One record per
@@ -840,6 +880,7 @@ struct IngestResult
                                            // startByte)); reachable only through graph.h's resolveFieldSelector.
     std::vector<Reference>   references;   // unresolved calls
     std::vector<Include>     includes;     // #include / import directives (physical dependencies)
+    std::vector<ConstOpen>   constOpens;   // parser version 82: Ruby class/module opens, for the constant index (resolve.h)
     std::vector<Binding>     bindings;     // P2-D Rule 2: local var→type bindings (`Foo x;`), for receiver-var narrowing
     std::vector<BindingAlias> bindingAliases;  // R5: cross-language FFI binding declarations (pybind/extern-C/ctypes)
     std::vector<RouteDef>    routeDefs;     // B6.3: HTTP server-side route registrations (unresolved handler names)
