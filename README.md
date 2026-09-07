@@ -54,7 +54,7 @@ the tests that reach them. Run on this repository (2026-08-30), that second line
 
 Every number on this page is a measurement on a corpus we happen to have. **Yours is one we don't.**
 
-After you have actually used it on your own repository for a while, hand your agent
+After a session on your own repository — your first one counts, and counts most — hand your agent
 [`prompts/improve-for-my-language.md`](prompts/improve-for-my-language.md). It harvests that
 session's own transcript — where ripwire answered, where it missed, where you fell back to grep —
 and every finding it produces has to cite the moment it came from: what you asked, which command
