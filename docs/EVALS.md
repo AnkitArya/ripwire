@@ -12238,14 +12238,14 @@ number anywhere in this section.** The full audit is in the round's local report
 | --- | --- | --- |
 | ripwire cold / warm | this branch, dev build (never Release); pre-fix `5726d4d9`, post-fix `f139025e` | Round C's frozen verb map: S1 `--for=<subject>`, S2 `--situ=<file>`, S3 `--affected=<file>`, S4 `--for=<question>`, S5 `--rank-by=churn-decay`; cold = `--no-cache` (parse inside the window) |
 | graft-ask | trailhq/Graft `05760b07` (release 0.17.0), built from source, node v26.4.0, WARM (graph pre-built: 13.09 s, 46,305 nodes / 53,157 edges, 141 MB; its refresh-first stat inside the window) | `graft ask "<question verbatim>"` on every shape, default `--limit 8` — the plain-words posture |
-| graft-expert | same | per-shape verb frozen from `--help` before any score: S1 `ask "<subject>"`, S2 `callers <PascalCase(stem)> --depth 2`, S3 `grep "<stem>" --fixed`, S4 `callers <PascalCase(stem)> --direction out --depth 2`, S5 `ask` (Graft has no history verb; identical to graft-ask by construction) |
-| rg floor | ripgrep 15.1.0 | `rg -l --sort path --fixed-strings` then whole-file reads (cap 200) |
+| graft-expert | same | per-shape verb frozen from `--help` before any score: S1 `ask "<subject>"`, S2 `callers <PascalCase(stem)>` two hops in, S3 `grep "<stem>"` as a fixed string, S4 `callers <PascalCase(stem)>` two hops out, S5 `ask` (Graft has no history verb; identical to graft-ask by construction) |
+| rg floor | ripgrep 15.1.0 | `rg -l` sorted by path, fixed-string literal, then whole-file reads (cap 200) |
 | placebo | random rank at ripwire-warm's matched byte budget, seeded by qid | mandatory; mutually-incomplete rows are TIES |
 
 Graft's `[graft] tokens saved ≈ N …` banner lines — which also instruct the reading agent to report the
 saving to the user — are part of what it emits and are counted. Every Graft call ran under `env -i` with an
 allowlist and `DO_NOT_TRACK=1`, in its own worktree of the corpus (its build appends `/graft/` to the corpus
-`.gitignore` and writes `.ignore`, so no other arm may share that checkout). Its LLM layer (`--deep`,
+`.gitignore` and writes `.ignore`, so no other arm may share that checkout). Its LLM layer (the deep build,
 summaries, crux) needs an API key and was not measured; no dollars were spent by any arm. Cold ripwire pays
 ~2.0 s of parse inside its window; graft's graph is built before its window opens — the asymmetry is
 declared, not smoothed. Two other sessions were live on this machine, so every millisecond is an upper bound.
@@ -12391,3 +12391,5 @@ TypeScript/Python full-fidelity tier; wall time contaminated by two concurrent s
    and passes ALL PASS on a clean checkout of `5726d4d9` with the pre-round binary, with the `7dae6522`
    binary, and with the final binary of this round. The failures are the checkout's untracked local files
    (plan directories, `ccdb/`, `compile_commands.json`), not code; the gate's ROOT is the tree it lives in.
+5. `test/sublistcountcheck.sh` arm (6b) is red on the round's BASE (`5726d4d9`, clean worktree, its own
+   binary): the MCP `grep` limit=3 payload is 1,563 B against a 1,500 B budget. Pre-existing, not touched here.
