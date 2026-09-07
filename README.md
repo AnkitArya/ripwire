@@ -1735,7 +1735,7 @@ imports. Dynamic dispatch — `$fn()`, `call_user_func`, `__call` — names its 
 a stated floor, not a silence), **Lua** (all five spellings that define a function, including the
 `M.f = function` and table-constructor forms; `function M:f()` is a method. Metatable inheritance is
 a runtime call with no syntax to read, so a Lua corpus reports no inheritance edges — stated, not
-implied), **Elixir** (`.ex`/`.exs` — modules, protocols, functions, macros, guards and delegates;
+implied), **Elixir** (`.ex`/`.exs` — modules, protocols, protocol implementations, functions, macros, guards and delegates;
 literal ExUnit tests, local calls, remote calls and pipes; see the
 [static-analysis limits](docs/ARCHITECTURE.md#elixir-extraction)), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
 `[tool.ruff.lint]` table is one symbol under its full dotted name, and

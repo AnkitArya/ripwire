@@ -1686,6 +1686,12 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 d.name = "test " + std::string( nameTxt.substr( 1, nameTxt.size() - 2 ) );
                 d.testScope = 1;
             }
+            else if( le.lang == Lang::Elixir && !elixirImplName( roleNode, src ).empty() )
+            {
+                // `defimpl P, for: T` — the @name capture is just the protocol alias, but the module Elixir
+                // generates is `P.T`, which is what the impl's own defs carry as their scope.
+                d.name = elixirImplName( roleNode, src );
+            }
             if( le.lang == Lang::Cpp )                              // canonical scope (E#4): out-of-line `A::b` → "A", else enclosing class/namespace
             {
                 d.scope = qualifierOf( nameNode, src );
@@ -1704,7 +1710,8 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             }
             else if( le.lang == Lang::Elixir )
             {
-                d.scope = elixirScope( roleNode, src );
+                // A defimpl row's own name is already absolute (`P.For`), so no enclosing module scopes it.
+                d.scope = elixirImplName( roleNode, src ).empty() ? elixirScope( roleNode, src ) : std::string{};
             }
             defs.push_back( std::move( d ) );
             if( kind == SymKind::Class || kind == SymKind::Struct || kind == SymKind::Interface )

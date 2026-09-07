@@ -66,18 +66,10 @@ TSNode elixirFirstArgument( TSNode node ) noexcept
 }
 
 // Both `do ... end` and `do: expression` carry a body, but neither has a body: field.
-/// Find a definition's direct do-block or do-keyword value without adopting an ancestor's body.
-/// node must be non-null; src must contain its source span. Return a null node when no body exists.
-TSNode elixirBody( TSNode node, std::string_view src ) noexcept
+/// Find the value of a `key:` entry in node's own keyword arguments (`def f(), do: 1`, `defimpl P, for: T`).
+/// key carries its trailing colon. Return a null node when node has no such keyword.
+TSNode elixirKeywordValue( TSNode node, std::string_view key, std::string_view src ) noexcept
 {
-    for( std::uint32_t childId = 0; childId < ts_node_named_child_count( node ); ++childId )
-    {
-        const TSNode child = ts_node_named_child( node, childId );
-        if( std::strcmp( ts_node_type( child ), "do_block" ) == 0 )
-        {
-            return child;
-        }
-    }
     const TSNode args = elixirArguments( node );
     if( ts_node_is_null( args ) )
     {
@@ -93,18 +85,33 @@ TSNode elixirBody( TSNode node, std::string_view src ) noexcept
         for( std::uint32_t pairId = 0; pairId < ts_node_named_child_count( arg ); ++pairId )
         {
             const TSNode pair = ts_node_named_child( arg, pairId );
-            auto key = nodeTextOf( ts_node_child_by_field_name( pair, "key", 3 ), src );
-            while( !key.empty() && std::isspace( static_cast<unsigned char>( key.back() ) ) )
+            auto found = nodeTextOf( ts_node_child_by_field_name( pair, "key", 3 ), src );
+            while( !found.empty() && std::isspace( static_cast<unsigned char>( found.back() ) ) )
             {
-                key.remove_suffix( 1 );
+                found.remove_suffix( 1 );
             }
-            if( key == "do:" )
+            if( found == key )
             {
                 return ts_node_child_by_field_name( pair, "value", 5 );
             }
         }
     }
     return {};
+}
+
+/// Find a definition's direct do-block or do-keyword value without adopting an ancestor's body.
+/// node must be non-null; src must contain its source span. Return a null node when no body exists.
+TSNode elixirBody( TSNode node, std::string_view src ) noexcept
+{
+    for( std::uint32_t childId = 0; childId < ts_node_named_child_count( node ); ++childId )
+    {
+        const TSNode child = ts_node_named_child( node, childId );
+        if( std::strcmp( ts_node_type( child ), "do_block" ) == 0 )
+        {
+            return child;
+        }
+    }
+    return elixirKeywordValue( node, "do:", src );
 }
 
 /// Count syntactic parameters in an ordinary or guarded definition head, saturating at UINT16_MAX.
@@ -129,7 +136,7 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     // Quoted syntax and module attributes (notably @spec/@type) are not runtime call sites.
     for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
     {
-        if( elixirTarget( parent, src ) == "quote" || elixirTarget( parent, src ) == "defimpl"
+        if( elixirTarget( parent, src ) == "quote"
             || ( std::strcmp( ts_node_type( parent ), "unary_operator" ) == 0 && nodeFieldText( parent, "operator", 8, src ) == "@" ) )
         {
             return false;
@@ -154,7 +161,8 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
             }
             return true;
         }
-        return kind == SymKind::Other ? elixirModuleKeyword( target ) : elixirFunctionKeyword( target );
+        // `defimpl` defines a real module (`Protocol.For`); its row is named by elixirImplName at capture.
+        return kind == SymKind::Other ? ( elixirModuleKeyword( target ) || target == "defimpl" ) : elixirFunctionKeyword( target );
     }
     const TSNode firstArg = elixirFirstArgument( role );
     if( target == "test" && !ts_node_is_null( firstArg ) && std::strcmp( ts_node_type( firstArg ), "string" ) == 0 && !ts_node_is_null( elixirBody( role, src ) ) )
@@ -203,6 +211,25 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     return true;
 }
 
+/// Return the module name `defimpl` generates for node — `Protocol.For`, or `Protocol` when the `for:`
+/// is implicit (Elixir then adopts the enclosing module, which alias resolution cannot name here).
+/// Return an empty string when node is not a defimpl or its protocol is not statically named.
+std::string elixirImplName( TSNode node, std::string_view src )
+{
+    if( elixirTarget( node, src ) != "defimpl" )
+    {
+        return {};
+    }
+    const auto protocol = nodeTextOf( elixirFirstArgument( node ), src );
+    if( protocol.empty() )
+    {
+        return {};
+    }
+    const TSNode forNode = elixirKeywordValue( node, "for:", src );
+    const auto   target  = ts_node_is_null( forNode ) ? std::string_view{} : nodeTextOf( forNode, src );
+    return std::string( protocol ) + ( target.empty() ? "" : "." + std::string( target ) );
+}
+
 /// Build the enclosing static module/protocol scope, outermost first, from ancestors of node.
 /// Return an owned dotted name, or an empty string at file scope; alias resolution is not inferred.
 std::string elixirScope( TSNode node, std::string_view src )
@@ -210,6 +237,12 @@ std::string elixirScope( TSNode node, std::string_view src )
     std::string scope;
     for( TSNode parent = ts_node_parent( node ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
     {
+        const auto implName = elixirImplName( parent, src );
+        if( !implName.empty() )
+        {
+            // A defimpl module name is absolute in Elixir, so this is the outermost scope there is.
+            return implName + ( scope.empty() ? "" : "." + scope );
+        }
         if( elixirModuleKeyword( elixirTarget( parent, src ) ) )
         {
             const auto name = nodeTextOf( elixirFirstArgument( parent ), src );
