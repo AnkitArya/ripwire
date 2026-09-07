@@ -972,7 +972,7 @@ function row(s, y, h, cols, opts={}){
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
     ["557 gate scripts",                  "bash test/manifestcheck.sh"],
-    ["41 repos · 67 papers · 237 surveyed","bash test/readmedriftcheck.sh"],
+    ["42 repos · 67 papers · 237 surveyed","bash test/readmedriftcheck.sh"],
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
     ["the oracle round",                  "bench/headtohead/r9-2026-08-09/RESULTS.md"],
