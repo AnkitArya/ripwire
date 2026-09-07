@@ -214,7 +214,10 @@ jobs:
       # comment. The shard's own gates are still LPT-ordered by the scratch timings; -j 3 stays because
       # the 4-vCPU runners saturate (many gates are internally multi-threaded).
       - name: "gate suite, parallel, this job's shard (560+ gates: determinism, cache transparency, G4 XML, quality, …)"
-        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }}
+        # --budget-scale 4: the harness's flat 300 s default is a hang tripwire calibrated on an idle dev machine;
+        # here -j 3 on a 4-vCPU runner is a 3-8x multiplier (two gates hit rc=124 at exactly 300 s in the first
+        # sharded runs). The scale applies to the default only; GATE_BUDGET_SEC's explicit entries stay as declared.
+        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }} --budget-scale 4
 
       - name: det-gate — 2-run byte-identical diff
         run: |

@@ -6,7 +6,7 @@ exceeds the agent harness time ceiling. This runs the same scripts concurrently 
 full verification fits in one window. It does NOT modify regression.sh.
 
 usage: pargates.py <repo-root> <ripwire-bin> [-j N] [--only substr] [--json out.json]
-                   [--shard K/N] [--shard-plan]
+                   [--shard K/N] [--shard-plan] [--budget-scale F]
 """
 import concurrent.futures as cf
 import hashlib
@@ -25,6 +25,7 @@ only = None
 jsonout = None
 shard = None          # (k, n): run only the k-th of n deterministic slices of the gate list
 shard_plan = False    # print every slice's membership and predicted weight, run nothing
+budget_scale = 1.0    # multiply the DEFAULT per-gate budget (never the explicit overrides) -- CI passes >1
 args = sys.argv[3:]
 for i, a in enumerate(args):
     if a == "-j":
@@ -40,6 +41,10 @@ for i, a in enumerate(args):
             sys.exit(f"--shard K/N needs 1 <= K <= N, got {args[i + 1]}")
     elif a == "--shard-plan":
         shard_plan = True
+    elif a == "--budget-scale":
+        budget_scale = float(args[i + 1])
+        if budget_scale <= 0:
+            sys.exit(f"--budget-scale needs a positive factor, got {args[i + 1]}")
 
 testdir = os.path.join(root, "test")
 # item 7 (§B12 polish round): os.listdir returns dotfiles too (unlike a shell glob without dotglob), so a
@@ -178,6 +183,13 @@ exclusive = {"editcheckcheck.sh"}
 # multiplier on these, putting the honest CI numbers well past 300 s and under 900 s; 900 matches what the
 # six *importprecisecheck/*condcheck entries above already use for the same reason. Per the house rule
 # that build and CI cost never gate on wall clock, a budget here is a hang tripwire, not a perf bar.
+# --budget-scale (2026-09-07, first sharded CI runs): the flat default is a HANG tripwire calibrated on an idle
+# dev machine, and a 4-vCPU runner at -j 3 is a 3-8x multiplier on any gate's wall time (mcpframehonestycheck
+# 151 s local -> rc=124 at 300.1 s; paginationcheck 53 s local -> rc=124 at 300.0 s). Sixty-four uncapped gates
+# sit inside that multiplier of the cap, so per-gate entries would be the wrong shape -- and raising the constant
+# itself would blunt the tripwire on the machines it was measured on. So CI passes a scale factor that applies
+# to the DEFAULT only; the explicit entries in GATE_BUDGET_SEC were derived from CI measurements and stay as
+# declared. The TIMEOUT message names the effective budget and the scale, so a red still names its own limit.
 DEFAULT_TIMEOUT_SEC = 300
 GATE_BUDGET_SEC = {
     "crossdirincludecheck.sh":    900,
@@ -341,7 +353,11 @@ def failure_report(out, logpath):
 
 def run(g):
     env = dict(os.environ, RIPWIRE_BIN=binp)
-    limit = GATE_BUDGET_SEC.get(g, DEFAULT_TIMEOUT_SEC)
+    if g in GATE_BUDGET_SEC:
+        limit, scaled = GATE_BUDGET_SEC[g], ""
+    else:
+        limit = int(round(DEFAULT_TIMEOUT_SEC * budget_scale))
+        scaled = "" if budget_scale == 1.0 else f", default {DEFAULT_TIMEOUT_SEC}s x --budget-scale {budget_scale:g}"
     t0 = time.time()
     try:
         p = subprocess.run(
@@ -355,7 +371,7 @@ def run(g):
         # the budget expired is kept ahead of it: a gate killed at 300 s that had already announced a
         # failing arm used to report ONLY the word TIMEOUT.
         partial = (e.stdout or b"").decode("utf-8", "replace") if isinstance(e.stdout, (bytes, bytearray)) else (e.stdout or "")
-        rc, out = 124, partial + f"\nTIMEOUT after {limit}s (declared budget={limit}s)"
+        rc, out = 124, partial + f"\nTIMEOUT after {limit}s (declared budget={limit}s{scaled})"
     # A gate that SKIPS is not a gate that PASSED. argvdiffcheck skips without a RIPWIRE_BASE
     # reference binary, and reporting that as a pass is exactly the green-while-inert failure this
     # suite exists to catch elsewhere (the CI/NDEBUG blindness is the same family).
