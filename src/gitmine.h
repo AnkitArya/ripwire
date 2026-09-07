@@ -1819,18 +1819,27 @@ inline constexpr double kChurnDecayHalfLifeDays = 90.0;
 // gitLogFileSets takes it — pass "" for the whole history). Mirrors gitLogFileSets' parse, plus the epoch on
 // the marker line; a commit touching more than `maxFiles` files is skipped by the same merge-bomb rule.
 // Degrades to an all-zero vector on no git / no HEAD / popen failure, and reports that through `outAnyHistory`.
-inline std::vector<double> gitLogDecayedFileWeights( const std::string& root, const IngestResult& ing, const std::string& windowArgs,
-                                                     std::size_t maxFiles, bool* outAnyHistory, std::uint32_t onlyRoot = UINT32_MAX )
+// H2H-Graft F3 (2026-09-07): the walk keeps, per fileId, the committer epoch of the NEWEST commit that touched
+// it (0 = never seen) beside the decayed weight — the file-level "what changed recently" answer the map's
+// <recent> rows are built from. Same walk, same merge-bomb rule, no second git call.
+struct DecayedChurnMined
+{
+    std::vector<double>       weights;
+    std::vector<std::int64_t> lastEpoch;
+    bool                      anyHistory = false;
+};
+
+inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const IngestResult& ing, const std::string& windowArgs,
+                                                  std::size_t maxFiles, std::uint32_t onlyRoot = UINT32_MAX )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitLogDecayedFileWeights (rank-by=churn-decay)" );
-    std::vector<double> weights( ing.files.size(), 0.0 );
-    if( outAnyHistory )
-    {
-        *outAnyHistory = false;
-    }
+    DecayedChurnMined m;
+    m.weights.assign( ing.files.size(), 0.0 );
+    m.lastEpoch.assign( ing.files.size(), 0 );
+    std::vector<double>& weights = m.weights;
     if( ing.files.empty() )
     {
-        return weights;
+        return m;
     }
 
     // The anchor first: without it there is no age to measure, so there is no answer to degrade FROM.
@@ -1838,7 +1847,7 @@ inline std::vector<double> gitLogDecayedFileWeights( const std::string& root, co
     if( headEpoch <= 0 )
     {
         DEGRADED_PATH_ALERT( "gitmine: no HEAD committer epoch — the decayed-churn prior is UNIFORM" );
-        return weights;
+        return m;
     }
 
     // built BEFORE the log pipe opens, for the reason gitLogFileSets states: it runs a git probe of its own.
@@ -1849,11 +1858,12 @@ inline std::vector<double> gitLogDecayedFileWeights( const std::string& root, co
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
     {
-        return weights;
+        return m;
     }
 
     bool                       anyCommit = false;
     double                     curWeight = 0.0;   // this commit's decayed weight
+    std::int64_t               curEpoch  = 0;     // this commit's committer epoch (F3: the newest one per file is kept)
     std::vector<std::uint32_t> cur;               // this commit's resolved fileIds (dedup before tally)
     const auto flush = [ & ]()
     {
@@ -1864,6 +1874,7 @@ inline std::vector<double> gitLogDecayedFileWeights( const std::string& root, co
             for( std::uint32_t f : cur )
             {
                 weights[f] += curWeight;
+                if( curEpoch > m.lastEpoch[f] ) { m.lastEpoch[f] = curEpoch; }
             }
         }
         cur.clear();
@@ -1882,6 +1893,7 @@ inline std::vector<double> gitLogDecayedFileWeights( const std::string& root, co
             const std::int64_t epoch  = ( s.size() > 6 ) ? std::strtoll( s.c_str() + 6, nullptr, 10 ) : 0;
             const std::int64_t ageSec = ( epoch > 0 && headEpoch > epoch ) ? ( headEpoch - epoch ) : 0;   // clamped: never > 1
             curWeight                 = std::pow( 0.5, ( double( ageSec ) / 86400.0 ) / kChurnDecayHalfLifeDays );
+            curEpoch                  = epoch;
             continue;
         }
         if( s.empty() )
@@ -1896,11 +1908,20 @@ inline std::vector<double> gitLogDecayedFileWeights( const std::string& root, co
     }
     flush();
     pclose( pipe );
+    m.anyHistory = anyCommit;
+    return m;
+}
+
+// The pre-F3 contract, unchanged for its callers: the weights alone, plus the history flag.
+inline std::vector<double> gitLogDecayedFileWeights( const std::string& root, const IngestResult& ing, const std::string& windowArgs,
+                                                     std::size_t maxFiles, bool* outAnyHistory, std::uint32_t onlyRoot = UINT32_MAX )
+{
+    DecayedChurnMined m = gitLogDecayedFileMining( root, ing, windowArgs, maxFiles, onlyRoot );
     if( outAnyHistory )
     {
-        *outAnyHistory = anyCommit;
+        *outAnyHistory = m.anyHistory;
     }
-    return weights;
+    return std::move( m.weights );
 }
 
 // The decayed sibling of churnPriorFromFreq: same Laplace-smoothed (+1) shape, so every symbol keeps
@@ -1948,6 +1969,44 @@ inline std::vector<float> churnDecayTeleport( const std::string& root, const Ing
         *outHasChurnEvidence = anyHistory;
     }
     return churnPriorFromDecayed( ing, weights, anyHistory );
+}
+
+// F3 (H2H-Graft, 2026-09-07): one <recent> row of the map — the file-level "what changed recently" answer.
+struct RecentFile
+{
+    std::uint32_t fileId  = 0;
+    std::uint32_t ageDays = 0;     // HEAD's committer epoch minus the file's newest commit epoch, in whole days
+    double        weight  = 0.0;   // the decayed churn weight the ranker used
+};
+
+// F3: the single-root map's file-level <recent> rows from ONE mining pass — the SAME weights the churn-decay
+// teleport is built from (churnPriorFromDecayed on m.weights), cut to `keep` rows by weight desc then path;
+// age is measured on HEAD's clock, the anchor the decay itself uses. `outOf` receives the number of files any
+// mined commit touched. Empty when the walk found no history.
+inline std::vector<RecentFile> recentRowsFromDecayed( const std::string& root, const IngestResult& ing, const DecayedChurnMined& m,
+                                                      std::size_t keep, std::size_t* outOf )
+{
+    std::vector<RecentFile> rows;
+    const std::int64_t      headEpoch = m.anyHistory ? gitHeadCommitEpoch( root ) : 0;
+    for( std::uint32_t f = 0; f < std::uint32_t( m.weights.size() ); ++f )
+    {
+        if( m.weights[f] > 0.0 )
+        {
+            const std::int64_t age = ( headEpoch > m.lastEpoch[f] ) ? ( headEpoch - m.lastEpoch[f] ) : 0;
+            rows.push_back( RecentFile{ f, std::uint32_t( age / 86400 ), m.weights[f] } );
+        }
+    }
+    if( outOf )
+    {
+        *outOf = rows.size();
+    }
+    std::sort( rows.begin(), rows.end(), [ & ]( const RecentFile& a, const RecentFile& b )
+               { return a.weight != b.weight ? a.weight > b.weight : ing.files[a.fileId] < ing.files[b.fileId]; } );
+    if( rows.size() > keep )
+    {
+        rows.resize( keep );
+    }
+    return rows;
 }
 
 // Multi-root --rank-by=churn-decay: mine each root's history AGAINST ITS OWN files, accumulate ONE weight
