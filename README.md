@@ -125,7 +125,7 @@ this project publishes against itself.
 </details>
 
 <details>
-<summary><b>Where those savings compound: an orchestrator that spawns fresh contexts.</b> Every lane starts cold on the same tree, and the map is the one artifact that does not have to be rediscovered per agent — the quality verbs then hand a verdict back instead of a pile of files to re-read</summary>
+<summary><b>Where those savings compound: an orchestrator that matches tasks to models — every lane it spawns starts cold on the same tree.</b> The map is the one artifact that does not have to be rediscovered per agent, and the quality verbs hand a verdict back instead of a pile of files to re-read</summary>
 
 The shape: plan the work, then run a loop that matches each task to the model that fits it. Every
 thread it spawns opens with an empty context on a repository it has never seen. **Orienting an empty
@@ -581,7 +581,7 @@ warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessin
 ### Where it pays most, and where it does not
 
 <details>
-<summary><b>A map is a fixed cost paid once per context</b> — it pays most on a cold orientation and on the checking pass, and it <b>does not pay</b> on a question one <code>grep</code> already answers</summary>
+<summary><b>A map is a fixed cost paid once per context — strongest of all under an orchestrator that matches tasks to models: every lane it spawns starts cold on the same tree.</b> It pays again on the checking pass, and it <b>does not pay</b> on a question one <code>grep</code> already answers</summary>
 
 **A map is a fixed cost paid once per context, so it pays in proportion to what that context goes on
 to do with it.** Two shapes get the most out of it, and one gets nothing.
