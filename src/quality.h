@@ -1397,10 +1397,12 @@ inline std::string headSnapRepoHex( const std::string& root )
 // lines too. Bumping kParserVer without updating these two lines is a hard gate failure, not a silent miss.
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
-constexpr std::uint32_t kIngestCacheVersionMirror = 15;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 78;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestCacheVersionMirror = 16;   // MUST equal ingest.cpp's kCacheVersion (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 79;   // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 78 = 2026-09-07 (Elixir): a twenty-second grammar and its
-                                                          // definition/call filters. See ingest_cache.h's kParserVer note.
+                                                          //    definition/call filters.
+                                                          // 79 = 2026-09-07 (ES import facts): named import aliases and
+                                                          //    `export { f }` clause exports. See ingest_cache.h's note.
                                                           // 77 = 2026-09-03 (Phase 5): Python super() receiver kind +
                                                           // import-name bindings. See ingest_cache.h's kParserVer note.
                                                           // 74 = 2026-08-30 (objc-sniff lane): looksObjC masks comments

@@ -1982,7 +1982,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // written once the document it describes has been measured (PHASE 2 below) and the legend's own bytes
     // are part of what it describes.
     std::string legend = outProv
-        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=per-EDGE-confidence(orthogonal-to-k):scip(index-pinned;precise)|binding(cross-lang-FFI)|split(one-arm-of-a-k-way-pick;read-source;these-are-the-edges-amb=-counts)(absent=uniquely-resolved-name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->"
+        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=per-EDGE-confidence(orthogonal-to-k):scip(index-pinned;precise)|binding(cross-lang-FFI)|import(ES-named-import;module+export-named)|split(one-arm-of-a-k-way-pick;read-source;these-are-the-edges-amb=-counts)(absent=uniquely-resolved-name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->"
         : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->";
     // R-E fix (2026-08-19): root= was added to <r> with nothing defining it — legendcoveragecheck's arm (A)
     // named it on nine roster verbs at once (the default map, --around, and every map-* variant share this
@@ -2426,7 +2426,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 w.write( "<c n=\"" );
                 w.write( escapeXml( ing.symbols[ outTargets[e] ].name, esc ) );
                 // A4-R5: prov="scip" on a SCIP-pinned (precise) edge, prov="binding" on an FFI
-                // binding-table edge (pybind/extern-C/JNI). C1: prov="split" on one arm of a k-way split the
+                // binding-table edge (pybind/extern-C/JNI), prov="import" on an ES named-import edge whose
+                // module AND export the source named. C1: prov="split" on one arm of a k-way split the
                 // resolver could not choose between. Absent = name-based AND uniquely resolved (the common case
                 // → zero token cost). outProv parallels outTargets exactly, so index `e` is the same edge.
                 //
@@ -2436,8 +2437,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 // becomes the guessed edges and nothing else.
                 if( outProv && e < outProv->size() && ( *outProv )[e] )
                 {
-                    const std::uint8_t pv = ( *outProv )[e];
-                    w.write( pv == 3u ? "\" prov=\"split" : pv == 2u ? "\" prov=\"binding" : "\" prov=\"scip" );
+                    w.write( "\" prov=\"" );
+                    w.write( provLabel( ( *outProv )[e] ) );
                 }
                 w.write( "\"/>" );
             }
@@ -6748,13 +6749,13 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                 firstC = false;
                 w.write( "{\"n\":" );  writeJsonStr( w, ing.symbols[ outTargets[e] ].name, esc );
                 // §A4d: prov mirrors the XML attribute 1:1 — "scip" for a SCIP-pinned edge, "binding" for a
-                // decoded FFI binding, "split" (C1) for one arm of a k-way split the resolver could not choose
-                // between. outProv parallels outTargets exactly, so index `e` is the same edge. The two dialects
-                // MUST spell the same vocabulary: test/mcpclidiffcheck.sh is the gate that says so.
+                // decoded FFI binding, "import" for an ES named-import edge, "split" (C1) for one arm of a k-way
+                // split the resolver could not choose between. outProv parallels outTargets exactly, so index `e`
+                // is the same edge. The two dialects MUST spell the same vocabulary: test/mcpclidiffcheck.sh is
+                // the gate that says so.
                 if( outProv && e < outProv->size() && (*outProv)[e] )
                 {
-                    const std::uint8_t pv = (*outProv)[e];
-                    w.write( ",\"prov\":" );  writeJsonStr( w, pv == 3u ? "split" : pv == 2u ? "binding" : "scip", esc );
+                    w.write( ",\"prov\":" );  writeJsonStr( w, provLabel( (*outProv)[e] ), esc );
                 }
                 w.write( "}" );
             }

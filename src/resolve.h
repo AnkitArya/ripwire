@@ -1091,14 +1091,14 @@ inline void recordLazyPair( HashMap<std::uint64_t, char>& lazyPairs, std::uint32
 // Include occurrence resolving to this edge so far was lazy" (Include::isLazy) — see recordLazyPair above.
 // Independent of `dedup`: keyed by file-id PAIR, not by adj's post-sort indices, so it stays correct
 // whichever adjacency shape the caller asked for.
-inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const IngestResult& ing, bool dedup = true,
+inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPreciseIncludeAdjWithContext( const IngestResult& ing, bool dedup = true,
                                                                        HashMap<std::uint64_t, char>* lazyPairsOut = nullptr )
 {
     const std::uint32_t F = std::uint32_t( ing.files.size() );
     std::vector<std::vector<std::uint32_t>> adj( F );
     if( ing.includes.empty() )
     {
-        return adj;
+        return { std::move( adj ), {} };
     }
 
     // path → fileId over the canonical (sorted) file list. The KEY is the LEXICALLY-NORMALIZED file path,
@@ -1239,7 +1239,13 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
             v.erase( std::unique( v.begin(), v.end() ), v.end() );
         }
     }
-    return adj;
+    return { std::move( adj ), std::move( wsCtx ) };
+}
+
+inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const IngestResult& ing, bool dedup = true,
+                                                                       HashMap<std::uint64_t, char>* lazyPairsOut = nullptr )
+{
+    return buildPreciseIncludeAdjWithContext( ing, dedup, lazyPairsOut ).first;
 }
 
 // Transitive include-set per file: for each file f, the sorted, deduped set of fileIds reachable from

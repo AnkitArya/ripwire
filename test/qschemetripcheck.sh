@@ -43,6 +43,18 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   fork's parser version onto main means RE-BUMPING to the next free number over main's (the rule in
 #   ingest_cache.h's kParserVer note), which is 78 — never keeping the fork's development value.
 #   Extraction identity invalidates snapshots; no Snapshot-side semantics changed, scheme stays 8.
+# 2026-09-07, ES NAMED IMPORTS (PR #45 + its review fixes, test/lib/jsimportalias.sh, test/lib/jsimportfacts.sh):
+#   kParserVer 78 -> 79 and kCacheVersion 15 -> 16, landing ON TOP of the Elixir bump above. The change adds
+#   three JS/TS ingest FACTS — a named ES import records local name + module + exported name
+#   (LocalBindKind::JsImport, RawBind gains `importedName`, so the cache RECORD FORMAT moved and
+#   kCacheVersion had to move with it), a direct exported declaration records JsExport, and a declaration
+#   shadowing an import records JsShadow — and widens JsExport to the CLAUSE forms `export { f }` /
+#   `export { f as g }` (JsExport's `importedName` carries the local name the exported spelling binds);
+#   re-export and default clauses are deliberately still not recorded. The fork branch carried 79 -> 80 with
+#   the same "skip the rich family" rationale refuted above; on the merged tree the next free number over
+#   Elixir's 78 is 79, so that is what landed. quality.h's kIngestCacheVersionMirror / kIngestParserVerMirror
+#   were bumped to 16 / 79 in the same diff (qextractionkeycheck), no Snapshot-side function changed,
+#   kQSnapCacheScheme stays 8.
 # 2026-09-03, PHASE 5 — the external-name veto + the receiver MRO walk (test/externalvetocheck.sh, test/mrowalkcheck.sh,
 #   docs/EVALS.md "Phase 5"): kParserVer 76 -> 77 — three Python ingest FACTS moved: a `super()` call receiver
 #   classifies the new RecvKind::SuperObj (appended) instead of None; every import statement records the NAMES it
