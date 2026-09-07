@@ -15,6 +15,25 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — Ruby setter methods: `def name=(v)` is indexed, and `obj.name = v` calls it, not the getter
+
+Two defects compounded. tree-sitter-ruby names a setter method with a `(setter)` node, which the method
+pattern in `queries/ruby/tags.scm` did not accept, so no `def name=(v)` was ever indexed (ActiveSupport
+7.2.3.2 `lib/`: 27 of them). And `obj.name = v` parses as an `(assignment left: (call …))` — the same
+`(call)` shape as the read `obj.name` — so the call rule captured a reference to `name` and the resolver
+handed a WRITE to the getter `def name`: a false edge, not a floor. The setter is now named `name=` on both
+sides — the definition from the `(setter)` node's own text, the call site by reading the assignment parent
+in ingest (`rubyCallIsAssignmentTarget`, `src/ingest_names.h`) — so `self.name = v` inside the class pins
+to `Class::name=` through Rule 1 and `--callers=name=` answers. Stated floor, pinned by the gate: a
+compound `obj.count += 1` reads and writes, and one capture carries one name, so it keeps the getter edge.
+
+Measured on ActiveSupport 7.2.3.2 `lib/` (`--top-k=100000`, `--no-cache`, byte-identical across runs,
+`xmllint --noout` clean): symbols 2804 → 2831 (the 27 setters), `edges=` 3592 → 3595, 15 call edges now
+name a setter, `ambiguous=` unchanged at 417. `kParserVer` 78 → 79. Gate: `test/rubysettercheck.sh`
+(defs, scope ids, write vs read edges, the compound-assignment floor, `--callers` on both names, a
+write-to-read mutation, determinism).
+
+
 ### Fixed — Ruby definitions now carry their enclosing class/module as `scope`
 
 Until now `src/ingest_sidecap.h` set a definition's `scope` for C++, Python and Rust only. A Ruby `def`
