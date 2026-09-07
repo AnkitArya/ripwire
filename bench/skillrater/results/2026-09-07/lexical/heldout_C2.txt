@@ -1,4 +1,4 @@
-ripwire --eval-skills  (skill routing over K=16 candidate skills [ripwire-router excluded]; 85 positive + 53 negative prompts; corpus '/private/tmp/claude-501/-Users-qgames-AppDevelopLocal-project2-ripwire/3f9fc843-b9d5-412e-b335-2c1ece4adcb8/scratchpad/heldout_c2.tsv'; split test=138 dev=0)
+ripwire --eval-skills  (skill routing over K=16 candidate skills [ripwire-router excluded]; 85 positive + 53 negative prompts; corpus 'bench/skillrater/results/2026-09-07/heldout_c2.tsv'; split test=138 dev=0)
   arm           hit@1   hit@2     mrr   sep-auc   fire/abstain@ORACLE-th (upper bound)
   overlap       37.6%   54.1%   0.537     0.509    39.1% (th=0.500)
   name          11.8%   17.6%   0.254     0.586    38.4% (th=0.250)
