@@ -260,6 +260,9 @@ your agent starts in the right place at all.
 | Aider repo-map 0.86.2 | 20.0% | 35.0% | *(inside query)* | 2.920 s |
 | codeseek 0.1.31 (better of its two arms) | 15.0% | 20.0% | 3.37 s | 0.040 s |
 
+<details>
+<summary>What this table costs us — six paired losses named, a runner-up we had under-credited at <b>26.7%</b> and corrected to <b>40.0%</b>, and the multi-file stratum no arm solves</summary>
+
 Ripwire leads every arm on both accuracy metrics and in both strata. Paired, the losses are small and
 they are published: **2** instances to codebase-memory-mcp, **2** to repowise, **1** each to graphify
 and aider. **Cold from nothing to an answer — parse, rank, reply, no cache — ripwire takes 0.213 s**,
@@ -285,6 +288,8 @@ wherever they live — not by file path alone. On an astral-sh/ruff clone (5,945
 `--ignore-tests` removes **23,907** test symbols where path rules alone caught 18,532
 (`ripwire <ruff> --ignore-tests`, 2026-08-14; the per-language fixtures are pinned by
 `test/testscopecheck.sh`).
+
+</details>
 
 ---
 
@@ -487,6 +492,9 @@ spends — **5.2%** on the questions both arms fully answered. `--pack-signature
 fewer bytes** than full bodies at top-50 (re-derived on this tree, 2026-09-06). The output is already
 dense enough that running a dedicated context compressor over it saved **exactly 0 tokens**.
 
+<details>
+<summary>Why both figures are printed — <b>7.3% → 5.0%</b> overall, but <b>1.7% → 5.2%</b> on the questions both arms answered</summary>
+
 Both of those first two figures moved when they were re-derived on 2026-08-23, and they moved in
 **opposite** directions — 7.3% → 5.0% overall, but 1.7% → 5.2% on the both-answered subset. Same
 frozen questions, same frozen verb ladders, same corpus pin, same tokenizer; the naive arm reproduced
@@ -497,6 +505,8 @@ commit. The full per-question re-derivation is in the Round 3 note under [Measur
 
 It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
 warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
+
+</details>
 
 ### Better Code: It automates the review judgments nobody has time to make — every lens from published research
 
@@ -511,12 +521,17 @@ lesson taken from each paper, and the rules measured and *withdrawn*, in
 between any two families is **+0.168**: they really are measuring different things, so two families
 firing on the same function is corroboration rather than one metric counted twice.
 
+<details>
+<summary>Why this matters most for code an agent wrote — empty-catch masking <b>+47%</b>, rewritten-within-two-weeks <b>+15%</b>, and reuse declining</summary>
+
 That matters most for code an agent wrote. Empty-catch error masking is **+47%** more common in
 AI-authored commits, a function rewritten again inside two weeks **+15%** more likely, and reuse is
 *declining* as AI's share of commits grows (GitClear, *AI Copilot Code Quality*, 2026). Each of
 `--quality-delta`'s 10 kinds targets one measured mode like those, and it reports **only what your
 change made worse** — then `--exemplar` shows the pattern in your own repo to copy, and `--test-gate`
 names the tests that must run before "done."
+
+</details>
 
 Tree-local numbers above are reproducible with the commands shown; the rest are dated, sourced
 measurements in [`docs/EVALS.md`](docs/EVALS.md) — each with its instrument, its corpus, and its
@@ -1336,12 +1351,17 @@ four-fact grep re-derivation lives in [`docs/EVALS.md` §5](docs/EVALS.md).
 
 ### Where its own cycles go — hardware counters, per scope
 
+<details>
+<summary><b>3.2–3.5 instructions per cycle</b> across parse and query, and the <b>≈167×</b> fewer instructions a warm run retires</summary>
+
 **Every pipeline phase is bracketed by two hardware-counter reads, and the numbers say what
 wall-clock cannot.** Parse and query retire **3.2–3.5 instructions per cycle**; the graph phases
 stream at 32–35 L1D MPKI and still hold IPC above 3.1 (guardrail G2 doing its visible job); and a
 warm run replaces the dominant phase's 8.74 B instructions with a 52.3 M-instruction cache load,
 **≈167× fewer**. Two opt-in builds go faster still — PGO by **14–25% cold** — with **byte-identical**
 output on every one.
+
+</details>
 
 <details>
 <summary>How the self-profiler measures — kperf / <code>perf_event_open</code>, the per-scope counter table, and the three things it says that wall-clock cannot</summary>
@@ -1443,6 +1463,9 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 
 ## Standing on the whole field
 
+<details>
+<summary>34 repositories, 67 papers and a 222-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
+
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
 **41 repositories and 67 papers** into one deterministic executable, alongside a labelled
 survey of 237 tools that folded nothing and are catalogued separately — the two sets are disjoint,
@@ -1457,6 +1480,8 @@ arm's failures happening silently at the planner→sub-agent hand-off
 ([arXiv:2608.01507](https://arxiv.org/abs/2608.01507)). A single process answering in one call has no
 hand-off to fail at.
 
+</details>
+
 ---
 
 ## The honesty contract
@@ -1466,14 +1491,22 @@ and this tool ships the check.**
 
 ### What it misses, and what to run next
 
+<details>
+<summary>What a name-based call graph cannot see — dynamic dispatch, a callback routed through a table, a symbol that exists only after macro expansion</summary>
+
 A name-based call graph cannot see dynamic dispatch, a callback routed through a table, or a symbol
 that exists only after macro expansion. Every static tool has that horizon; the one that costs you a
 bug is the one that hides it. So the contract is not *it sees everything* — it is **nothing it is
 unsure about reaches your agent unlabelled.**
 
+</details>
+
 **Measured against a compiler-grade oracle, its silent-miss count is zero.** Of 68 answers scored
 against a `scip-clang` index, six were imperfect and four flagged themselves; the other two were
 right, and the oracle was the one that could not see the files. No imperfect answer arrived unmarked.
+
+<details>
+<summary>Three ways to escalate on purpose — <code>--expand</code> for the body, <code>--uses</code>/<code>--impact</code> for the blast radius, <code>--scip</code> for compiler-grade edges</summary>
 
 When a mark says the cheap answer is not enough, escalate on purpose — never by guessing:
 
@@ -1482,6 +1515,8 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
    radius. `--callers` alone under-counts, and says so.
 3. **`--scip=index.scip`** — hand it a compiler-grade index and precise edges *replace* the
    name-based guesses, tagged `prov="scip"`. Missing or corrupt index degrades; it never fails.
+
+</details>
 
 <details>
 <summary>The six marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>--skipped</code></summary>
@@ -1551,6 +1586,9 @@ the units differ by verb.
 
 ### In the numbers
 
+<details>
+<summary>Four negatives published on purpose — including PageRank as a co-change ranker: <b>3.8%</b> recall@5 against plain lexical's <b>40.3%</b></summary>
+
 The evaluation labels were authored by reading the source and deciding which symbol *is* the on-task
 answer — never by transcribing the ranker's own output — so the eval is allowed to say the ranker is
 wrong, and it has. These are the results that say so, all in-tree, all published on purpose:
@@ -1569,7 +1607,12 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 - **Strict multi-file localization is hard and stays hard.** Held-out LocBench: single-file gold
   73.4%, multi-file 18.2%. Every corpus shows the same cliff.
 
+</details>
+
 ### In the tests
+
+<details>
+<summary><b>548 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
 
 `test/regression.sh` names **548 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
@@ -1581,9 +1624,14 @@ and requires stdout, stderr and exit code to match on each.
 The house rule behind all of it: **write the gate before the code it measures.** A ranking, a token
 estimate and a call graph all look plausible whether or not they are correct.
 
+</details>
+
 ---
 
 ## Set it up in your coding agent
+
+<details>
+<summary>Why the CLI is primary and MCP is opt-in — the per-session context cost that decides it, and the edit verbs both surfaces expose</summary>
 
 **If your agent can run shell commands, it is already set up.** The CLI is the primary interface:
 `ripwire` on `PATH` costs the agent nothing until the moment it runs a command — no server to
@@ -1603,6 +1651,8 @@ printf '%s' "$BLOCK" | ripwire . --insert-before-symbol=SYM --edit-payload=-
 That MCP convenience has a
 cost the CLI doesn't carry — the verb schemas sit in the agent's context every session — so register
 it when you want those verbs, not as a default.
+
+</details>
 
 ### 1. (Optional) Register the MCP server
 
@@ -1656,6 +1706,9 @@ socket instead of stdio, `ripwire --listen=HOST:PORT` serves the same verbs.
 
 ### 2. Install the skills
 
+<details>
+<summary>Eighteen task-shaped skills, every install mode, and the <code>--scan-skills</code> verdict to read first</summary>
+
 `skills/` ships **eighteen task-shaped skills** that tell an agent *which* verb answers the moment it
 is in — orienting cold, tracing a call, sizing a refactor, checking a diff, hunting a bug, writing
 tests, reviewing security. Without them an agent has 31 verbs and no map of when each applies; the skills name the moment
@@ -1676,6 +1729,8 @@ The script's own header documents its other modes, including the opt-in advisory
 `wrap` also prints a pasteable use-when blurb for your client's rules file (`CLAUDE.md`,
 `AGENTS.md`, `.cursor/rules`, …) and works from a prebuilt install with no checkout — from v0.2.2
 it points at the installer's staged copy of the skills when the cwd is not a checkout.
+
+</details>
 
 ---
 
@@ -1722,6 +1777,9 @@ study, a sibling sweep, a live command tour, a showcase build — are listed wit
 
 ## Languages
 
+<details>
+<summary><b>22</b> vendored grammars, and what each parser does and does not see — CUDA launch edges, PHP dynamic dispatch, Lua metatables</summary>
+
 C, C++, Objective-C / Objective-C++, **Metal** (Metal Shading Language, `.metal` — indexed with the
 C++ grammar, since MSL is a C++14 dialect, so a dual-compile header's symbols resolve from both the
 GPU and CPU halves), **CUDA** (`.cu`/`.cuh` — indexed with the vendored `tree-sitter-cuda` grammar,
@@ -1754,6 +1812,8 @@ represents definitions as ordinary calls. Open an issue naming the grammar and t
 Notebooks, HTML and CSV are indexed as *documents* for `--recall` and the doc↔code edges behind
 `--mentions`; Office and PDF join them through an optional bridge. Markdown graduated from that
 tier: it parses with its own vendored grammar, so its headings are symbols, not just document text.
+
+</details>
 
 ---
 
