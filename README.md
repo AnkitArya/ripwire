@@ -661,10 +661,10 @@ ranking, bodies, callers and tests in one budgeted bundle.
 **Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, built for **RHEL 8+**;
 every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
 [GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
-to `~/.local/bin`. From v0.2.2 the release tarball also ships the eighteen agent skills, and the
+to `~/.local/bin`. From v0.2.2 the release tarball also ships the seventeen agent skills, and the
 installer stages them under `~/.local/share/ripwire/skills` **and activates them for every agent it
-detects** (Claude Code, Codex), printing one line per agent saying what it did. Seventeen of the
-eighteen are for using the tool; the one about compiling ripwire itself (`ripwire-opt-remarks`,
+detects** (Claude Code, Codex), printing one line per agent saying what it did. Sixteen of the
+seventeen are for using the tool; the one about compiling ripwire itself (`ripwire-opt-remarks`,
 `audience: contributor` in its front matter) stays staged unless you pass `--contributor` to
 `skills/install.sh`. An agent that is not
 installed is never given a skills directory, hooks are never registered without an explicit `--hook`,
@@ -1615,9 +1615,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>547 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
+<summary><b>548 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
 
-`test/regression.sh` names **547 gate scripts** and is the authoritative list;
+`test/regression.sh` names **548 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1710,9 +1710,9 @@ socket instead of stdio, `ripwire --listen=HOST:PORT` serves the same verbs.
 ### 2. Install the skills
 
 <details>
-<summary>Eighteen task-shaped skills, every install mode, and the <code>--scan-skills</code> verdict to read first</summary>
+<summary>Seventeen task-shaped skills, every install mode, and the <code>--scan-skills</code> verdict to read first</summary>
 
-`skills/` ships **eighteen task-shaped skills** that tell an agent *which* verb answers the moment it
+`skills/` ships **seventeen task-shaped skills** that tell an agent *which* verb answers the moment it
 is in — orienting cold, tracing a call, sizing a refactor, checking a diff, hunting a bug, writing
 tests, reviewing security. Without them an agent has 31 verbs and no map of when each applies; the skills name the moment
 each verb is for. Install as symlinks back into this repo, so edits here take effect

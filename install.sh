@@ -30,6 +30,10 @@ fi
 
 cmake -S . -B build-install -DCMAKE_BUILD_TYPE=Release -DRIPWIRE_NATIVE=ON
 cmake --build build-install -j
+# The staged skills dir is OWNED by this installer: `cmake --install` is additive, so a skill directory this
+# source no longer ships (renamed or folded — ripwire-efficient, 2026-09-07) would survive an upgrade and be
+# re-linked as live by skills/install.sh. Blow it away first; the release installer (scripts/install.sh) does the same.
+rm -rf "$prefix/share/ripwire/skills"
 cmake --install build-install --prefix "$prefix" --component ripwire
 
 # 2026-09-06 (stranger audit): activate the skills for the agents present on this machine, the same way the

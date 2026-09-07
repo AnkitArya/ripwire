@@ -11,7 +11,7 @@ no(){ echo "  FAIL  $1"; fail=1; }
 [ -x "$BIN" ] || { echo "no executable ripwire binary: $BIN"; exit 2; }
 
 SEC="$ROOT/skills/ripwire-security-scan/SKILL.md"
-EFF="$ROOT/skills/ripwire-efficient/SKILL.md"
+EFF="$ROOT/skills/ripwire-orient/map-before-you-read.md"
 PERF="$ROOT/skills/ripwire-perf-target/SKILL.md"
 ROUTER="$ROOT/skills/ripwire-router/SKILL.md"
 # The catalog-count assertions used to aim at an architecture skill that lived only in the author's
