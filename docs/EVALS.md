@@ -2390,6 +2390,18 @@ zero discriminative value and costs 720 characters of shared budget). Wording ma
 the **dev split only** (bm25 arms), and the rater harness may be dry-run **once** on the dev split to
 validate its format (reported, not decisive). Nothing about the held-out rows is read as text.
 
+**Amendment 2026-09-07, before any held-out measurement (drafting on the dev split only).** The set
+total ceiling moves **4,800 → 5,400** characters; the per-description ceiling (320), the arms, the
+held-out set, the primary metric and every band are unchanged. Reason, recorded so the change cannot
+be mistaken for a post-hoc one: the first drafts that met 4,800 scored **48.5%** dev-split bm25-desc
+hit@1 (today's full text 69.1%, today's head-cut 57.4%) and their dev misses were surface-form losses —
+`godfile` vs `godfiles`, `deserializer` vs `deserialization`, `compacted` vs `compaction`, and moments
+cut for space (`dependency already vendored`, `which ref still defines it`, `god object`). Restoring
+those natural trigger phrases took the dev split to **80.9%** at 5,551 characters; forcing them back
+out to reach 4,800 would trade routing for a mass figure that was itself a design guess (18 × 267). At
+5,400 the set is still 71% smaller than today, ≈1,350 tokens, under 70% of a 200K-window Claude Code
+listing budget and ~26% of a 272K-window Codex budget. `test/skilldescbudgetcheck.sh` pins 5,400.
+
 **Arms.**
 - **A** — today's descriptions, full (the ideal no budgeted client renders).
 - **B** — today's descriptions, first 350 characters (what the reporter's Codex renders; the real

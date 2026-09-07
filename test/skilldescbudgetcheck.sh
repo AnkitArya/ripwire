@@ -7,7 +7,7 @@
 # boundaries lived, is what vanishes. Claude Code lists under 1% of the context window and caps an entry
 # at 1,536. The registered design ceiling (docs/EVALS.md "Skill descriptions under a client budget") is
 # 320 normalized characters per description — 30 under the observed cut, so the head IS the description —
-# and 4,800 for the whole set, so the eighteen together stay a minority of any of those budgets.
+# and 5,400 (amended from 4,800 before measurement, see the registration) for the whole set, so the eighteen together stay a minority of any of those budgets.
 # Length = the YAML content (whitespace-normalized, block-scalar marker excluded), exactly what a client
 # reads; bench/skilldesc_budget.py is the measurement and this gate's body.
 set -u
@@ -25,9 +25,9 @@ printf '%s\n' "$out" | sed 's/^/    /'
 
 total="$( printf '%s' "$summary" | sed -n 's/.* total=\([0-9]*\).*/\1/p' )"
 count="$( printf '%s' "$summary" | sed -n 's/.*skills=\([0-9]*\).*/\1/p' )"
-[ -n "$total" ] && [ "$total" -le 4800 ] \
-    && ok "set total ${total} chars over ${count} skills (ceiling 4800)" \
-    || no "set total ${total:-?} chars exceeds the 4800 ceiling — the skills as a set crowd out every other skill the user installs"
+[ -n "$total" ] && [ "$total" -le 5400 ] \
+    && ok "set total ${total} chars over ${count} skills (ceiling 5400)" \
+    || no "set total ${total:-?} chars exceeds the 5400 ceiling — the skills as a set crowd out every other skill the user installs"
 
 # the measurement must agree with the gate's own notion of a description: a description written as a
 # folded block scalar and the same text inline must measure identically (the > marker is not content)
