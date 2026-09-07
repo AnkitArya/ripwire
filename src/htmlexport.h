@@ -25,6 +25,7 @@
 //   The JS sim / BFS / view routing run client-side only and do not affect the HTML bytes.
 
 #include "model.h"
+#include "gitstamp.h"     // htmlProvenanceFor — the page's at= stamp (2026-09-06)
 #include "graph.h"       // for Communities / communities() — module (community) grouping
 #include "serialize.h"   // for escapeXml (not reused here; we write jsonEscape instead)
 #include "infra/jsonesc.h"     // A4-F27: canonical escape core; jsonEscape below is a thin wrapper
@@ -130,15 +131,23 @@ inline std::string stripHomePair( std::string_view root )
         }
     }
 
-    if( dropCount == 0 )
+    // 2026-09-06 stranger audit: a root with no home pair used to be emitted VERBATIM — a checkout under
+    // /Volumes, /srv, /work or a symlinked home shipped its whole absolute path into a page whose only use of
+    // ROOT is the caption's last-two-segments label. Nothing on the page needs more than that label, so the
+    // envelope IS the label now: the last two segments, with an ellipsis when anything was cut. The JS
+    // rootShort() is idempotent over this shape.
+    std::size_t begin    = first + dropCount;
+    bool        elided   = false;
+    if( parts.size() - begin > 2 )
     {
-        return std::string( root );                 // nothing to hide — keep the spelling as typed
+        begin  = parts.size() - 2;
+        elided = true;
     }
 
-    std::string out;
-    for( std::size_t i = first + dropCount; i < parts.size(); ++i )
+    std::string out = elided ? std::string( "\xE2\x80\xA6/" ) : std::string();
+    for( std::size_t i = begin; i < parts.size(); ++i )
     {
-        if( !out.empty() )
+        if( i != begin )
         {
             out += '/';
         }
@@ -1661,19 +1670,22 @@ static const char kScriptRouter[] = R"JS(
     // The leaking segment is always the one after that home root, and its position is knowable, so
     // remove it by structure rather than hoping the tail misses it.
     var rootShort = function(r) {
-      if (!r) { return '.'; }
+      if (!r) { return ROOT_NAME || '.'; }
       var parts = r.replace(/[\/\\]+$/, '').split(/[\/\\]+/).filter(function(x){ return x.length && x !== '.'; });
       if (parts.length && /^[A-Za-z]:$/.test(parts[0])) { parts.shift(); }
       var lead = (parts[0] || '').toLowerCase();
       if ((lead === 'users' || lead === 'home') && parts.length >= 2) { parts.splice(0, 2); }
       else if (lead === 'root') { parts.splice(0, 1); }
-      if (!parts.length) { return '~'; }
+      if (!parts.length) { return ROOT_NAME || '.'; }   // the name, never '~': a tilde reads as the home directory
       return (parts.length > 2 ? '…/' : '') + parts.slice(-2).join('/');
     };
     factLines.push( k('root') + '<b>' + escHtml(rootShort(ROOT)) + '</b>  ' +
                     k('ranker') + '<b>' + escHtml(RANKER) + '</b>  ' +
                     k('top-k') + '<b>' + TOPK + '</b> of ' + SYM_TOTAL + ' symbols (' + pct + '%)  ' +
-                    k('map') + '<b>' + NODE_TOTAL + '</b> nodes / <b>' + EDGE_TOTAL + '</b> call edges' );
+                    k('map') + '<b>' + NODE_TOTAL + '</b> nodes / <b>' + EDGE_TOTAL + '</b> call edges' +
+                    (AT ? '  ' + k('commit') + '<b>' + escHtml(AT) + '</b>' : '') +
+                    (AT.indexOf('+shallow') >= 0 ? ' <b>(shallow clone: churn counts only the commits present)</b>' : '') +
+                    '  ' + k('ripwire') + '<b>' + escHtml(VERSION) + '</b>' );
     // ...and how much of that the CAMERA is on. Absent when the camera frames the whole view, which is
     // the auto-fit default and the case where the counts above already describe the frame; present the
     // moment a zoom or a pan makes them describe more than the picture does (see draw()'s closing block).
@@ -2193,6 +2205,9 @@ struct HtmlColorExtras
     ColorBy                           initialMode   = ColorBy::Lang;
     std::string_view                  churnWindow;               // the window the caller actually MINED ("18 months ago"), for the legend
     RankBy                            ranker        = RankBy::PageRank;   // for the provenance caption — which ranks these are
+    std::string_view                  atStamp;                   // gitstamp::stampAt of the mapped root ("" off git / multi-root): the caption's commit
+    std::string_view                  rootName;                  // the mapped root's last path segment — the page's name, never its path
+    std::string_view                  version;                   // kRipwireVersion, so a handed-around page says which binary drew it
 };
 
 // The APPEARANCE payload, emitted as ONE section because it is one payload: everything the page needs
@@ -2203,6 +2218,28 @@ struct HtmlColorExtras
 // than leaving a function called "color" emitting the shape table.
 // `fileList` maps FILES index → ing.files index; churn is file-granularity, so it is keyed by the
 // former and looked up through the latter.
+// The page's two identity facts (2026-09-06): the commit stamp every XML root carries, and the root's LAST path
+// segment. Multi-root pages carry neither (each root labels its own paths). The segment is a NAME — the path it
+// came from never reaches the page; stripHomePair() on the ROOT envelope stays the privacy boundary.
+struct HtmlProvenance { std::string atStamp; std::string rootName; };
+
+inline HtmlProvenance htmlProvenanceFor( const std::string& root, bool multiRoot )
+{
+    HtmlProvenance out;
+    if( multiRoot )
+    {
+        return out;
+    }
+    out.atStamp = gitstamp::stampAt( root );
+    std::error_code ec;
+    const auto      canon = std::filesystem::canonical( root, ec );
+    if( !ec )
+    {
+        out.rootName = canon.filename().string();
+    }
+    return out;
+}
+
 inline void writeAppearancePayload( std::FILE* out, const std::vector<std::uint32_t>& fileList, const HtmlColorExtras& color )
 {
     std::fprintf( out, "const FCHURN = [" );
@@ -2214,6 +2251,9 @@ inline void writeAppearancePayload( std::FILE* out, const std::vector<std::uint3
     std::fprintf( out, "];\n" );
     // whether git evidence existed — 0 ⇒ churn mode discloses "unavailable" instead of lying zeros
     std::fprintf( out, "const CHURN_OK = %d;\n", color.churnEvidence ? 1 : 0 );
+    std::fprintf( out, "const AT = \"%s\";\n", jsonEscape( color.atStamp ).c_str() );
+    std::fprintf( out, "const ROOT_NAME = \"%s\";\n", jsonEscape( color.rootName ).c_str() );
+    std::fprintf( out, "const VERSION = \"%s\";\n", jsonEscape( color.version ).c_str() );
     // the WINDOW those commit counts were mined over. The legend used to print a bare "0 1-2 3-9 10-29 30+"
     // with no unit and no horizon, so "3-9" could be read as three commits ever; it is three commits inside
     // this window. Passed in by the caller rather than spelled in the JS, because the JS cannot know what
@@ -2293,7 +2333,11 @@ inline void writeEdgePayload( std::FILE* out, const std::vector<HtmlEdge>& edges
 // writeAppearancePayload states at its own head: writeHtml is a 400-line emitter and this is a nameable,
 // input-free concept, so the caller grows by a call instead of by ninety lines of literal. Nothing here
 // depends on the graph; every byte is constant.
-inline void writeDocumentShell( std::FILE* out )
+// 2026-09-06 stranger audit: the page was titled "ripwire wiki" whatever it mapped, and named its root "~" for
+// "." — a page handed to a colleague read as a map of someone's home directory, of unknown code. The title is
+// the mapped root's NAME (its last path segment, never its path: the home-pair strip below stays the privacy
+// boundary), and the caption carries the commit stamp and the binary version, same as every XML root does.
+inline void writeDocumentShell( std::FILE* out, const std::string& pageTitle )
 {
     // emit document head. Three in-file VIEWS share one #bar + one #c canvas; #cards (Overview) and
     // #crumb (breadcrumb trail) are additional DOM regions toggled by the router, not separate pages.
@@ -2303,7 +2347,7 @@ inline void writeDocumentShell( std::FILE* out )
         "<head>\n"
         "<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-        "<title>ripwire wiki</title>\n"
+        "<title>%s</title>\n"
         "<style>\n"
         "* { margin:0; padding:0; box-sizing:border-box; }\n"
         "body { background:#111; color:#eee; font:13px/1.4 sans-serif; overflow:hidden; }\n"
@@ -2366,7 +2410,7 @@ inline void writeDocumentShell( std::FILE* out )
         "</head>\n"
         "<body>\n"
         "<div id=\"bar\">\n"
-        "  <h1>ripwire wiki</h1>\n"
+        "  <h1>%s</h1>\n"
         // Two named routes in the bar, in the order the page uses them. "Graph" is the boot view (the
         // whole selected map — see the renderGraph header for why it is the boot view and not the cards);
         // the module overview keeps its route and its link and is simply no longer the landing page. Its
@@ -2393,7 +2437,7 @@ inline void writeDocumentShell( std::FILE* out )
         "<div id=\"cards\"></div>\n"
         "<canvas id=\"c\"></canvas>\n"
         "<script>\n"
-    );
+        , pageTitle.c_str(), pageTitle.c_str() );
 }
 
 // writeHtml — emit a self-contained HTML wiki document to `out`.
@@ -2595,7 +2639,15 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         moduleRank[modOrder[disp]] = disp;
     }
 
-    writeDocumentShell( out );
+    // the title is HTML text: escape it (the root name is user-chosen; a "<" in it must not become markup)
+    std::string pageTitle = "ripwire";
+    if( !color.rootName.empty() )
+    {
+        std::vector<char> titleEsc;
+        pageTitle += " — ";
+        pageTitle += std::string( rw::escapeXml( color.rootName, titleEsc ) );
+    }
+    writeDocumentShell( out, pageTitle );
 
     // emit NODES array — one entry per selected symbol, deterministic (rank-desc, id-asc order
     // preserved). `file` indexes FILES; `comm` is the display module id (moduleRank), or -1 if this

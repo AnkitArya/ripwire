@@ -32,11 +32,14 @@ reading this page:
 
 ```bash
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
-ripwire . --for="incremental cache invalidation"
+export PATH="$HOME/.local/bin:$PATH"      # where it installed; the installer prints this line if you need it
+cd your-repo
+ripwire . --for="<the change you are about to make, in words>"
 ```
 
 One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks, and
-the tests that reach them. Run on this repository (2026-08-30), that second line answers in about
+the tests that reach them. The task is yours to phrase — ask about *your* code, not ours. Run on this
+repository (2026-08-30) with `--for="incremental cache invalidation"`, that last line answers in about
 4.3K tokens with:
 
 - **The ranked symbols, in rank order** — the cache-header constant `kCacheMagic` first (with its doc
@@ -49,12 +52,15 @@ the tests that reach them. Run on this repository (2026-08-30), that second line
   `exclConfigHex`; no second query needed to see the neighbourhood.
 - **Its own confidence** — this answer says `confidence="high"` with the score margin attached; a
   flat ranking says `low`, so it reads as a starting point instead of masquerading as an answer.
+  `confidence=` measures how clearly the ranking separates its head from the rest, not whether the
+  head is what you meant: ask a repository about a concept it does not contain and the best lexical
+  matches still rank, confidently. Phrase the task in your code's own words.
 
 ### If it works on your codebase, tell us what it got wrong
 
 Every number on this page is a measurement on a corpus we happen to have. **Yours is one we don't.**
 
-After you have actually used it on your own repository for a while, hand your agent
+After a session on your own repository — your first one counts, and counts most — hand your agent
 [`prompts/improve-for-my-language.md`](prompts/improve-for-my-language.md). It harvests that
 session's own transcript — where ripwire answered, where it missed, where you fell back to grep —
 and every finding it produces has to cite the moment it came from: what you asked, which command
@@ -657,13 +663,17 @@ every release is smoke-tested on a RHEL 9 userland before it publishes). Downloa
 [GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
 to `~/.local/bin`. From v0.2.2 the release tarball also ships the eighteen agent skills, and the
 installer stages them under `~/.local/share/ripwire/skills` **and activates them for every agent it
-detects** (Claude Code, Codex), printing one line per agent saying what it did. An agent that is not
+detects** (Claude Code, Codex), printing one line per agent saying what it did. Seventeen of the
+eighteen are for using the tool; the one about compiling ripwire itself (`ripwire-opt-remarks`,
+`audience: contributor` in its front matter) stays staged unless you pass `--contributor` to
+`skills/install.sh`. An agent that is not
 installed is never given a skills directory, hooks are never registered without an explicit `--hook`,
 and `RIPWIRE_NO_ACTIVATE=1` stages without activating for image builds. When no agent is detected the
 activation one-liner is printed instead:
 
 ```bash
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
+export PATH="$HOME/.local/bin:$PATH"      # not on PATH by default on macOS or most Linux shells; add it to your rc file
 ```
 
 **Building it yourself needs CMake 3.24+ and a C++23 compiler, and nothing else installed first** —
@@ -957,8 +967,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="src/eval.h:169"/>
 <s t="fn" n="rankGraph" p="src/graph.h:2581"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:3130"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:991"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:1116"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:994"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:1119"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:1104"/>
 </callers>
 ```
@@ -1714,6 +1724,7 @@ skills/install.sh --codex         # → ${AGENTS_HOME:-~/.agents}/skills (canoni
 skills/install.sh --codex --hook  # → also install Codex's task router, CLI nudge + session primer
 skills/install.sh --codex-legacy  # → ${CODEX_HOME:-~/.codex}/skills (older Codex installs)
 skills/install.sh /some/path      # → an explicit destination
+skills/install.sh --contributor   # → also the contributor-facing skill (compiling ripwire itself)
 ripwire --scan-skills=skills      # read the security scanner's verdict first, if you would rather
 ```
 

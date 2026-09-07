@@ -204,7 +204,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // reading. Present-only, like every term here: absent means nothing was dropped.
     { "dropped_positive",  "dropped_positive=N: N ranked candidates cut by the ceiling" },
     { "withheld",          "withheld=: rows the budget cut" },
-    { "at",                "at=: commit(+dirty)" },
+    { "at",                "at=: commit+dirty+shallow" },
     { "root",              "root=: p= relative to it" },
     { "parse_degraded",    "parse_degraded=1: ERROR nodes in that parse", true },
     { "tier_partial",      "tier_partial=1: tier elected under a partial classification" },

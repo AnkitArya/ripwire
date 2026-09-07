@@ -768,8 +768,11 @@ std::optional<int> runNotes( const MainDispatch& d )
         std::string date = rw::quality::gitCommitterDateIso( d.root );
         if( date.empty() )
         {
-            DEGRADED_PATH_ALERT( "notes: non-git root — dating the note at the fixed epoch 1970-01-01 for determinism" );
-            date = "1970-01-01";
+            // 2026-09-06 stranger audit: this used to store 1970-01-01 — an epoch nobody explained, read as a
+            // real date by every consumer. "undated" is the honest value: there is no committer date to anchor to.
+            DEGRADED_PATH_ALERT( "notes: non-git root — the note is stored undated" );
+            date = "undated";
+            std::fprintf( stderr, "ripwire: --note-add: %s is not a git checkout — the note is stored undated (d=\"undated\"; a git checkout stamps the committer date)\n", d.root.c_str() );
         }
         // provenance stamp (the day's costliest lesson): anchor the note to the commit it was written under.
         // gitHeadSha resolves empty exactly when date's own gitCommitterDateIso lookup would have (same
@@ -841,7 +844,7 @@ std::optional<int> runNotes( const MainDispatch& d )
             char hdr[ 512 ];
             std::snprintf( hdr, sizeof( hdr ),
                            "<ctx><!-- ripwire field notes: notes=%zu targets=%zu dangling=%zu (a target with no matching indexed symbol/file — legal: listed here, surfaced nowhere)."
-                           " Each note row: d= is the ISO date it was recorded; sha= the abbreviated commit and branch= the branch checked out at record time,"
+                           " Each note row: d= is the ISO date it was recorded (\"undated\" when the root was not a git checkout at record time); sha= the abbreviated commit and branch= the branch checked out at record time,"
                            " both omitted entirely on a note stored before provenance stamping (absent means none recorded, never empty) -->",
                            all.size(), targetCount, danglingCount );
             w.write( hdr );
@@ -1508,8 +1511,14 @@ int runDefaultMap( const MainDispatch& d )
                 return 1;
             }
         }
-        writeHtml( htmlOut, ing, rank, g, mapTopK,
-                   HtmlColorExtras{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy, kHtmlChurnWindow, cfg.rankBy }, mapRootArg );   // R-R
+        // 2026-09-06 stranger audit: the page names what it maps (last path segment only — the path itself never
+        // reaches the page), anchors to the commit like every XML root does, and says which binary drew it.
+        HtmlColorExtras       htmlColor{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy, kHtmlChurnWindow, cfg.rankBy };
+        const HtmlProvenance  htmlProv = htmlProvenanceFor( root, multiRoot );
+        htmlColor.atStamp  = htmlProv.atStamp;
+        htmlColor.rootName = htmlProv.rootName;
+        htmlColor.version  = kRipwireVersion;
+        writeHtml( htmlOut, ing, rank, g, mapTopK, htmlColor, mapRootArg );   // R-R
         if( htmlOut != stdout )
         {
             std::fclose( htmlOut );
@@ -2639,6 +2648,42 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
 // payload byte untouched), and written to the real stdout. Exit codes pass through unchanged. A run that
 // produced no XML root (a refusal already happened, or a text verb slipped past validateLegendModifier's
 // list) is refused here naming the flag — never served as if the posture had applied.
+// 2026-09-06 stranger audit: a root that exists but cannot be opened (chmod 000, another user's checkout) came
+// back as an EMPTY map at exit 0 — indistinguishable from "no source here". Probe the directory the way the
+// crawl will; refuse with the reason instead of serving nothing. A non-directory root is left to the crawl.
+static bool rootIsReadable( const std::string& resolvedRoot )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if( !fs::is_directory( fs::path( resolvedRoot ), ec ) || ec )
+    {
+        return true;
+    }
+    fs::directory_iterator probe( fs::path( resolvedRoot ), ec );
+    if( !ec )
+    {
+        return true;
+    }
+    std::fprintf( stderr, "ripwire: root path cannot be read: %s (%s) — fix its permissions, or point at a directory you can open\n",
+                  resolvedRoot.c_str(), ec.message().c_str() );
+    return false;
+}
+
+// 2026-09-06 stranger audit: --cache=<a directory> read as "corrupt", wrote nothing, and served a byte-identical
+// map at exit 0 — the fixed --cache=<nonexistent dir> bug's twin. The flag names a FILE; say so, with the form.
+static bool cachePathIsDirectory( const std::string& cachePath )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if( !fs::is_directory( fs::path( cachePath ), ec ) || ec )
+    {
+        return false;
+    }
+    std::fprintf( stderr, "ripwire: --cache=%s: that is a directory; --cache names the blob FILE to read and write, e.g. --cache=%s/ripwire.bin\n",
+                  cachePath.c_str(), cachePath.c_str() );
+    return true;
+}
+
 static int dispatchMain( const rw::Config& cfg, char** argv );
 
 // the key for a SHARED root (`r` = the map family, `ctx` = the bundle family), from the flags that shaped it
@@ -3332,6 +3377,10 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                 }
                 return 1;
             }
+            if( !rootIsReadable( resolvedRoot ) )
+            {
+                return 1;   // the refusal is on stderr (rootIsReadable)
+            }
         }
         resolvedRoots.push_back( resolvedRoot );
     }
@@ -3430,6 +3479,10 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         // The file need not EXIST — a cold first run is the normal case — but the directory that would hold
         // it must, or the write at the end of the run silently does nothing.
         const fs::path    cacheDir = fs::path( cachePath ).parent_path();
+        if( cachePathIsDirectory( cachePath ) )
+        {
+            return 1;   // the refusal is on stderr (cachePathIsDirectory)
+        }
         if( !cacheDir.empty() && !fs::is_directory( cacheDir, cacheEc ) )
         {
             std::fprintf( stderr, "ripwire: --cache=%s: the directory '%s' does not exist, so nothing could ever be written there "
