@@ -411,8 +411,15 @@ echo "=== disclosure: a rejected cache says so on stderr; a good or absent one d
 # fresh mutants: every rejected cache Part 1 ran against was REWRITTEN as a good one by that very run (the
 # self-heal this arm is about), so the files under $MUTDIR are healthy by now. Cut two new ones from $GOOD.
 DISCDIR="$TMP/disclose"; mkdir -p "$DISCDIR"
-cp "$GOOD" "$DISCDIR/trailer_bytes_corrupted.cache"
-printf '\377' | dd of="$DISCDIR/trailer_bytes_corrupted.cache" bs=1 seek=$(( $( wc -c <"$GOOD" ) - 1 )) conv=notrunc 2>/dev/null
+# XOR the last byte, as Part 1's mut_trailer_corrupted does — never WRITE a constant: on the one CI leg
+# (macos-14 Release, run 34090630725) where that byte already was 0xFF, a constant left the mutant equal to
+# the good cache, nothing was rejected, and this arm reported "no disclosure" about a cache that was fine.
+python3 - "$GOOD" "$DISCDIR/trailer_bytes_corrupted.cache" <<'PYMUT'
+import sys
+b = bytearray( open( sys.argv[1], "rb" ).read() )
+b[-1] ^= 0xFF
+open( sys.argv[2], "wb" ).write( bytes( b ) )
+PYMUT
 : >"$DISCDIR/empty_file.cache"
 for dname in trailer_bytes_corrupted empty_file; do
     "$BIN" "$FIXTURE" --cache="$DISCDIR/$dname.cache" --no-stable >/dev/null 2>"$TMP/disc_$dname.err"
