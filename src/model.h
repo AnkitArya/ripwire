@@ -523,6 +523,9 @@ enum class LocalBindKind : std::uint8_t
                //     bound name's module is inside the indexed tree. Rule 2 (kind == Type), the L3 fn tables
                //     and shadow suppression all skip it by kind. Python captures these; a `from m import *`
                //     records nothing (no name is bound). APPENDED for the same cache reason as VarDecl.
+    JsImport,  // named ES import: var=local name, typeName=module, importedName=export (empty for type-only).
+    JsExport,  // direct ES export declaration: var=exported name. No barrel/default-export inference.
+    JsShadow,  // lexical declaration hiding an ES import; spanStart/spanEnd cover the declaring scope.
 };
 
 inline constexpr const char* kFnBindLambdaTarget  = "(lambda)";    // parens are illegal in identifiers, so
@@ -540,6 +543,7 @@ struct Binding
                                           //   declarations) from its scope's start. See suppressShadowedReferences.
                                           //   {0,0} on every other kind and on a scope-less capture (contains nothing).
     std::string   var;                    // the declared variable identifier (`x`)
+    std::string   importedName;           // JsImport only: the requested export; never a global-name fallback.
     std::string   typeName;               // kind==Type: the written type's final segment (`Foo`), resolved to a
                                           //   class in buildGraph. kind==FnDecl/FnAssign: the bound FUNCTION
                                           //   name as written minus `&` (`alpha`, `ns::alpha`), or a sentinel.

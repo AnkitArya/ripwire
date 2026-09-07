@@ -964,6 +964,113 @@ inline const rw::SmallVec<NodeId, 2>* fnBindTargetIds( const HashMap<std::string
 // which narrowing stage committed it and to which canonical target. It adds rows to g.pinCensus and
 // changes NOTHING else — no candidate is admitted, dropped or reordered by it, so the emitted map is
 // byte-identical armed or not (test/pincensuscheck.sh arm (E) is the executable form of that sentence).
+struct JsImportTables
+{
+    HashMap<std::string, NodeId> targets;
+    HashMap<std::string, std::vector<VarSpan>> shadows;
+};
+
+inline std::string jsImportKey( std::uint32_t fileId, std::string_view name )
+{
+    return std::to_string( fileId ) + "#" + std::string( name );
+}
+
+inline std::uint32_t resolveJsNamedImportFile( std::string_view importer, std::string_view module,
+                                             const HashMap<std::string, std::uint32_t>& files, const WsIncludeCtx* workspace, std::uint32_t importerFileId )
+{
+    // Source trees commonly spell runtime extensions. Require a unique file across exact/runtime and
+    // source alternatives; competing emitted and source files are deliberately unresolved.
+    if( ( !module.starts_with( "./" ) && !module.starts_with( "../" ) )
+        || ( !module.ends_with( ".js" ) && !module.ends_with( ".mjs" ) && !module.ends_with( ".cjs" ) ) )
+    {
+        return resolvePreciseInclude( importer, module, false, files, {}, false, workspace, importerFileId );
+    }
+    std::uint32_t hit = joinNormalizeLookup( includerDir( importer ), std::string( module ), files, workspace, importerFileId );
+    bool ambiguous = false;
+    const auto probe = [ & ]( std::string_view extension, std::size_t suffixLength )
+    {
+        const auto candidate = joinNormalizeLookup( includerDir( importer ), std::string( module.substr( 0, module.size() - suffixLength ) )
+                                                   + std::string( extension ), files, workspace, importerFileId );
+        if( candidate == kNoFile ) { return; }
+        if( hit != kNoFile && hit != candidate ) { ambiguous = true; }
+        hit = candidate;
+    };
+    if( module.ends_with( ".js" ) ) { probe( ".ts", 3 ); probe( ".tsx", 3 ); }
+    else if( module.ends_with( ".mjs" ) ) { probe( ".mts", 4 ); }
+    else if( module.ends_with( ".cjs" ) ) { probe( ".cts", 4 ); }
+    return ambiguous ? kNoFile : hit;
+}
+
+inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncludeCtx* workspace )
+{
+    JsImportTables tables;
+    if( std::none_of( ing.bindings.begin(), ing.bindings.end(), []( const Binding& b ) { return b.kind == LocalBindKind::JsImport; } ) )
+    {
+        return tables;
+    }
+    tables.targets.reserve( ing.bindings.size() );
+    tables.shadows.reserve( ing.bindings.size() );
+    HashMap<std::string, std::uint32_t> files;
+    files.reserve( ing.files.size() );
+    for( std::uint32_t fileId = 0; fileId < ing.files.size(); ++fileId )
+    {
+        files.emplace( lexicalNormalize( ing.files[ fileId ] ), fileId );
+    }
+    HashMap<std::string, std::vector<VarSpan>> exportSpans;
+    exportSpans.reserve( ing.bindings.size() );
+    HashMap<std::string, NodeId> exported;
+    exported.reserve( ing.bindings.size() );
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind == LocalBindKind::JsExport )
+        {
+            const std::string key = jsImportKey( b.fileId, b.var );
+            exported.try_emplace( key, kNoNode );
+            exportSpans[ key ].push_back( { b.spanStart, b.spanEnd } );
+        }
+        if( b.kind == LocalBindKind::JsShadow )
+        {
+            tables.shadows[ jsImportKey( b.fileId, b.var ) ].push_back( { b.spanStart, b.spanEnd } );
+        }
+    }
+    HashMap<std::string, char> duplicate;
+    duplicate.reserve( exported.size() );
+    for( const Symbol& symbol : ing.symbols )
+    {
+        if( ( symbol.lang != Lang::TypeScript && symbol.lang != Lang::JavaScript ) || !symbol.scope.empty()
+            || ( symbol.kind != SymKind::Function && symbol.kind != SymKind::Class ) ) { continue; }
+        const std::string key = jsImportKey( symbol.fileId, symbol.name );
+        auto found = exported.find( key );
+        if( found == exported.end() || duplicate.find( key ) != duplicate.end() ) { continue; }
+        const auto& spans = exportSpans.find( key )->second;
+        if( std::none_of( spans.begin(), spans.end(), [ & ]( const VarSpan& span )
+            { return symbol.sigStartByte >= span.startByte && symbol.endByte <= span.endByte; } ) ) { continue; }
+        if( found->second != kNoNode )
+        {
+            found->second = kNoNode;
+            duplicate.try_emplace( key, 1 );
+        }
+        else { found->second = symbol.id; }
+    }
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind != LocalBindKind::JsImport || b.fileId >= ing.files.size() ) { continue; }
+        NodeId target = kNoNode;
+        if( !b.importedName.empty() )
+        {
+            const auto fileId = resolveJsNamedImportFile( ing.files[ b.fileId ], b.typeName, files, workspace, b.fileId );
+            if( fileId != kNoFile )
+            {
+                const auto found = exported.find( jsImportKey( fileId, b.importedName ) );
+                if( found != exported.end() ) { target = found->second; }
+            }
+        }
+        const auto [ found, inserted ] = tables.targets.try_emplace( jsImportKey( b.fileId, b.var ), target );
+        if( !inserted ) { found->second = kNoNode; }   // duplicate binding, including invalid source: never choose one
+    }
+    return tables;
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -1196,7 +1303,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // resolver degrades to the name-based fallback ladder + honest amb=. The caller's OWN file is excluded (f ∉ trans[f]).
     // Deterministic: a pure function of the sorted ing.files + ing.includes; each set is sorted+deduped
     // so rule3IncludeFile's binary-search membership is valid and order-stable (warm == cold).
-    std::vector<std::vector<NodeId>> fileIncludes = transitiveIncludeSet( buildPreciseIncludeAdj( ing ) );
+    auto [ includeAdj, includeContext ] = buildPreciseIncludeAdjWithContext( ing );
+    std::vector<std::vector<NodeId>> fileIncludes = transitiveIncludeSet( includeAdj );
+    const JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr );
     // per-symbol fileId view for Rule 3 (group a candidate def by its file without passing the whole IngestResult).
     std::vector<std::uint32_t> symFileId( N );
     for( const Symbol& s : ing.symbols )
@@ -1543,6 +1652,30 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // keeps role="call": it IS a real call; only the RESOLUTION came from the binding — the same trust
         // level as Rule 2 receiver narrowing.
         bool narrowed = false;
+        // A bound ES name never falls through to the global spelling ladder. SCIP remains authoritative.
+        if( !scipPinned && r.role == RefRole::Call && r.recv == RecvKind::None && r.qualifier.empty()
+            && ( r.lang == Lang::TypeScript || r.lang == Lang::JavaScript ) )
+        {
+            const std::string key = jsImportKey( r.fileId, r.calleeName );
+            if( const auto imported = jsImports.targets.find( key ); imported != jsImports.targets.end() )
+            {
+                bool shadowed = false;
+                if( const auto spans = jsImports.shadows.find( key ); spans != jsImports.shadows.end() )
+                {
+                    for( const VarSpan& span : spans->second )
+                    {
+                        if( r.startByte >= span.startByte && r.startByte < span.endByte ) { shadowed = true; break; }
+                    }
+                }
+                if( shadowed || imported->second == kNoNode )
+                {
+                    ++g.unresolvedOut[ r.fromSymbol ];
+                    continue;
+                }
+                cand.push_back( imported->second );
+                narrowed = true;
+            }
+        }
         if( !scipPinned && !canonical && fnBindActive && r.role == RefRole::Call
             && r.recv == RecvKind::None && r.qualifier.empty()
             && ( r.lang == Lang::Cpp || r.lang == Lang::C || r.lang == Lang::ObjC ) )

@@ -82,6 +82,7 @@ struct RawBind
     std::uint32_t spanStart = 0;   // kind==VarDecl only: the declaring BLOCK's byte span (shadow scope);
     std::uint32_t spanEnd   = 0;   //   {0,0} on every other kind — see model.h Binding
     std::string   var;             // the declared variable identifier (`x`)
+    std::string   importedName;    // JsImport only; persisted beside the local name and module target.
     std::string   typeName;        // kind==Type: the written type's final segment (`Foo`);
                                    // kind==FnDecl/FnAssign: the bound function name (or an L3 sentinel)
 };
@@ -115,7 +116,8 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 15;           // 15 (offset-table blob): the blob gains a RECORD OFFSET
+constexpr std::uint32_t kCacheVersion = 16;           // 16: RawBind gains importedName for ES named imports.
+                                                      // 15 (offset-table blob): the blob gains a RECORD OFFSET
                                                       //    TABLE and a 24-byte trailer, so a run deserialises only
                                                       //    the records for the files it actually crawled, and a
                                                       //    save CARRIES OVER — byte for byte — the records for
@@ -190,7 +192,7 @@ constexpr std::uint32_t kCacheVersion = 15;           // 15 (offset-table blob):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 77;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 79;           // 79: ES import/export/shadow facts; skip 78 (77 rich-cache family).
                                                       // 77 = 2026-09-03 (Phase 5, docs/EVALS.md): two Python
                                                       //    ingest FACTS — (a) a `super()` call receiver classifies
                                                       //    RecvKind::SuperObj (appended) instead of None, so
@@ -1411,8 +1413,8 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     return d;
 }
 inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = Lang( r.u8() ); x.name = r.str(); x.isInherit = r.u8() != 0; x.isDocLink = r.u8() != 0; x.qualifier = r.str(); x.recv = RecvKind( r.u8() ); x.recvVar = r.str(); x.isCompose = r.u8() != 0; x.fieldName = r.str(); x.composeRel = r.str(); x.role = RefRole( r.u8() ); x.line = r.u32(); x.argCount = std::uint16_t( r.u32() ); x.argCountKnown = r.u8() != 0; return x; }
-inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); }
-inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = Lang( r.u8() ); b.kind = LocalBindKind( r.u8() ); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); return b; }
+inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
+inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = Lang( r.u8() ); b.kind = LocalBindKind( r.u8() ); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); b.importedName = r.str(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }
 inline BindingAlias readFfi( ByteR& r ) { BindingAlias a; a.kind = BindKind( r.u8() ); a.lowConf = r.u8() != 0; a.aliasName = r.str(); a.targetName = r.str(); a.targetScope = r.str(); return a; }
 // B6.3: RouteDef needs no startByte (its handler is resolved by NAME in buildGraph); RawRouteUse mirrors
@@ -1462,7 +1464,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     // arrays themselves are bounded per record inside readDef.
     const std::size_t     kMinDefRecordBytes      = minDefRecordBytes( captureValueUses );   // F8: named + tripwire-pinned above
     constexpr std::size_t kMinIncRecordBytes      =  6;   // 2×u8 (isAngle,isLazy) + 1×str(len u32, empty)
-    constexpr std::size_t kMinBindRecordBytes     = 13;   // 1×u32 + 1×u8 + 2×str(len u32, empty)
+    constexpr std::size_t kMinBindRecordBytes     = 26;   // 3×u32 + 2×u8 + 3×str(len u32, empty)
     constexpr std::size_t kMinFfiRecordBytes      = 14;   // 2×u8 (kind,lowConf) + 3×str(len u32, empty)
     constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (line) + 1×u8 (method) + 2×str(len u32, empty)
     constexpr std::size_t kMinRouteUseRecordBytes = 13;   // B6.3: 2×u32 (startByte,line) + 1×u8 (method) + 1×str(len u32, empty)
