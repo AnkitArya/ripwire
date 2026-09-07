@@ -1,10 +1,10 @@
 ---
 name: ripwire-orient
 description: >
-  Landing COLD in an unfamiliar repo or subsystem: main subsystems and entry points, 'how does X work
-  / where is Y' — or compacted mid-task, rebuilding what you knew. A ladder from a one-screen map
-  upward; --skipped when the map looks short. A NAMED symbol → navigate. Stop at the first rung that
-  answers.
+  Landing COLD in an unfamiliar repo or subsystem, or about to open several files for one question:
+  map first, read only the files it ranks highest. Main subsystems and entry points, 'how does X work
+  / where is Y'; compacted mid-task, rebuild what you knew. A NAMED symbol → navigate. Stop at the
+  first rung that answers.
 allowed-tools: Bash, Read
 ---
 
@@ -14,7 +14,7 @@ allowed-tools: Bash, Read
 > • Tracing one call graph / locating a literal → **ripwire-navigate**.
 > • Vetting your OWN diff before you push → **ripwire-change-check**.
 > • Risk in code you did NOT write / an unfamiliar subsystem → **ripwire-fresh-eyes**.
-> • Map-before-you-read token discipline (any info need, mid-task) → **ripwire-efficient**.
+> • Map-before-you-read token discipline (any info need, mid-task) → this skill's companion **[`map-before-you-read.md`](map-before-you-read.md)** (folded in from the former `efficient` skill, 2026-09-07).
 > • Deep architecture-health read (deps metrics, layering rules, --arch gate) → **ripwire-layers**.
 > • Not sure which skill? → **ripwire-router**.
 
@@ -199,3 +199,12 @@ not. When you are deep in a task and learn something non-obvious, pin it *then* 
 Orientation summary: the 3–5 most important files (from god-files + hotspots), the main architectural
 modules (from `--communities` / `--zoom`), any cycles (from `--report`), and one sentence on overall shape.
 Use it to decide where a change belongs and which boundary a refactor should respect.
+
+## Mid-task: about to open several files for one question
+
+The same skill, a different rung: run the cheapest verb that answers the question (`--for`, `--grep`, `--expand`,
+`--pack-task` under a `--token-budget`), then read only the 2-3 files it ranks highest. Less context is measurably
+MORE accurate, not just cheaper. The full discipline — the read ladder, `--pack-task --partition=N` for fan-out,
+whole-symbol edits without a whole-file Read, the portable `--cache=FILE` one-liner — is
+**[`map-before-you-read.md`](map-before-you-read.md)**; the detail/token squeeze once you are reading a body is
+**[`compress-ladder.md`](compress-ladder.md)**. Both load on demand; neither is a separate skill.

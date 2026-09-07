@@ -15,3 +15,11 @@ Recorded 2026-09-07 for the "Skill descriptions under a client budget" registrat
 
 A row added, edited or relabeled after this line changes the digest; a round that measures against
 the sealed set states the digest it measured against.
+
+## Seal after the 2026-09-07 relabel (efficient → orient, 12 rows, mechanical map; RELABEL log in the header)
+
+    Seal: sha256(prompts.tsv) = 9262a1b6d87a0ea8c39d5a165217a8f72ac46ff728923aa9a9f38241b8c5ee35
+
+Rows 266, split=test 183 (85 judged), split=dev 83 — unchanged; only the 12 labels moved. The
+description-budget round's held-out measurement was taken against the previous seal (16b1c847…); the
+folded arm (C2) was scored against a derived copy carrying exactly this map.

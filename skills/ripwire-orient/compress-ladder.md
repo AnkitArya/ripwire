@@ -1,6 +1,6 @@
 # The detail ladder (and --compress) with ripwire
 
-Reference for `ripwire-efficient` — load this when you've already found the right file(s) via the map and
+Reference for `ripwire-orient` — load this when you've already found the right file(s) via the map and
 need to decide HOW MUCH of a symbol to pull into context, or want to shrink body output further.
 
 `<dir>` = repo root. Every rung is additive to the ranked map; climb only as far as the question demands.

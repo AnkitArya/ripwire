@@ -1,16 +1,11 @@
----
-name: ripwire-efficient
-description: >
-  About to open more than ~2 files, or paste whole files into context, to answer one question: map
-  first, then read only the 2-3 files the map ranks highest. The token budget discipline for ANY read
-  — less context is measurably MORE accurate; fires alongside the moment skills.
-allowed-tools: Bash, Read
----
+# Map before you read — the token + accuracy discipline (companion to ripwire-orient)
 
-# Be token-efficient with ripwire
+Folded into **ripwire-orient** on 2026-09-07: three blind rater models routed every prompt written for this
+discipline to orient anyway, so the moment lives there and this file is its full text (the former `efficient` skill) — load it when you
+catch yourself about to open more than ~2 files, or to paste whole files, to answer one question.
 
 > Routing — this is the cross-cutting discipline; for the specific MOMENT, use its skill:
-> • Cold-start / "how does X work / where is Y" (the understand moment) → **ripwire-orient**.
+> • Cold-start / "how does X work / where is Y" (the understand moment) → **ripwire-orient**'s SKILL.md itself.
 > • Tracing one call graph / locating a literal → **ripwire-navigate**.
 > • Not sure which skill at all → **ripwire-router**.
 

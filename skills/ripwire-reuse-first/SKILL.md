@@ -12,7 +12,7 @@ allowed-tools: Bash, Read
 
 > Routing — pick the right door:
 > • Starting a whole FEATURE (multi-symbol, needs a plan / interface / sizing) → **ripwire-before-you-build**.
-> • The cross-cutting *map-before-you-read* token discipline for any read → **ripwire-efficient**.
+> • The cross-cutting *map-before-you-read* token discipline for any read → **ripwire-orient** (`map-before-you-read.md`).
 > • Judging whether what you wrote got better or worse before "done" → **ripwire-quality-bar**.
 > • Not sure which skill? → **ripwire-router**.
 
