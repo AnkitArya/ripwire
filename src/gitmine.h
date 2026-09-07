@@ -2517,15 +2517,26 @@ inline std::vector<CoGroup> cochangeViolationGroups( std::vector<CoViolation>& v
 // evidence of hidden coupling. ~22 of the first 30 repo-wide rows were such pairs (a PDF↔PPTX build
 // artifact pair rendered as "hidden architectural debt"; every gate↔subject pair rendered as surprising).
 //
-// The predicate is §P9.4's, verbatim — lintrules::dependencyCapable( langOfPath( path ) ), the same one
-// <health dep_files=> uses for its denominator — so "dependency-capable" cannot mean two things in one
-// binary. A pair with a dep-incapable side KEEPS its row (co-change is a real, mined fact about it) and
-// carries dep_capable="0" in place of surprising=, which is the honest reading: the question surprising=
-// answers is not defined for this pair.
+// The predicate is §P9.4's — lintrules::dependencyPairCapable, which is dependencyCapable( both sides )
+// PLUS a shared dependency dialect, so "dependency-capable" cannot mean two things in one binary. A pair
+// with a dep-incapable side KEEPS its row (co-change is a real, mined fact about it) and carries
+// dep_capable="0" in place of surprising=, which is the honest reading: the question surprising= answers
+// is not defined for this pair.
+//
+// WHY THE PAIR FORM, AND NOT dependencyCapable ON EACH SIDE (kParserVer 81). Until Bash/Ruby/Lua/Elixir
+// joined the capable set, per-file capability and pair capability agreed on every row this repo produces,
+// because the only dep-INcapable files here were .sh/.md/.json — so a `.sh` side alone decided it. The
+// moment a .sh became capable, the per-file form would have declared `test/foo.sh <-> src/bar.h` a pair
+// whose missing static dependency is EVIDENCE, and a `source` statement cannot name a .h: that is §A9.3's
+// vacuous truth back again, at scale (75 such rows in this repo's own top 400 — the measurement is in
+// lintrules.h beside the dialect table). The pair form keeps the gate that already guards this —
+// test/cochangesurprisecheck.sh's `tools/deploy.sh <-> src/alpha.cpp` negative control — green for the
+// right reason instead of by accident, and it also FIXES 22 pre-existing over-claims of the same shape
+// that the per-file form always allowed through (.js<->.h, .py<->.h, .py<->.cpp: cross-dialect pairs that
+// were carrying surprising="1" before this change).
 inline bool coPairDependencyCapable( const IngestResult& ing, std::uint32_t a, std::uint32_t b )
 {
-    return dependencyCapable( langOfPath( ing.files[a] ) )
-        && dependencyCapable( langOfPath( ing.files[b] ) );
+    return dependencyPairCapable( langOfPath( ing.files[a] ), langOfPath( ing.files[b] ) );
 }
 
 // one co-change partner of a file (changes together in git history). `surprising` can only ever be true

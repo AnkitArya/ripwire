@@ -1646,7 +1646,7 @@ $ ./build/ripwire . --metrics --top-k=10
 
 **Answers:** file->file dependency graph (god-files, cycles — validated);
 
-its nccd (Lakos) is a design heuristic, not independently outcome-validated. instab= (Martin's I=Ce/(Ca+Ce)) counts project includes ONLY -- system/third-party headers are excluded from Ce, matching stabledeps' gap= so gap == consumer's instab - provider's instab always. <health>'s ccd/acd/nccd/shape are computed over dep_files= (files whose language has #include/import syntax) not files= (the raw corpus, incl. .sh/.md/.json/etc, which can't participate in the graph) -- --arch's propagation_cost uses the same N
+its nccd (Lakos) is a design heuristic, not independently outcome-validated. instab= (Martin's I=Ce/(Ca+Ce)) counts project includes ONLY -- system/third-party headers are excluded from Ce, matching stabledeps' gap= so gap == consumer's instab - provider's instab always. <health>'s ccd/acd/nccd/shape are computed over dep_files= (files whose language has #include/import syntax) not files= (the raw corpus, incl. md/json/toml/yaml, which can't participate in the graph) -- --arch's propagation_cost uses the same N. <health dep_langs=> names that language set, which is what makes a dep_files=/ccd/ acd/nccd number comparable across builds: sh, rb, lua and ex joined it at parser version 81 and every one of those numbers moved on a corpus holding them
 
 **Try it**
 

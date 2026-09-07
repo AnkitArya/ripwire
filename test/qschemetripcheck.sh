@@ -34,6 +34,17 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-07, FOUR-LANGUAGE IMPORTS (test/bashsourcecheck.sh, test/luarequirecheck.sh,
+#   test/rubyrequirecheck.sh, test/eliximportcheck.sh, test/deplangscheck.sh): kParserVer 80 -> 81 and
+#   kIngestParserVerMirror -> 81. Bash `source`/`.`, Lua `require`, Ruby `require`/`require_relative`/
+#   `load` and Elixir `alias`/`import`/`require`/`use` become Include records — four languages that
+#   emitted NO Include record on ANY tree now emit one per directive, so a v80 blob on a tree holding any
+#   of them carries an EMPTY include list where a real one exists and must be rejected. Include's RECORD
+#   SHAPE is unchanged (same four fields), so kCacheVersion stays 16 — the 38/39 precedent, where the
+#   extracted SET grew and only parserVer moved. No Snapshot-side function changed, kQSnapCacheScheme
+#   stays 8. The same commit flips lintrules.h::dependencyCapable for those four languages, which moves
+#   dep_files=/ccd/acd/nccd and --arch's propagation_cost on any corpus holding them; that is disclosed in
+#   the output itself as <health dep_langs=> rather than only here.
 # 2026-09-07, RUBY SCOPE + SETTERS (PR #47 rebased onto the langs integration branch,
 #   test/rubyscopecheck.sh, test/rubysettercheck.sh): kParserVer 79 -> 80 and kIngestParserVerMirror -> 80,
 #   landing ON TOP of the Elixir (78) and ES-import (79) bumps above. Two Ruby extraction FACTS moved:

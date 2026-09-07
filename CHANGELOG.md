@@ -15,6 +15,71 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — Bash, Lua, Ruby and Elixir get import/dependency edges (parser version 81)
+
+Four languages that emitted **no dependency record on any tree** now emit one per directive. Each spells a
+real file dependency, and each spells it as an ordinary CALL rather than a reserved statement — which is
+why `directiveTargetOf` had no branch for any of them, and why `lintrules.h::dependencyCapable` called all
+four incapable. That was a true statement about this extractor and a false one about the languages.
+
+| Language | Directives captured | Resolution rule |
+| --- | --- | --- |
+| Bash | `source FILE`, `. FILE` | the argument IS the path — no convention to model. A `$VAR`/`$( … )` anchor is reduced to its literal tail and probed against the includer's directory and every ancestor, unique-or-degrade |
+| Lua | `require "a.b"` | package.path's dotted convention (`a.b` → `a/b.lua`, or the package form `a/b/init.lua`), probed from the requiring file upward and under the `src/` and `lua/` source roots |
+| Ruby | `require_relative`, `require`, `load` | a leading dot means file-relative (the extractor normalizes `require_relative "x"` to `./x`); a bare specifier is searched against the crawl root plus `lib/`, `app/`, `test/`, `spec/` |
+| Elixir | `alias`, `import`, `require`, `use` | the corpus's OWN `defmodule` index, not a `MyApp.Foo` → `lib/my_app/foo.ex` path convention — so umbrella layouts and generated paths resolve, and a module two files define resolves to neither |
+
+Every rule is unique-or-degrade: two candidate files answering one specifier resolve to **neither**. There
+is no basename fallback anywhere in this, which is the one shortcut that would have made all four look
+better on a benchmark and been wrong invisibly.
+
+**Measured on this repository** (`ripwire . --deps`): 29 `source` directives across 28 gate scripts, 26 of
+them resolved. The 3 that do not are `. /dev/stdin <<EOF`, an absolute path outside the crawl — shown as a
+target row with no edge, never dropped. All 29 specifiers in this tree are `$ROOT/…`, so a literal-only
+resolver would have resolved zero of them.
+
+**Disclosed floors.** A shell specifier whose FILENAME is variable (`"$1"`, `"$d/$n.sh"`) cannot be
+resolved by anything short of running the script: it is captured, displayed, and produces no edge. Ruby's
+`autoload :Foo, "path"` is not captured (its path is argument two). An Elixir `alias A.B.C` also binds the
+local name `C`, so a later `C.f()` means `A.B.C.f` — the FILE edge lands, the NAME alias does **not** narrow
+call resolution, because the call's receiver is not kept by `queries/elixir/tags.scm`. Quoted Elixir AST
+(`quote do … end`) is descended into, so an `alias` inside a macro template is captured: the same
+union-over-arms posture the preprocessor tables take, a spurious edge rather than a missing one.
+
+### Changed — the dependency denominator moved, and now says so
+
+Making four languages dependency-capable changes **five denominators and one predicate**: `--deps`'s
+`dep_files=`/`ccd`/`acd`/`nccd`, `--arch`'s `propagation_cost`, and `--cochange`'s pair filter. Any number
+recorded against an older build on a corpus holding Bash, Ruby, Lua or Elixir has moved. On this repository
+`dep_files` went 758 → 1392 and `nccd` 0.68 → 0.39.
+
+`--deps` therefore publishes **`<health dep_langs=>`** — the capable language set, derived from the
+predicate itself so it cannot drift from what it documents. A `dep_files=` number is only comparable across
+builds when `dep_langs=` matches, and until now the set behind it existed only in a source comment.
+
+**`--cochange`'s `surprising=` is now a PAIR question.** It was "both sides dependency-capable", which
+agreed with the truth only while `.sh` was incapable. The moment a shell script became capable, that form
+would have declared `test/foo.sh` ↔ `src/bar.h` a pair whose missing static dependency is *evidence* — and
+no `source` can name a header. Measured before the change: of 153 `dep_capable="0"` rows in this repo's top
+400, the per-file form would have turned 88 capable and **75 of those are cross-dialect** pairs that would
+have read as hidden architectural debt. The predicate now also requires a shared dependency dialect, which
+additionally fixes 22 pre-existing over-claims of the same shape (`.js`↔`.h`, `.py`↔`.h`, `.py`↔`.cpp`).
+
+**Markdown stays excluded, now on the record.** Markdown *does* mint doc→doc link edges — `[B](b.md)` is a
+real edge and the map shows it — so "no import syntax" was never the reason. It is excluded because `--deps`
+and `--arch` measure change amplification, and a README linking twelve design docs is not twelve files of
+it: docs are read, not compiled. JSON/TOML/YAML have no file-level import at all.
+
+**Fixed while building this:** the root-relative probe every unknown-anchor rule needs was anchored at an
+empty base, which is the crawl root only when the root was written as `.`. The same tree scanned as
+`ripwire /abs/path` resolved 13 of 29 `source` directives where `ripwire .` resolved 26. Probing the
+includer's ancestor chain instead is root-spelling independent, and each new gate asserts the two spellings
+produce identical edges.
+
+Five new gates: `test/bashsourcecheck.sh`, `test/luarequirecheck.sh`, `test/rubyrequirecheck.sh`,
+`test/eliximportcheck.sh`, `test/deplangscheck.sh` (550 → 555). `test/luacheck.sh` §2 was **inverted** — it
+used to assert `<deps files="0">` on a Lua corpus, which is the assertion that would have kept this defect.
+
 ### Fixed — Ruby: definitions carry their enclosing class/module, and `def name=` is indexed and called
 
 Landed from PR #47 (Andriy Tyurnikov), rebased onto the Elixir and ES-import work. Two Ruby extraction

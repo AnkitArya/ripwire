@@ -152,8 +152,9 @@ inline std::string lexicalNormalize( std::string_view path )
 // (needs go.mod module-root) and Swift (whole-module, no path) are DEFERRED — their imports stay unresolved.
 
 // The import dialect a file's imports resolve in, keyed off its extension. C-family covers the quote
-// `#include`; Other (Go/Swift/Markdown/…) never precise-resolves (deferred / no path in import).
-enum class IncludeLang : std::uint8_t { CFamily, Python, Ts, Rust, Go, Other };
+// `#include`; Other (Swift/Java/C#/PHP/Markdown/…) never precise-resolves (deferred / no path in import).
+// Bash/Ruby/Lua/Elixir joined at kParserVer 81 — see their Step-As below.
+enum class IncludeLang : std::uint8_t { CFamily, Python, Ts, Rust, Go, Bash, Ruby, Lua, Elixir, Other };
 
 // extension → dialect, a declarative constexpr table (NOT a scattered if-chain). Extension includes the
 // leading dot; the classifier lowercases nothing (source extensions are lowercase by convention here).
@@ -172,6 +173,13 @@ inline IncludeLang includeLangOf( std::string_view path ) noexcept
         { ".mjs", IncludeLang::Ts },      { ".cjs", IncludeLang::Ts },
         { ".rs",  IncludeLang::Rust },
         { ".go",  IncludeLang::Go },       // Go: single-root DEFERRED (kNoFile); cross-root via go.mod `replace` (§3.2)
+        // kParserVer 81 — the four-language import round. Each has a SOUND Step-A below (unique-or-degrade,
+        // never a basename fallback); none is deferred, because unlike a Go package path or a C# namespace,
+        // each of these four names a FILE by a rule this tool can evaluate without a build system.
+        { ".sh",  IncludeLang::Bash },    { ".bash", IncludeLang::Bash },  { ".zsh", IncludeLang::Bash },
+        { ".rb",  IncludeLang::Ruby },
+        { ".lua", IncludeLang::Lua },
+        { ".ex",  IncludeLang::Elixir },  { ".exs", IncludeLang::Elixir },
         // B6.2: `.cs` has NO entry here — it falls through to IncludeLang::Other below, DEFERRED like
         // Java (also absent) and Swift/Go-single-root: a C# namespace does not map 1:1 onto a file (one
         // namespace spans many files, one file can hold several namespaces), so there is no sound
@@ -975,19 +983,341 @@ inline std::uint32_t resolveGoImport( std::string_view target, const WsIncludeCt
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
 }
 
+// ─── kParserVer 81 Step-As: Bash / Ruby / Lua / Elixir ───────────────────────────────────────────────
+//
+// One shared shape, the same one Python and TS already use: build a small FIXED list of candidate
+// relative paths, probe each through joinNormalizeLookup, and resolve IFF exactly ONE distinct fileId
+// comes back. Two or more ⇒ kNoFile (degrade, no guess); zero ⇒ kNoFile. Nothing here ever falls back to
+// a basename or a path SUFFIX match, which is the one shortcut that would make all four of these look
+// far better on a benchmark and be wrong in a way no user could see.
+
+// The unique-or-degrade accumulator every Step-A below shares — `hit` holds the single fileId found so
+// far, `kNoFile - 1` is the "a second, different file also answered" tombstone (≠ any real id), and the
+// caller reads the result through `result()`.
+struct UniqueProbe
+{
+    std::uint32_t hit = kNoFile;
+
+    void consider( std::uint32_t f ) noexcept
+    {
+        if( f == kNoFile )      { return; }
+        if( hit == kNoFile )    { hit = f; }
+        else if( f != hit )     { hit = kNoFile - 1; }
+    }
+    [[nodiscard]] std::uint32_t result() const noexcept { return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit; }
+};
+
+// Probe `rel` against the includer's own directory AND every ANCESTOR of it, unique-or-degrade.
+//
+// This is the answer to "the anchor is not knowable, so which base do I join against?" — the question a
+// `. "$ROOT/scripts/x.sh"`, a Lua `require "pkg.mod"` and a Ruby load-path `require "lib/x"` all ask, and
+// the three earlier Step-As (Python/TS/Rust) never had to, because their anchors are stated in the
+// specifier. The first implementation of this probed the includer's dir plus an EMPTY base, on the
+// reasoning that an empty base is "the crawl root". IT IS NOT, and the bug that exposed it is worth
+// recording: `ing.files` carry the crawl root exactly as it was WRITTEN on the command line, so
+// `ripwire .` stores `test/foo.sh` (empty base == the root, probe works) while `ripwire /abs/repo` stores
+// `/abs/repo/test/foo.sh` (empty base matches nothing, probe silently inert). Measured on this repo:
+// `ripwire .` resolved 26 of 29 `source` directives and `ripwire "$PWD"` resolved 13 — the SAME tree,
+// the same files, a different spelling of the root. An MCP server always passes an absolute path, so the
+// inert half would have been the half real users got.
+//
+// Walking ancestors fixes it without adding a crawl-root parameter and without moving any other language:
+// the ancestor chain of an absolute includer reaches the absolute crawl root, the chain of a relative one
+// reaches the empty base, and in both cases it stops finding matches exactly at the root because no
+// fileIndex key lives above it. It is also the more honest rule on its own terms — an unknown `$VAR` is
+// SOME directory, and the directories there is evidence for are the ones the file actually sits under.
+// The depth cap is a hostile-input bound (a path cannot have 64 meaningful ancestors); exceeding it
+// simply stops probing, which can only lose an edge, never invent one.
+inline void probeUpward( std::string_view baseDir, std::string_view rel, UniqueProbe& p,
+                         const HashMap<std::string, std::uint32_t>& fileIndex,
+                         const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    std::string_view dir = baseDir;
+    for( int guard = 0; guard < 64; ++guard )
+    {
+        p.consider( joinNormalizeLookup( dir, rel, fileIndex, ws, includerFileId ) );
+        if( dir.empty() )
+        {
+            return;
+        }
+        const std::size_t slash = dir.rfind( '/' );
+        dir = ( slash == std::string_view::npos ) ? std::string_view{} : dir.substr( 0, slash );
+    }
+}
+
+// How far into `spec` the shell expansion that starts at `spec[i]` runs, or i when nothing starts there.
+// Handles `$(cmd)` (paren-balanced, so `$(dirname "$0")` closes correctly), backtick substitution,
+// `${VAR…}` (brace-balanced), and a bare `$NAME` / `$1` / `$@`. Pure, bounds-checked, no allocation.
+inline std::size_t shellExpansionEnd( std::string_view spec, std::size_t i ) noexcept
+{
+    if( i >= spec.size() )
+    {
+        return i;
+    }
+    if( spec[i] == '`' )
+    {
+        const std::size_t close = spec.find( '`', i + 1 );
+        return ( close == std::string_view::npos ) ? spec.size() : close + 1;
+    }
+    if( spec[i] != '$' || i + 1 >= spec.size() )
+    {
+        return i;
+    }
+    const char c = spec[ i + 1 ];
+    if( c == '(' || c == '{' )
+    {
+        const char open = c, close = ( c == '(' ) ? ')' : '}';
+        int depth = 0;
+        for( std::size_t k = i + 1; k < spec.size(); ++k )
+        {
+            if( spec[k] == open )       { ++depth; }
+            else if( spec[k] == close ) { if( --depth == 0 ) { return k + 1; } }
+        }
+        return spec.size();   // unterminated → the whole rest is expansion, so no literal tail survives
+    }
+    std::size_t k = i + 1;
+    if( ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' ) || c == '_' )
+    {
+        while( k < spec.size() && ( ( spec[k] >= 'A' && spec[k] <= 'Z' ) || ( spec[k] >= 'a' && spec[k] <= 'z' )
+                                    || ( spec[k] >= '0' && spec[k] <= '9' ) || spec[k] == '_' ) )
+        {
+            ++k;
+        }
+        return k;
+    }
+    return k + 1;   // `$1`, `$@`, `$*`, `$?`, `$$` — one character
+}
+
+// ── Bash Step-A — SOUND, with an explicitly FLOORED case. `source FILE` / `. FILE`.
+// The specifier is a written path, so there is no name→path convention at all; the whole difficulty is
+// that the path is usually built out of a variable (`. "$ROOT/scripts/cxxstd.sh"` — 29 of 29 source lines
+// in this repo's own test/ take that shape, so the expansion case IS the ordinary case).
+//
+// The rule: reduce the specifier to the LITERAL TAIL after its last expansion. If that tail begins with
+// `/`, everything variable is confined to the DIRECTORY part and the remainder is a real relative path —
+// probe it, both relative-to-includer and relative-to-crawl-root, unique-or-degrade. If it does not
+// (`"$1"`, `"$dir/$name.sh"`, `"${p}.sh"`), the FILENAME itself is variable and nothing is knowable:
+// return kNoFile. That is a FLOOR, not a zero — the directive is still captured and still shows in
+// `--deps` as `<inc t="$1"/>` with no edge, the same disclosure an unresolvable `#include <vector>` gets.
+// An absolute or `~`-rooted literal is outside the crawl by construction and also floors.
+//
+// Probing root-relative for a variable-anchored path is the same move Python's ABSOLUTE-import probe
+// makes, and it is what makes `$ROOT/scripts/cxxstd.sh` land on `scripts/cxxstd.sh`: `$ROOT` is unknown,
+// but the crawl root is the only anchor in evidence and unique-or-degrade catches it being the wrong one.
+inline std::uint32_t resolveBashSource( std::string_view includerPath, std::string_view target,
+                                        const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
+{
+    if( target.empty() || target.front() == '~' )
+    {
+        return kNoFile;
+    }
+    std::size_t lastEnd = 0;
+    for( std::size_t i = 0; i < target.size(); )
+    {
+        const std::size_t e = shellExpansionEnd( target, i );
+        if( e > i ) { lastEnd = e;  i = e; }
+        else        { ++i; }
+    }
+    std::string_view rel        = target;
+    const bool       anchorKnown = ( lastEnd == 0 );
+    if( !anchorKnown )
+    {
+        rel = target.substr( lastEnd );
+        if( rel.empty() || rel.front() != '/' )
+        {
+            return kNoFile;   // the FILENAME is variable — floored, disclosed at the site
+        }
+        rel.remove_prefix( 1 );
+    }
+    if( rel.empty() || rel.front() == '/' )
+    {
+        return kNoFile;       // absolute literal → outside the crawl
+    }
+
+    UniqueProbe p;
+    if( anchorKnown && rel.front() == '.' )
+    {
+        // `./x.sh` / `../x.sh` — the anchor IS stated, relative to the sourcing file. One probe, no walk.
+        p.consider( joinNormalizeLookup( includerDir( includerPath ), rel, fileIndex, ws, includerFileId ) );
+        return p.result();
+    }
+    probeUpward( includerDir( includerPath ), rel, p, fileIndex, ws, includerFileId );
+    return p.result();
+}
+
+// ── Lua Step-A — SOUND. `require "a.b"` → package.path's dotted convention: dots become directory
+// separators and the module is either `a/b.lua` or the package form `a/b/init.lua`. Probed relative to
+// the requiring file AND against a small fixed list of source roots — "" (the crawl root), `src/` and
+// `lua/`, the last because a Neovim plugin's `require("plug.mod")` lives at `lua/plug/mod.lua` and that
+// is a large fraction of the Lua in the world. Unique-or-degrade across every probe, so a tree that
+// answers one specifier from two roots resolves to NEITHER rather than to whichever was probed first.
+// A specifier that names nothing in the tree (`require "socket"`, a C rock) is simply unresolved: no
+// edge, and the directive is still visible in `--deps` as its own `<inc t="socket"/>` row.
+inline std::uint32_t resolveLuaRequire( std::string_view includerPath, std::string_view target,
+                                        const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
+{
+    if( target.empty() )
+    {
+        return kNoFile;
+    }
+    std::string modPath;
+    modPath.reserve( target.size() );
+    for( const char c : target )
+    {
+        modPath.push_back( c == '.' ? '/' : c );
+    }
+    if( modPath.empty() || modPath.front() == '/' )
+    {
+        return kNoFile;
+    }
+    const std::string cand[ 2 ] = { modPath + ".lua", modPath + "/init.lua" };
+    static constexpr std::string_view kRoots[] = { "", "src/", "lua/" };
+
+    UniqueProbe p;
+    const std::string_view dir = includerDir( includerPath );
+    for( const std::string& c : cand )
+    {
+        for( const std::string_view r : kRoots )
+        {
+            probeUpward( dir, std::string( r ) + c, p, fileIndex, ws, includerFileId );
+        }
+    }
+    return p.result();
+}
+
+// ── Ruby Step-A — SOUND. Two rules behind one spelling, told apart by a LEADING DOT (the extractor
+// normalizes `require_relative "x"` to `./x`; see ingest_relations.h::rubyRequireTarget):
+//   * a dotted specifier is relative to the requiring FILE — the exact analogue of a C quote-include;
+//   * a bare specifier is searched on $LOAD_PATH, which this tool does not have. It probes the crawl root
+//     plus the four directories that are on it in practice (`lib/` for every gem by RubyGems convention,
+//     `app/`, `test/`, `spec/`), unique-or-degrade.
+// `.rb` is appended when the specifier does not already carry it, and the verbatim spelling is probed
+// first for the `require "x.rb"` form.
+//
+// A bare specifier that resolves to nothing — `require "json"`, `require "rails"` — is EXTERNAL, not
+// unresolved: it names a gem outside the indexed tree, exactly as a bare TS specifier names a node_modules
+// package. Both produce the same thing here (no edge), and the distinction is stated rather than encoded
+// because this layer emits FILE edges only; the name-level census that spends `external=` vs `unresolved=`
+// is graph.h's, and it is not fed by Ruby requires this round (see the ROUND FLOOR note in
+// buildPreciseIncludeAdjWithContext).
+inline std::uint32_t resolveRubyRequire( std::string_view includerPath, std::string_view target,
+                                         const HashMap<std::string, std::uint32_t>& fileIndex,
+                                         const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
+{
+    if( target.empty() )
+    {
+        return kNoFile;
+    }
+    const bool  hasRb = ( target.size() > 3 && target.substr( target.size() - 3 ) == ".rb" );
+    std::string withRb( target );
+    if( !hasRb ) { withRb += ".rb"; }
+
+    UniqueProbe p;
+    if( target.front() == '.' )                       // require_relative (and a dotted `require`) — file-relative
+    {
+        const std::string_view dir = includerDir( includerPath );
+        p.consider( joinNormalizeLookup( dir, withRb, fileIndex, ws, includerFileId ) );
+        if( hasRb )
+        {
+            p.consider( joinNormalizeLookup( dir, target, fileIndex, ws, includerFileId ) );
+        }
+        return p.result();
+    }
+    static constexpr std::string_view kLoadRoots[] = { "", "lib/", "app/", "test/", "spec/" };
+    for( const std::string_view r : kLoadRoots )
+    {
+        probeUpward( includerDir( includerPath ), std::string( r ) + withRb, p, fileIndex, ws, includerFileId );
+    }
+    return p.result();
+}
+
+// ── Elixir Step-A — SOUND, and the only one of the four that uses EVIDENCE instead of a convention.
+// `MyApp.Foo` conventionally lives at `lib/my_app/foo.ex`, and a path rule could be written for it
+// (CamelCase → snake_case, `lib/` prefix). It is not written, because the corpus already STATES where
+// each module lives: every Elixir file carries a `defmodule MyApp.Foo` whose captured symbol name is the
+// full dotted module. The index built from those definitions resolves umbrella apps, `test/support/`,
+// generated paths and any other layout the convention would have missed — and it can never invent a
+// module that does not exist. Two files defining one module ⇒ ambiguous ⇒ kNoFile (the index stores the
+// same `kNoFile - 1` tombstone every other Step-A uses).
+// A module the index does not hold (`Logger`, `Ecto.Query`, `GenServer`) is outside the tree: no edge.
+inline std::uint32_t resolveElixirModule( std::string_view target, const HashMap<std::string, std::uint32_t>* moduleIndex )
+{
+    if( target.empty() || moduleIndex == nullptr )
+    {
+        return kNoFile;
+    }
+    const auto it = moduleIndex->find( std::string( target ) );
+    if( it == moduleIndex->end() || it->second == kNoFile - 1 )
+    {
+        return kNoFile;
+    }
+    return it->second;
+}
+
+// The Elixir module index (kParserVer 81): `defmodule MyApp.Foo` → the file that holds it. Built from the
+// corpus's OWN definitions, never from a name→path convention — see resolveElixirModule for why. A module
+// two files define is tombstoned `kNoFile - 1` (ambiguous ⇒ no edge), the same unique-or-degrade rule every
+// other Step-A applies, applied at index-build time instead of probe time.
+//
+// Built ONLY when the corpus actually holds an Elixir directive, and EMPTY otherwise: on a tree with no
+// `.ex`/`.exs` includer this is one pass over `ing.includes` that finds nothing and allocates nothing, so
+// every other language's cost is unchanged. An empty result is the caller's signal to pass nullptr.
+//
+// ROUND FLOOR, stated once. This layer resolves the FILE edge for all four languages added at parser
+// version 81. It does NOT feed the name-level resolver: an Elixir `alias A.B.C` also binds the local name
+// `C`, a Ruby `require` makes a constant autoloadable, and neither narrows a later call the way a Python
+// import now does through Phase 5's binding table. `--deps`/`--arch`/`--impact`/`--cochange` see these
+// edges; `--callers`/`--callees` still resolve those languages' calls by the global name ladder alone.
+inline HashMap<std::string, std::uint32_t> buildElixirModuleIndex( const IngestResult& ing )
+{
+    HashMap<std::string, std::uint32_t> modules;
+    const std::uint32_t F = std::uint32_t( ing.files.size() );
+    bool anyElixirDirective = false;
+    for( const Include& inc : ing.includes )
+    {
+        if( inc.fileId < F && includeLangOf( ing.files[ inc.fileId ] ) == IncludeLang::Elixir )
+        {
+            anyElixirDirective = true;
+            break;
+        }
+    }
+    if( !anyElixirDirective )
+    {
+        return modules;
+    }
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.lang != Lang::Elixir || s.kind != SymKind::Other || s.name.empty() || s.fileId >= F )
+        {
+            continue;   // queries/elixir/tags.scm's @definition.module is the ONLY Elixir SymKind::Other
+        }
+        const auto [ it, inserted ] = modules.try_emplace( s.name, s.fileId );
+        if( !inserted && it->second != s.fileId )
+        {
+            it->second = kNoFile - 1;   // two files define this module → ambiguous, never choose one
+        }
+    }
+    return modules;
+}
+
 // Resolve ONE #include / import target to a concrete repo fileId by LEXICAL path semantics, dispatched on
 // the INCLUDER's language (its file extension). `fileIndex` maps each canonical `ing.files` path → its
-// fileId. `crateRootDir`/`hasCrateRoot` carry the Rust crate root (empty/false for non-Rust). Returns the
+// fileId. `crateRootDir`/`hasCrateRoot` carry the Rust crate root (empty/false for non-Rust);
+// `moduleIndex` carries the Elixir defmodule index (nullptr for every other language and for callers that
+// do not build one — an Elixir target then simply stays unresolved, never guessed). Returns the
 // fileId on a UNIQUE precise hit, else kNoFile (unresolved → contributes nothing; NEVER a basename
 // fallback, NEVER a guess).
 //   * C-family quote `"x.h"` (isAngle==false): resolve relative-to-includer, collapse `.`/`..`, exact hit.
 //   * C-family angle `<x.h>` (isAngle==true): external without a build system ⇒ kNoFile (never matched).
-//   * Python / TS / Rust: their per-language Step-A above (unique-or-degrade).
+//   * Python / TS / Rust / Bash / Ruby / Lua / Elixir: their per-language Step-A above (unique-or-degrade).
 //   * Go / Swift / Other: DEFERRED / no path ⇒ kNoFile (contributes nothing — honest).
 inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::string_view target, bool isAngle,
                                             const HashMap<std::string, std::uint32_t>& fileIndex,
                                             std::string_view crateRootDir = {}, bool hasCrateRoot = false,
-                                            const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
+                                            const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile,
+                                            const HashMap<std::string, std::uint32_t>* moduleIndex = nullptr )
 {
     if( target.empty() )
     {
@@ -1052,6 +1382,10 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
         case IncludeLang::Ts:     return resolveTsImport( includerPath, target, fileIndex, ws, includerFileId );
         case IncludeLang::Rust:   return resolveRustImport( includerPath, target, fileIndex, crateRootDir, hasCrateRoot, ws, includerFileId );
         case IncludeLang::Go:     return resolveGoImport( target, ws, includerFileId );   // single-root deferred; cross-root via go.mod replace (§3.2)
+        case IncludeLang::Bash:   return resolveBashSource(  includerPath, target, fileIndex, ws, includerFileId );
+        case IncludeLang::Ruby:   return resolveRubyRequire( includerPath, target, fileIndex, ws, includerFileId );
+        case IncludeLang::Lua:    return resolveLuaRequire(  includerPath, target, fileIndex, ws, includerFileId );
+        case IncludeLang::Elixir: return resolveElixirModule( target, moduleIndex );
         case IncludeLang::Other:  return kNoFile;        // Swift (no path in import) → deferred
     }
     return kNoFile;
@@ -1192,6 +1526,9 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
         else if( !hasCrateRoot ) { crateRootDir = includerDir( p ); hasCrateRoot = true; }
     }
 
+    const HashMap<std::string, std::uint32_t> elixirModules = buildElixirModuleIndex( ing );
+    const HashMap<std::string, std::uint32_t>* moduleIndex = elixirModules.empty() ? nullptr : &elixirModules;
+
     std::vector<std::uint32_t> includeCountByFile( F, 0 );
     for( const Include& inc : ing.includes )
     {
@@ -1220,7 +1557,7 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
             hasCrd = hasCrateByRoot[ r ] != 0;
         }
         const std::uint32_t to = resolvePreciseInclude( ing.files[ inc.fileId ], inc.target, inc.isAngle,
-                                                         fileIndex, crd, hasCrd, ws, inc.fileId );
+                                                         fileIndex, crd, hasCrd, ws, inc.fileId, moduleIndex );
         if( to == kNoFile || to == inc.fileId )
         {
             continue; // unresolved or self-include → contributes nothing

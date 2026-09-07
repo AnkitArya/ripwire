@@ -5953,7 +5953,12 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // its own files=, same idea here across an element and its child instead of a fold).
     w.write( "<!-- ripwire deps: file-to-file #include/import view, heaviest transitive cone first. files= (root) = files with "
              "at least one dependency edge (this listing's own denominator); health files= = the whole indexed corpus; "
-             "health dep_files= = the dependency-CAPABLE subset of it (the ccd/acd/nccd denominator). "
+             "health dep_files= = the dependency-CAPABLE subset of it (the ccd/acd/nccd denominator), and health dep_langs= "
+             "names EXACTLY which languages that subset counts — a dep_files=/ccd/acd/nccd number recorded against an "
+             "older build is comparable only when dep_langs= matches, and sh, rb, lua and ex joined the set at parser "
+             "version 81. a per-file target row (inc t=) with no edge behind it is a directive that did not resolve to an indexed file "
+             "(external package, or a specifier this tool declines to guess at, e.g. a shell path built from a variable) "
+             "— it is shown, never silently dropped. "
              "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
@@ -5973,11 +5978,20 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
 
     // whole-codebase dependency health (Lakos): NCCD<1 horizontal/flat/good, >1 vertical, >2 tangled.
     // §P9.4: files=corpus size, dep_files=the ccd/acd/nccd/shape denominator (dependency-capable only).
+    //
+    // dep_langs= (kParserVer 81) is the DENOMINATOR'S OWN DISCLOSURE, and the reason it exists is that
+    // this line's numbers moved on the day four languages joined the capable set. `dep_files="750"` is
+    // not a comparable quantity across builds unless the set behind it is stated, and until now it was
+    // stated only in a source comment. It is derived from dependencyCapable() + langTag() in one loop
+    // (lintrules.h::dependencyCapableLangTags), so it cannot drift from the predicate it describes, and
+    // it is the SAME predicate --arch's propagation_cost N and --cochange's dep_capable= are built on.
+    const std::string depLangs = rw::dependencyCapableLangTags();
     char hb[ 176 ];
-    std::snprintf( hb, sizeof( hb ), "<health files=\"%zu\" dep_files=\"%zu\" ccd=\"%llu\" acd=\"%.1f\" nccd=\"%.2f\" shape=\"%s\"/>",
+    std::snprintf( hb, sizeof( hb ), "<health files=\"%zu\" dep_files=\"%zu\" ccd=\"%llu\" acd=\"%.1f\" nccd=\"%.2f\" shape=\"%s\"",
                    ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd,
                    nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
     w.write( hb );
+    w.write( " dep_langs=\"" );  w.write( escapeXml( depLangs, esc ) );  w.write( "\"/>" );
 
     // most depended-ON (afferent coupling Ca) = highest blast radius: changing these recompiles the most.
     // The complement of the transitive-cone ranking below (efferent, "pulls in 100 headers").

@@ -791,6 +791,246 @@ inline std::string preprocImportTarget( TSNode n, std::string_view src, bool& is
     return spelling.empty() ? std::string{} : includePathOf( spelling, isAngleOut );   // the closing delimiter ends the path
 }
 
+// ─── kParserVer 81: the four languages that had no directive branch at all ───────────────────────────
+//
+// Bash / Lua / Ruby / Elixir each spell a real FILE dependency, and each of the four spells it as an
+// ordinary CALL rather than a reserved statement — which is why `directiveTargetOf` had no branch for
+// them and why lintrules.h's dependencyCapable() called all four false. That was a fact about this
+// extractor, never about the languages: `source lib.sh`, `require "a.b"`, `require_relative "x"` and
+// `alias MyApp.Foo` all name a file the way `#include "x.h"` does. The call-shaped spelling is the whole
+// difficulty, because `call_expression`/`function_call`/`call`/`command` are node types EVERY grammar
+// has: the language gate plus a literal-name check is what keeps a C++ function called `require`, or a
+// Ruby method a user named `load`, from manufacturing a dependency edge — the same guard, for the same
+// reason, that jsModuleLoadTarget already carries for CommonJS.
+//
+// Every one of the four reads its argument through the grammar's own STRING node and takes the
+// `string_content` child, never a byte slice: an interpolated specifier (`require "#{x}"`,
+// `source "$dir/$f"`) then has no single literal to read, and the honest outcome is no target at all
+// rather than a guess assembled out of the parts.
+
+// Defined in ingest_elixir.h, which ingest.cpp includes AFTER this file — declared, not copied: an
+// Elixir call's `arguments` child is one shape and it already has one reader, and a second private copy
+// here is exactly the duplication --quality-delta flags. Same TU, same anonymous namespace.
+TSNode elixirArguments( TSNode node ) noexcept;
+
+// The literal text a shell word/string argument names, or empty when the argument is not a literal at
+// all. `word` is an unquoted argument (`source ./lib.sh`), `string`/`raw_string` a quoted one; a
+// `concatenation` (unquoted `$ROOT/x.sh`) is returned VERBATIM, expansions included, because the
+// resolver — not this extractor — is what decides whether an expansion leaves a resolvable literal tail
+// (resolve.h::resolveBashSource). Returning it verbatim is also what puts the un-expandable specifier in
+// `--deps`'s own `<inc t="$1">` row: a directive we cannot resolve is DISCLOSED at the site, exactly the
+// way an unresolvable `#include <vector>` is, instead of vanishing.
+inline std::string bashWordText( TSNode arg, std::string_view src )
+{
+    if( ts_node_is_null( arg ) )
+    {
+        return {};
+    }
+    const char* t = ts_node_type( arg );
+    if( std::strcmp( t, "word" ) == 0 || std::strcmp( t, "concatenation" ) == 0 )
+    {
+        return std::string( nodeTextOf( arg, src ) );
+    }
+    if( std::strcmp( t, "string" ) == 0 || std::strcmp( t, "raw_string" ) == 0 )
+    {
+        std::string_view s = nodeTextOf( arg, src );
+        if( s.size() >= 2 && ( s.front() == '"' || s.front() == '\'' ) && s.back() == s.front() )
+        {
+            s = s.substr( 1, s.size() - 2 );   // strip exactly one delimiter pair, as importSpecifierText does
+        }
+        return std::string( s );
+    }
+    return {};   // an expansion/substitution ALONE (`source $f`) carries no literal — no target
+}
+
+// Bash `source FILE` / `. FILE` — a `command` node whose name is one of the two spellings of the ONE
+// builtin that reads another file into this shell. There is no name→path convention to model here at
+// all: the argument IS the path, which makes Bash the only one of the four whose specifier needs no
+// dialect rule, and the only one whose specifier is routinely a VARIABLE (`. "$ROOT/scripts/x.sh"` — 29
+// of the 29 source lines in this repo's own test/ are that shape, so the expansion case is the common
+// case here, not the corner). Only the FIRST argument is read: `source lib.sh a b` passes a and b as
+// positional parameters to the sourced script, they are not further files.
+inline std::string bashSourceTarget( TSNode n, std::string_view src )
+{
+    const std::string_view name = nodeFieldText( n, "name", 4, src );
+    if( name != "source" && name != "." )
+    {
+        return {};
+    }
+    return bashWordText( ts_node_child_by_field_name( n, "argument", 8 ), src );
+}
+
+// The first STRING-literal argument of a call-shaped node, read through the grammar: `arguments`/
+// `argument_list` → first named child must be a `string`, and its text comes from the `string_content`
+// child so an interpolated or concatenated specifier yields nothing rather than a fragment. Shared by
+// Lua and Ruby, whose argument nodes differ only in name.
+inline std::string firstStringArgText( TSNode args, std::string_view src )
+{
+    if( ts_node_is_null( args ) || ts_node_named_child_count( args ) == 0 )
+    {
+        return {};
+    }
+    const TSNode first = ts_node_named_child( args, 0 );
+    if( ts_node_is_null( first ) || std::strcmp( ts_node_type( first ), "string" ) != 0 )
+    {
+        return {};   // `require(mod)`, `require("a" .. b)`, `require "#{x}"` — no single literal to read
+    }
+    for( std::uint32_t i = 0; i < ts_node_named_child_count( first ); ++i )
+    {
+        const TSNode kid = ts_node_named_child( first, i );
+        if( std::strcmp( ts_node_type( kid ), "string_content" ) == 0 )
+        {
+            return std::string( nodeTextOf( kid, src ) );
+        }
+    }
+    return {};   // an empty string literal, or one whose only children are interpolations
+}
+
+// Lua `require "a.b"` / `require("a.b")` — a `function_call` whose `name:` is the bare identifier
+// `require`. The dotted specifier is package.path's convention, resolved in resolve.h::resolveLuaRequire
+// (`a.b` → `a/b.lua`). `name:` must be an `identifier`, never a `dot_index_expression`: `pkg.require("x")`
+// is somebody's own method, not the loader.
+inline std::string luaRequireTarget( TSNode n, std::string_view src )
+{
+    const TSNode name = ts_node_child_by_field_name( n, "name", 4 );
+    if( ts_node_is_null( name ) || std::strcmp( ts_node_type( name ), "identifier" ) != 0 || nodeTextOf( name, src ) != "require" )
+    {
+        return {};
+    }
+    return firstStringArgText( ts_node_child_by_field_name( n, "arguments", 9 ), src );
+}
+
+// Ruby `require_relative "x"` / `require "lib/x"` / `load "x.rb"` — a `call` whose `method:` is one of
+// the three Kernel loaders and which has NO receiver (`foo.require` is somebody's own method; the bare
+// spelling is the only one that is provably Kernel's). `autoload :Foo, "lib/x"` is deliberately NOT here
+// and is a DISCLOSED floor: its path is argument TWO, and adding an arg-index special case for one form
+// buys one shape at the cost of the "first string argument" rule every other language here shares.
+//
+// The two resolution rules are encoded in the target the way Python's already are — by a LEADING DOT,
+// not by a new prefix vocabulary. `require_relative`'s path is relative to the requiring FILE, so a
+// specifier that does not already start with `.` gets `./` prepended (`lib/helper` → `./lib/helper`);
+// `require`'s is searched on $LOAD_PATH, so it stays bare and resolve.h probes the load-path roots.
+// `require "./x"` keeps its dot and is therefore read file-relative — an approximation (Ruby resolves
+// it against the process CWD, which is not knowable here), and one that can only ever RESOLVE, never
+// mis-resolve: unique-or-degrade means a wrong file-relative guess simply finds nothing.
+inline std::string rubyRequireTarget( TSNode n, std::string_view src )
+{
+    if( !ts_node_is_null( ts_node_child_by_field_name( n, "receiver", 8 ) ) )
+    {
+        return {};
+    }
+    const TSNode method = ts_node_child_by_field_name( n, "method", 6 );
+    if( ts_node_is_null( method ) || std::strcmp( ts_node_type( method ), "identifier" ) != 0 )
+    {
+        return {};
+    }
+    const std::string_view m = nodeTextOf( method, src );
+    if( m != "require" && m != "require_relative" && m != "load" )
+    {
+        return {};
+    }
+    std::string spec = firstStringArgText( ts_node_child_by_field_name( n, "arguments", 9 ), src );
+    if( spec.empty() )
+    {
+        return {};
+    }
+    if( m == "require_relative" && spec.front() != '.' )
+    {
+        spec.insert( 0, "./" );
+    }
+    return spec;
+}
+
+// Elixir `alias`/`import`/`require`/`use` — a `call` whose `target:` is one of the four directive
+// identifiers. All four are compile-time dependencies on the named module's FILE (`use` most of all: it
+// runs that module's `__using__` macro at compile time), so all four earn an edge.
+//
+// Two argument shapes, both read off a real parse: `alias MyApp.Foo` puts a single `(alias)` first in
+// `arguments`; `alias MyApp.{Bar, Baz}` puts a `(dot left: (alias) right: (tuple (alias)…))` there,
+// which is ONE directive naming N modules and therefore N Include records — see elixirAliasGroup below.
+// A trailing `, as: F` / `, only: […]` is a later `arguments` child and is ignored here.
+//
+// NOT HANDLED, and disclosed rather than approximated: `alias A.B.C` also binds the NAME `C` in this
+// module, so a later `C.f()` means `A.B.C.f`. That is a call-RESOLUTION fact, not a file-dependency one,
+// and it needs the receiver of the call — which queries/elixir/tags.scm deliberately does not keep
+// (`(dot right: (identifier) @name) @reference.call` captures `run`, not `Foo.run`). The file edge lands;
+// the name alias does NOT narrow call resolution, exactly as that query's own comment already says.
+inline std::string elixirDirectiveTarget( TSNode n, std::string_view src )
+{
+    const TSNode target = ts_node_child_by_field_name( n, "target", 6 );
+    if( ts_node_is_null( target ) || std::strcmp( ts_node_type( target ), "identifier" ) != 0 )
+    {
+        return {};
+    }
+    const std::string_view kw = nodeTextOf( target, src );
+    if( kw != "alias" && kw != "import" && kw != "require" && kw != "use" )
+    {
+        return {};
+    }
+    const TSNode args = elixirArguments( n );
+    if( ts_node_is_null( args ) || ts_node_named_child_count( args ) == 0 )
+    {
+        return {};
+    }
+    const TSNode first = ts_node_named_child( args, 0 );
+    if( ts_node_is_null( first ) || std::strcmp( ts_node_type( first ), "alias" ) != 0 )
+    {
+        return {};   // a `dot` brace group is emitted by elixirAliasGroup; anything else is not a module name
+    }
+    return std::string( nodeTextOf( first, src ) );
+}
+
+// `alias MyApp.{Bar, Baz}` → the member module names, fully qualified. Empty for every other shape,
+// including the single-alias form (which elixirDirectiveTarget already owns) — the two are exclusive by
+// construction, so one directive can never emit both a target and a group.
+inline std::vector<std::string> elixirAliasGroup( TSNode n, std::string_view src )
+{
+    std::vector<std::string> out;
+    const TSNode target = ts_node_child_by_field_name( n, "target", 6 );
+    if( ts_node_is_null( target ) || std::strcmp( ts_node_type( target ), "identifier" ) != 0 )
+    {
+        return out;
+    }
+    const std::string_view kw = nodeTextOf( target, src );
+    if( kw != "alias" && kw != "import" && kw != "require" && kw != "use" )
+    {
+        return out;
+    }
+    const TSNode args = elixirArguments( n );
+    if( ts_node_is_null( args ) || ts_node_named_child_count( args ) == 0 )
+    {
+        return out;
+    }
+    const TSNode first = ts_node_named_child( args, 0 );
+    if( ts_node_is_null( first ) || std::strcmp( ts_node_type( first ), "dot" ) != 0 )
+    {
+        return out;
+    }
+    const TSNode left  = ts_node_child_by_field_name( first, "left", 4 );
+    const TSNode right = ts_node_child_by_field_name( first, "right", 5 );
+    if( ts_node_is_null( left ) || ts_node_is_null( right )
+        || std::strcmp( ts_node_type( left ), "alias" ) != 0 || std::strcmp( ts_node_type( right ), "tuple" ) != 0 )
+    {
+        return out;
+    }
+    const std::string_view prefix = nodeTextOf( left, src );
+    for( std::uint32_t i = 0; i < ts_node_named_child_count( right ); ++i )
+    {
+        const TSNode member = ts_node_named_child( right, i );
+        if( std::strcmp( ts_node_type( member ), "alias" ) != 0 )
+        {
+            continue;
+        }
+        const std::string_view name = nodeTextOf( member, src );
+        if( prefix.empty() || name.empty() )
+        {
+            continue;
+        }
+        out.emplace_back( std::string( prefix ) + "." + std::string( name ) );
+    }
+    return out;
+}
+
 // tree-sitter does NOT flatten the preprocessor. `#if` / `#ifdef` / `#ifndef` / `#else` / `#elif` /
 // `#elifdef` each parse as a CONTAINER node that OWNS every directive written between it and its
 // `#endif` — so a directive under a feature guard is a GRANDchild of the file root, not a child, and the
@@ -885,6 +1125,59 @@ inline constexpr std::array<std::string_view, 19> kRustImportContainers = {
 
 inline constexpr std::array<std::string_view, 2> kCsharpImportContainers = { "namespace_declaration", "declaration_list" };
 
+// kParserVer 81 — the four new languages' container sets. EVERY entry below was read off a real parse
+// with `--match='(<node>) @c'`, never predicted from a grammar file; a node type that does not exist
+// makes that query REFUSE to compile, which is how the absent ones (bash has no `until_statement`, lua no
+// `local_declaration`) were found and dropped rather than left in as noise.
+//
+// BASH. A `source` is an ordinary command, so every construct that can hold a command is a container.
+// The chains that matter and are NOT reachable without the intermediate: a function body is
+// `function_definition -> compound_statement -> command`; a loop body is `for_statement -> do_group ->
+// command`; a case arm is `case_statement -> case_item -> command`; and `[ -f x ] && source y` is a
+// `list`. `redirected_statement` covers `. lib.sh >/dev/null`, `command_substitution` a `$( . x )`.
+inline constexpr std::array<std::string_view, 17> kBashImportContainers = {
+    "compound_statement", "subshell", "do_group",                                  // the three body kinds
+    "function_definition", "for_statement", "c_style_for_statement", "while_statement",
+    "if_statement", "elif_clause", "else_clause",
+    "case_statement", "case_item",
+    "list", "pipeline", "negated_command", "redirected_statement", "command_substitution"
+};
+
+// LUA. `local m = require "x"` is `variable_declaration -> assignment_statement -> expression_list ->
+// function_call`, so all three intermediates are load-bearing; `function_declaration`/`block` reach a
+// body; `table_constructor`/`field` reach `M.dep = require "x"` inside a returned table, which is how a
+// module's dependency list is idiomatically written.
+inline constexpr std::array<std::string_view, 16> kLuaImportContainers = {
+    "block", "function_declaration", "function_definition",
+    "variable_declaration", "assignment_statement", "expression_list", "return_statement",
+    "if_statement", "elseif_statement", "else_statement",
+    "while_statement", "repeat_statement", "for_statement", "do_statement",
+    "table_constructor", "field"
+};
+
+// RUBY. A `require` inside `module M … end` / `class C … end` / a method is
+// `module -> body_statement -> call`; `then`/`else`/`elsif` are the if-arm nodes; `begin`/`rescue` cover
+// the `begin; require "x"; rescue LoadError; end` shape that is Ruby's own optional-dependency idiom
+// (the direct analogue of Python's `try: import ujson`, and captured for the same union-over-arms reason).
+inline constexpr std::array<std::string_view, 17> kRubyImportContainers = {
+    "body_statement", "module", "class", "singleton_class", "method", "singleton_method",
+    "if", "elsif", "else", "then", "unless", "case", "when",
+    "begin", "rescue", "ensure", "do_block"
+};
+
+// ELIXIR. `defmodule M do … end` is itself a `call` with a `do_block`, so `call` MUST be a container or
+// no directive in any module body is ever visited — this is the one language here whose top-level form
+// is a container. `stab_clause` is a `case`/`cond`/`fn` arm; `body` is a `stab_clause`'s own body.
+// `arguments`/`keywords` reach the keyword-list body form (`if x, do: alias Y`).
+// DISCLOSED over-capture: a `quote do … end` is also a `call` with a `do_block`, so an `alias` inside
+// quoted AST is captured. That is the same union-over-arms posture the preprocessor tables take — a
+// spurious edge, never a missing one — and it disagrees with queries/elixir/tags.scm's symbol side,
+// which omits quoted AST. Excluding it would need the walk to read node TEXT to identify `quote`, which
+// isImportContainer (a node-KIND predicate shared by every grammar) deliberately cannot do.
+inline constexpr std::array<std::string_view, 6> kElixirImportContainers = {
+    "call", "do_block", "stab_clause", "body", "arguments", "keywords"
+};
+
 // The FUNCTION-BODY node kinds — read off real parses, not predicted. Entering ANY one of these means
 // everything inside it is written INSIDE a function's body, so a require()/import() found there only runs
 // when and if that function runs: a real dependency (kParserVer 72's whole point — the importer tier must
@@ -957,12 +1250,16 @@ inline constexpr std::array<std::string_view, 34> kJsImportContainers = {
 // language has is DATA, and a language absent from the table simply has none.
 struct LangImportContainers { Lang lang; std::span<const std::string_view> nodes; };
 
-inline constexpr std::array<LangImportContainers, 5> kImportContainersByLang = { {
+inline constexpr std::array<LangImportContainers, 9> kImportContainersByLang = { {
     { Lang::Python,     kPythonImportContainers },
     { Lang::Rust,       kRustImportContainers   },
     { Lang::CSharp,     kCsharpImportContainers },
     { Lang::TypeScript, kJsImportContainers     },
-    { Lang::JavaScript, kJsImportContainers     }
+    { Lang::JavaScript, kJsImportContainers     },
+    { Lang::Bash,       kBashImportContainers   },
+    { Lang::Lua,        kLuaImportContainers    },
+    { Lang::Ruby,       kRubyImportContainers   },
+    { Lang::Elixir,     kElixirImportContainers }
 } };
 
 inline bool isImportContainer( Lang lang, const char* type ) noexcept
@@ -1057,6 +1354,26 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
     {
         target = jsModuleLoadTarget( n, src );
         isLazy = insideFn && !target.empty();   // kParserVer 72: a hit found inside a function body is LAZY
+    }
+    else if( std::strcmp( t, "command" ) == 0 && lang == Lang::Bash )              // Bash `source x.sh` / `. x.sh`
+    {
+        target = bashSourceTarget( n, src );
+    }
+    else if( std::strcmp( t, "function_call" ) == 0 && lang == Lang::Lua )         // Lua `require "a.b"`
+    {
+        target = luaRequireTarget( n, src );
+    }
+    else if( std::strcmp( t, "call" ) == 0 && lang == Lang::Ruby )                 // Ruby `require_relative "x"` / `require "x"` / `load "x"`
+    {
+        target = rubyRequireTarget( n, src );
+    }
+    else if( std::strcmp( t, "call" ) == 0 && lang == Lang::Elixir )               // Elixir `alias`/`import`/`require`/`use`
+    {
+        // `call` is the node type of EVERY Elixir expression including `defmodule`, so the four-keyword
+        // gate inside elixirDirectiveTarget is the whole guard — the same posture as the TS/JS
+        // call_expression branch above. The `MyApp.{A, B}` group form returns empty here and is emitted
+        // by captureIncludes through elixirAliasGroup, one Include per member.
+        target = elixirDirectiveTarget( n, src );
     }
     else if( std::strcmp( t, "use_declaration" ) == 0 )                  // Rust `use crate::a::b;`
     {
@@ -1289,11 +1606,15 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
         {
             capturePythonImportBinds( n, t, fileId, src, binds );   // Phase 5: the bound NAMES, beside the module
         }
-        if( !target.empty() )
+        // One directive's emission — the Include record plus its ABS-3 import-role use-site ref. A LAMBDA
+        // rather than the straight-line block it used to be for exactly one reason: an Elixir
+        // `alias MyApp.{Bar, Baz}` is ONE directive node naming N modules, so N records come off it and
+        // the second one cannot be written by falling through this code once.
+        const auto emitDirective = [ & ]( std::string tgt )
         {
             // import-role use-site ref: name = the importable final segment (skip when the target has no
             // identifier head, e.g. a relative `../x` whose head strips to empty → nothing to resolve).
-            if( std::string nm = importName( target ); !nm.empty() )
+            if( std::string nm = importName( tgt ); !nm.empty() )
             {
                 RawRef r;
                 r.fileId    = fileId;
@@ -1303,7 +1624,22 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
                 r.name      = std::move( nm );
                 refs.push_back( std::move( r ) );
             }
-            incs.push_back( { fileId, isAngle, isLazy, std::move( target ) } );
+            incs.push_back( { fileId, isAngle, isLazy, std::move( tgt ) } );
+        };
+
+        if( !target.empty() )
+        {
+            emitDirective( std::move( target ) );
+        }
+        else if( lang == Lang::Elixir && std::strcmp( t, "call" ) == 0 )
+        {
+            // The multi-alias group. Members come out in SOURCE order (elixirAliasGroup walks the tuple's
+            // named children left to right), so `incs` stays source-ordered and the determinism contract
+            // holds exactly as it does for the single-target path.
+            for( std::string& member : elixirAliasGroup( n, src ) )
+            {
+                emitDirective( std::move( member ) );
+            }
         }
     }
 }

@@ -192,7 +192,22 @@ constexpr std::uint32_t kCacheVersion = 16;           // 16: RawBind gains impor
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 80;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 81;           // bump on any grammar/.scm/extraction change
+                                                      // 81 = 2026-09-07 (four-language imports:
+                                                      //    test/bashsourcecheck.sh, test/luarequirecheck.sh,
+                                                      //    test/rubyrequirecheck.sh, test/eliximportcheck.sh,
+                                                      //    test/deplangscheck.sh): Bash `source`/`.`, Lua
+                                                      //    `require`, Ruby `require`/`require_relative`/`load` and
+                                                      //    Elixir `alias`/`import`/`require`/`use` become Include
+                                                      //    records, each with a container table and a resolve.h
+                                                      //    Step-A. Four languages that emitted NO Include record on
+                                                      //    any tree now emit one per directive, so a v80 blob on a
+                                                      //    tree holding any of them carries an EMPTY include list
+                                                      //    where a real one exists → reject. Record shapes are
+                                                      //    unchanged (Include is the same four fields), so
+                                                      //    kCacheVersion stays 16 — the 38/39 precedent exactly.
+                                                      //    quality.h's kIngestParserVerMirror bumped in the SAME
+                                                      //    commit.
                                                       // 78 = 2026-09-07 (Elixir, test/elixircheck.sh): a
                                                       //    twenty-second grammar (.ex/.exs) whose defs and call
                                                       //    edges are extracted through the keyword/head filters in
