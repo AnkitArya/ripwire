@@ -1460,7 +1460,7 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 <summary>34 repositories, 67 papers and a 222-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**41 repositories and 67 papers** into one deterministic executable, alongside a labelled
+**42 repositories and 67 papers** into one deterministic executable, alongside a labelled
 survey of 237 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
