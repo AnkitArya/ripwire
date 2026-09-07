@@ -98,6 +98,13 @@ inline const char* symTag( SymKind k ) noexcept
 // UNLIKE Json/Toml/Yaml these two are CODE languages with real call graphs — they are simply the next
 // two free indexes, and APPENDING (never inserting) is what keeps every on-disk cache key stable.
 enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir };
+// The number of Lang enumerators. MUST stay ( last enumerator + 1 ): any per-language array sized by
+// a LITERAL silently drops the tail when a language is appended, and the drop is invisible because
+// the affected code paths just see a zero. That happened: nonlocalstate.h's filesByLang was a
+// hardcoded 16 while Php(18), Lua(19) and Elixir(20) existed, so --nonlocal-state never disclosed
+// those three as unanalyzed even though kUnanalyzedLangs listed Php and Lua. Size per-language
+// arrays with this, never with a number.
+inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Elixir ) + 1;
 
 // short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD

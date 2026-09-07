@@ -222,12 +222,12 @@ inline bool isAnalyzedLang( Lang l ) noexcept
 // the confident, wrong zero this table exists to prevent. The emission order is this table's order, which
 // makes it deterministic.
 struct UnanalyzedLang { Lang lang; std::string_view name; };
-inline constexpr std::array<UnanalyzedLang, 12> kUnanalyzedLangs = { {
+inline constexpr std::array<UnanalyzedLang, 13> kUnanalyzedLangs = { {
     { Lang::C, "c" }, { Lang::Go, "go" }, { Lang::Rust, "rust" },
     { Lang::JavaScript, "javascript" }, { Lang::TypeScript, "typescript" },
     { Lang::Java, "java" }, { Lang::CSharp, "csharp" }, { Lang::Swift, "swift" },
     { Lang::Ruby, "ruby" }, { Lang::Bash, "bash" },
-    { Lang::Php, "php" }, { Lang::Lua, "lua" } } };
+    { Lang::Php, "php" }, { Lang::Lua, "lua" }, { Lang::Elixir, "elixir" } } };
 
 // The immutability keywords of the covered families. A declaration prefix carrying any of these is not
 // mutable state. Conservative on purpose: a type argument that merely MENTIONS const (`vector<const T*> v`)
@@ -738,7 +738,7 @@ inline Scan computeNonLocalState( const IngestResult& ing, const Graph& g )
 
     // Honesty first, before any measuring: which indexed files carry a language this lens cannot answer for.
     // Emitted in kUnanalyzedLangs' own order, so the attribute is deterministic without a sort.
-    std::array<std::uint32_t, 16> filesByLang{};
+    std::array<std::uint32_t, kLangCount> filesByLang{};   // kLangCount, never a literal — see model.h
     for( const std::string& path : ing.files )
     {
         if( const std::size_t index = static_cast<std::size_t>( langOfPath( path ) ); index < filesByLang.size() )
@@ -746,6 +746,7 @@ inline Scan computeNonLocalState( const IngestResult& ing, const Graph& g )
             ++filesByLang[index];
         }
     }
+    static_assert( kUnanalyzedLangs.size() <= kLangCount, "kUnanalyzedLangs cannot exceed the Lang enum" );
     for( const UnanalyzedLang& u : kUnanalyzedLangs )
     {
         const std::size_t index = static_cast<std::size_t>( u.lang );
