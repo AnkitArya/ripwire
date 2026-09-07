@@ -5499,9 +5499,16 @@ the script.
 The vector matrix is **assembled at runtime from five independent sources** — the flag surface,
 empty-value forms, combination guards, a harvest of command lines from the generated command capture,
 and a literal block — and the gate asserts a **floor of ≥250 vectors** rather than a fixed count, so
-adding surface grows the matrix instead of stranding it. It skips (exit 0) when no reference binary
-is given, self-tests that its differ can see a known difference, and asserts it left the tree
-unmodified.
+adding surface grows the matrix instead of stranding it. Each synthesized value is **typed from the
+flag's own `--help` placeholder**: a path-valued flag is aimed at a scratch dir rather than the literal
+`1`, which made `--pin-census=1` write a file named `1` into the repo root, and a command-valued flag
+(`--run-trace`, whose `duration_ms` is measured, not deterministic) drops the value form entirely. The
+same typing gates the **capture harvest**, whose real command lines carry real paths: a line naming a
+path- or command-valued flag by value, or one of the corpus-editing verbs, is dropped before the 60-line
+cap — `--lint --with-profile=report.txt` sat two lines past that cap, and the cap is decided by a
+regenerated file. It skips (exit 0) when no reference binary is given, self-tests that its differ can see a known difference,
+and asserts it left the tree unmodified — an assertion that is itself **controlled**: a stray file is
+created on purpose, must be detected, and must then be gone.
 
 ### `--quality-delta`'s ten measured failure modes
 
