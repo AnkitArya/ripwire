@@ -50,8 +50,10 @@ struct Graph
                                             //   2 = A4-R5 cross-language FFI binding                → prov="binding",
                                             //   3 = C1 one arm of a k-way split the resolver could  → prov="split".
                                             //       not choose between (the per-edge half of ambOut)
-                                            // Empty ⇒ no overlay, no FFI edge and nothing split: every edge uniquely
-                                            // resolved, so the whole attribute is absent (omit-at-confident).
+                                            //   4 = an ES named-import binding named the module and → prov="import",
+                                            //       the export (JS/TS); read, not chosen by name
+                                            // Empty ⇒ no overlay, no FFI/import edge and nothing split: every edge
+                                            // uniquely resolved, so the whole attribute is absent (omit-at-confident).
     std::size_t                scipDocsSeen = 0;   // # SCIP documents consumed (0 unless --scip); honesty summary
     std::size_t                scipEdgesPinned = 0;   // # (from,to) edges the SCIP index pinned; honesty summary
     std::vector<std::vector<NodeId>> implementors;   // base-class id → derived class ids (inheritance/Lego view)
@@ -79,6 +81,15 @@ struct Graph
                                             // over-counting gauge would itself be a silent-WRONG signal (the one bug
                                             // this lever exists to kill). Revisit that tier when partial-extraction
                                             // provenance lands. Like ambOut it never counts a resolved edge → low noise.
+                                            // TWO further populations share this counter, both of them the same KIND of
+                                            // fact — a call a BINDING proves the name ladder must not answer, and that
+                                            // the binding itself cannot answer either: L3's known-indirect function
+                                            // pointer (below), and an ES named import that is shadowed at the call
+                                            // site, contradicted by two candidate modules, or renamed to a spelling
+                                            // private to the importing file. An ES import whose MODULE is outside the
+                                            // tree is deliberately NOT here — that is a refusal the specifier proves,
+                                            // so it goes to `external=` through vetoExternal. The two gauges mean
+                                            // opposite things and the split is the whole point of keeping both.
     std::vector<std::uint32_t> locPinOut;   // per-symbol: # outgoing calls the S6-C locality tie-break ALONE pinned to one
                                             // def (pincensus.h::isLocalityPin — the census's `locality` population, 0.368
                                             // full-oracle precision on astropy). serialize: lpin="K" / locality_pinned=N,
@@ -120,6 +131,22 @@ struct Graph
                                               // (`--pin-census=FILE`), so every other run allocates nothing and
                                               // emits nothing — the map is byte-identical either way.
 };
+
+// The prov= VOCABULARY, spelled once. serialize's XML and serializeJson's JSON must emit identical
+// words for identical edges — test/mcpclidiffcheck.sh is the gate that says so — and two ternary
+// chains over the same integers is precisely how two dialects drift apart. Returns "" for 0 (a
+// uniquely-resolved name-based edge), which no emitter writes: the attribute is omitted at confident.
+inline const char* provLabel( std::uint8_t prov ) noexcept
+{
+    switch( prov )
+    {
+        case 1u: return "scip";      // a SCIP index pinned this (from,to) — precise
+        case 2u: return "binding";   // A4-R5 cross-language FFI alias
+        case 3u: return "split";     // C1 one arm of a k-way split the resolver could not choose between
+        case 4u: return "import";    // an ES named-import binding named the module and the export
+    }
+    return "";
+}
 
 // ObjC/ObjC++ and C++ share ONE call namespace: a .mm calls C++ functions (declared in .h/.cpp)
 // directly, by name — so an ObjC ref must be allowed to resolve to a C++ def and vice-versa. That is
@@ -960,13 +987,55 @@ inline const rw::SmallVec<NodeId, 2>* fnBindTargetIds( const HashMap<std::string
     return ( bit != byName.end() ) ? &bit->second : nullptr;
 }
 
-// `census` arms the eval-only S6-C silent-pin census (src/pincensus.h): every DECIDED call site records
-// which narrowing stage committed it and to which canonical target. It adds rows to g.pinCensus and
-// changes NOTHING else — no candidate is admitted, dropped or reordered by it, so the emitted map is
-// byte-identical armed or not (test/pincensuscheck.sh arm (E) is the executable form of that sentence).
+// ── ES named-import resolution (JS/TS): the binding table, and the THREE ways it can fail ────────────
+// A named import is a resolution FACT: `import { f } from './m.js'` says the call `f()` in this file
+// targets `m`'s export `f` and nothing else — so the global name ladder, which would spray `f` over
+// every same-named definition in the corpus, must not run. That makes this table a REFUSAL mechanism,
+// and a refusal is only as honest as its failure taxonomy. One counter cannot carry three meanings:
+//
+//   External — the module is provably outside the indexed tree (`node:` reserved, or a bare specifier
+//              that resolves to nothing and whose every segment is foreign to this tree). This is the
+//              Phase-5 external VETO's own population: no edge, `external=`, one census row. Spending
+//              it on `unresolved=` instead would claim an in-repo definition existed and went unused —
+//              the opposite of what happened, on the single most common shape in any JS corpus.
+//   Refused  — in-tree evidence exists and CONTRADICTS itself: two indexed files answer one specifier,
+//              or one local name is bound by two imports, or the import is type-only. Nothing is
+//              knowable; `unresolved=` (a call the tool declines to guess at) is exactly right.
+//   Unlisted — the module resolved but the name is not in our PARTIAL export table (a barrel
+//              re-export, an exported const, a shape this extractor does not model). Absence of
+//              evidence is not evidence of absence: DEGRADE to the name ladder, which resolved these
+//              correctly before this table existed. The one exception is a RENAMED import, where the
+//              local spelling is private to the importing file and a same-name ladder hit would be a
+//              coincidence rather than a resolution — that refuses.
+enum class JsImportOutcome : std::uint8_t
+{
+    Pinned = 0,   // the module is an indexed file and its export table names exactly ONE definition
+    External,     // the module is outside the indexed tree — route to vetoExternal (external=, census row)
+    Refused,      // contradictory in-tree evidence, or a type-only binding — no edge, counted unresolved=
+    Unlisted      // the module resolved, the name did not: fall through to the unchanged name ladder
+};
+
+struct JsImportTarget
+{
+    NodeId          node    = kNoNode;                    // meaningful only when outcome == Pinned
+    JsImportOutcome outcome = JsImportOutcome::Unlisted;
+    bool            renamed = false;                      // `import { f as g }` — the local spelling is private
+};
+
+// One export of one module: the definition it names, plus the region a definition must sit INSIDE to be
+// that export (the declaration for `export function f(){}`, the whole program for an `export { f }`
+// clause, whose target may be declared anywhere in the file). `ambiguous` tombstones a name two
+// definitions answer — never choose one.
+struct JsExportFact
+{
+    NodeId               node = kNoNode;
+    bool                 ambiguous = false;
+    std::vector<VarSpan> spans;
+};
+
 struct JsImportTables
 {
-    HashMap<std::string, NodeId> targets;
+    HashMap<std::string, JsImportTarget> targets;
     HashMap<std::string, std::vector<VarSpan>> shadows;
 };
 
@@ -975,15 +1044,89 @@ inline std::string jsImportKey( std::uint32_t fileId, std::string_view name )
     return std::to_string( fileId ) + "#" + std::string( name );
 }
 
-inline std::uint32_t resolveJsNamedImportFile( std::string_view importer, std::string_view module,
+// `utils.ts` and `utils` name the same module, so the vocabulary probe below has to compare stems.
+inline std::string_view jsModuleStem( std::string_view segment )
+{
+    for( const std::string_view extension : { ".d.ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs", ".jsx", ".ts", ".js" } )
+    {
+        if( segment.size() > extension.size() && segment.ends_with( extension ) )
+        {
+            return segment.substr( 0, segment.size() - extension.size() );
+        }
+    }
+    return segment;
+}
+
+// The tree's MODULE VOCABULARY: every directory segment and every JS/TS file stem. It is the escape
+// hatch that keeps an unresolvable-but-PRESENT module — a workspace package, a tsconfig path alias,
+// neither of which this resolver follows — from reading as external. Same shape, and the same reason,
+// as buildExternalVetoTables' Python `moduleNames` probe: over-claiming externality DELETES a correct
+// ladder edge, which is strictly worse than the miss it replaces.
+inline HashMap<std::string, char> jsModuleVocabulary( const IngestResult& ing )
+{
+    HashMap<std::string, char> names;
+    names.reserve( ing.files.size() * 2 );
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view path = ing.files[ f ];
+        std::size_t seg = 0;
+        while( seg <= path.size() )
+        {
+            const std::size_t slash = path.find( '/', seg );
+            const std::string_view part = path.substr( seg, ( slash == std::string_view::npos ? path.size() : slash ) - seg );
+            if( slash == std::string_view::npos )
+            {
+                const std::string_view stem = jsModuleStem( part );
+                if( !stem.empty() ) { names.try_emplace( std::string( stem ), '\0' ); }
+                break;
+            }
+            if( !part.empty() && part != "." && part != ".." ) { names.try_emplace( std::string( part ), '\0' ); }
+            seg = slash + 1;
+        }
+    }
+    return names;
+}
+
+// Is this specifier PROVABLY outside the indexed tree? Only a BARE specifier can be: a relative or
+// absolute path that failed to resolve is this resolver's miss, not evidence about the world, and is
+// left to the ladder. `node:` is reserved by the runtime and can never name a file. Everything else is
+// external only when no segment of it names anything in the tree.
+inline bool jsModuleIsForeign( std::string_view module, const HashMap<std::string, char>& vocabulary )
+{
+    if( module.empty() || module.front() == '.' || module.front() == '/' ) { return false; }
+    if( module.starts_with( "node:" ) ) { return true; }
+    std::size_t seg = 0;
+    while( seg <= module.size() )
+    {
+        const std::size_t slash = module.find( '/', seg );
+        const std::string_view part = jsModuleStem( module.substr( seg, ( slash == std::string_view::npos ? module.size() : slash ) - seg ) );
+        if( !part.empty() && vocabulary.find( std::string( part ) ) != vocabulary.end() ) { return false; }
+        if( slash == std::string_view::npos ) { break; }
+        seg = slash + 1;
+    }
+    return true;
+}
+
+// Everything path resolution needs to answer "where does this specifier land": the corpus file index, the
+// workspace/tsconfig context when there is one, and the module vocabulary the externality probe reads.
+struct JsModuleCtx
+{
+    const HashMap<std::string, std::uint32_t>& files;
+    const WsIncludeCtx*                        workspace;
+    const HashMap<std::string, char>&          vocabulary;
+};
+
+inline std::pair<std::uint32_t, bool> resolveJsNamedImportFile( std::string_view importer, std::string_view module,
                                              const HashMap<std::string, std::uint32_t>& files, const WsIncludeCtx* workspace, std::uint32_t importerFileId )
 {
     // Source trees commonly spell runtime extensions. Require a unique file across exact/runtime and
-    // source alternatives; competing emitted and source files are deliberately unresolved.
+    // source alternatives; competing emitted and source files are deliberately unresolved — and the
+    // second return value says WHICH kind of unresolved, because "two files answer this" is contrary
+    // in-tree evidence while "no file answers this" may simply be a module we cannot follow.
     if( ( !module.starts_with( "./" ) && !module.starts_with( "../" ) )
         || ( !module.ends_with( ".js" ) && !module.ends_with( ".mjs" ) && !module.ends_with( ".cjs" ) ) )
     {
-        return resolvePreciseInclude( importer, module, false, files, {}, false, workspace, importerFileId );
+        return { resolvePreciseInclude( importer, module, false, files, {}, false, workspace, importerFileId ), false };
     }
     std::uint32_t hit = joinNormalizeLookup( includerDir( importer ), std::string( module ), files, workspace, importerFileId );
     bool ambiguous = false;
@@ -998,7 +1141,27 @@ inline std::uint32_t resolveJsNamedImportFile( std::string_view importer, std::s
     if( module.ends_with( ".js" ) ) { probe( ".ts", 3 ); probe( ".tsx", 3 ); }
     else if( module.ends_with( ".mjs" ) ) { probe( ".mts", 4 ); }
     else if( module.ends_with( ".cjs" ) ) { probe( ".cts", 4 ); }
-    return ambiguous ? kNoFile : hit;
+    return { ambiguous ? kNoFile : hit, ambiguous };
+}
+
+// WHERE a named import's module lands, and — when it lands nowhere — WHICH kind of nowhere. The three
+// non-Pinned outcomes are the whole point: two files answering one specifier is contrary in-tree evidence
+// (Refused), a bare specifier this tree knows nothing about is a proven external (External), and anything
+// else is simply a module this resolver could not follow (Unlisted → the name ladder). `outcome` is
+// Unlisted whenever `fileId` is real: the export lookup, not this function, decides Pinned.
+inline std::pair<std::uint32_t, JsImportOutcome> resolveJsImportModule( std::string_view importer, std::string_view module,
+                                                                       std::uint32_t importerFileId, const JsModuleCtx& ctx )
+{
+    const auto [ fileId, ambiguous ] = resolveJsNamedImportFile( importer, module, ctx.files, ctx.workspace, importerFileId );
+    if( ambiguous )
+    {
+        return { kNoFile, JsImportOutcome::Refused };   // an emitted file and its source both answer the specifier
+    }
+    if( fileId == kNoFile )
+    {
+        return { kNoFile, jsModuleIsForeign( module, ctx.vocabulary ) ? JsImportOutcome::External : JsImportOutcome::Unlisted };
+    }
+    return { fileId, JsImportOutcome::Unlisted };
 }
 
 inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncludeCtx* workspace )
@@ -1016,60 +1179,83 @@ inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncl
     {
         files.emplace( lexicalNormalize( ing.files[ fileId ] ), fileId );
     }
-    HashMap<std::string, std::vector<VarSpan>> exportSpans;
-    exportSpans.reserve( ing.bindings.size() );
-    HashMap<std::string, NodeId> exported;
+    // Two views of the same export bindings: by the EXPORTED name (what an importer writes) and by the
+    // LOCAL one (what the definition is called). `export { f as g }` makes them different words, so a
+    // single map keyed either way would silently drop one of the two forms.
+    HashMap<std::string, JsExportFact> exported;
+    HashMap<std::string, std::vector<std::string>> byLocal;
     exported.reserve( ing.bindings.size() );
+    byLocal.reserve( ing.bindings.size() );
     for( const Binding& b : ing.bindings )
     {
         if( b.kind == LocalBindKind::JsExport )
         {
             const std::string key = jsImportKey( b.fileId, b.var );
-            exported.try_emplace( key, kNoNode );
-            exportSpans[ key ].push_back( { b.spanStart, b.spanEnd } );
+            exported[ key ].spans.push_back( { b.spanStart, b.spanEnd } );
+            byLocal[ jsImportKey( b.fileId, b.importedName.empty() ? b.var : b.importedName ) ].push_back( key );
         }
-        if( b.kind == LocalBindKind::JsShadow )
+        else if( b.kind == LocalBindKind::JsShadow )
         {
             tables.shadows[ jsImportKey( b.fileId, b.var ) ].push_back( { b.spanStart, b.spanEnd } );
         }
     }
-    HashMap<std::string, char> duplicate;
-    duplicate.reserve( exported.size() );
+    for( auto& [ localKey, keys ] : byLocal )
+    {
+        std::sort( keys.begin(), keys.end() );                              // one definition may answer one export ONCE:
+        keys.erase( std::unique( keys.begin(), keys.end() ), keys.end() );  //   a repeat would tombstone it as ambiguous
+    }
     for( const Symbol& symbol : ing.symbols )
     {
         if( ( symbol.lang != Lang::TypeScript && symbol.lang != Lang::JavaScript ) || !symbol.scope.empty()
             || ( symbol.kind != SymKind::Function && symbol.kind != SymKind::Class ) ) { continue; }
-        const std::string key = jsImportKey( symbol.fileId, symbol.name );
-        auto found = exported.find( key );
-        if( found == exported.end() || duplicate.find( key ) != duplicate.end() ) { continue; }
-        const auto& spans = exportSpans.find( key )->second;
-        if( std::none_of( spans.begin(), spans.end(), [ & ]( const VarSpan& span )
-            { return symbol.sigStartByte >= span.startByte && symbol.endByte <= span.endByte; } ) ) { continue; }
-        if( found->second != kNoNode )
+        const auto local = byLocal.find( jsImportKey( symbol.fileId, symbol.name ) );
+        if( local == byLocal.end() ) { continue; }
+        for( const std::string& key : local->second )
         {
-            found->second = kNoNode;
-            duplicate.try_emplace( key, 1 );
+            JsExportFact& fact = exported.find( key )->second;
+            if( fact.ambiguous ) { continue; }
+            if( std::none_of( fact.spans.begin(), fact.spans.end(), [ & ]( const VarSpan& span )
+                { return symbol.sigStartByte >= span.startByte && symbol.endByte <= span.endByte; } ) ) { continue; }
+            if( fact.node != kNoNode ) { fact.node = kNoNode; fact.ambiguous = true; }
+            else { fact.node = symbol.id; }
         }
-        else { found->second = symbol.id; }
     }
+    const HashMap<std::string, char> vocabulary = jsModuleVocabulary( ing );
+    const JsModuleCtx ctx{ files, workspace, vocabulary };
     for( const Binding& b : ing.bindings )
     {
         if( b.kind != LocalBindKind::JsImport || b.fileId >= ing.files.size() ) { continue; }
-        NodeId target = kNoNode;
-        if( !b.importedName.empty() )
+        JsImportTarget target;
+        target.renamed = b.importedName != b.var;
+        // An empty importedName is a TYPE-ONLY import: it binds a type, so a call through the name is not
+        // this import's call, and there is no module question to ask.
+        const auto [ moduleFile, moduleOutcome ] = b.importedName.empty()
+            ? std::pair<std::uint32_t, JsImportOutcome>{ kNoFile, JsImportOutcome::Refused }
+            : resolveJsImportModule( ing.files[ b.fileId ], b.typeName, b.fileId, ctx );
+        target.outcome = moduleOutcome;
+        if( moduleFile != kNoFile )
         {
-            const auto fileId = resolveJsNamedImportFile( ing.files[ b.fileId ], b.typeName, files, workspace, b.fileId );
-            if( fileId != kNoFile )
+            const auto found = exported.find( jsImportKey( moduleFile, b.importedName ) );
+            if( found != exported.end() && found->second.node != kNoNode )
             {
-                const auto found = exported.find( jsImportKey( fileId, b.importedName ) );
-                if( found != exported.end() ) { target = found->second; }
+                target.outcome = JsImportOutcome::Pinned;
+                target.node    = found->second.node;
             }
         }
         const auto [ found, inserted ] = tables.targets.try_emplace( jsImportKey( b.fileId, b.var ), target );
-        if( !inserted ) { found->second = kNoNode; }   // duplicate binding, including invalid source: never choose one
+        if( !inserted )
+        {
+            found->second.node    = kNoNode;                    // one local name, two import bindings (invalid source
+            found->second.outcome = JsImportOutcome::Refused;    //   included): never choose one of them
+        }
     }
     return tables;
 }
+
+// `census` arms the eval-only S6-C silent-pin census (src/pincensus.h): every DECIDED call site records
+// which narrowing stage committed it and to which canonical target. It adds rows to g.pinCensus and
+// changes NOTHING else — no candidate is admitted, dropped or reordered by it, so the emitted map is
+// byte-identical armed or not (test/pincensuscheck.sh arm (E) is the executable form of that sentence).
 
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
@@ -1428,6 +1614,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     std::string              bindKey;       // A4-R5 reused "<fileId>#var" key buffer for the ctypes-handle gate
     HashMap<std::uint64_t, char> bindingEdges;   // A4-R5 (from<<32|to) keys of edges resolved via an FFI alias —
                                                  // consumed below to stamp prov (outProv=2) + the amb honesty mark
+    HashMap<std::uint64_t, char> importEdges;    // (from<<32|to) keys of edges an ES named-import binding pinned,
+                                                 // consumed below to stamp prov (outProv=4). Same argument as
+                                                 // bindingEdges: an ABSENT prov= is defined by the map legend as
+                                                 // "uniquely-resolved-name-based", and these edges are neither —
+                                                 // the target was read out of a module's export table. Leaving them
+                                                 // unmarked would let a NEW resolution mechanism inherit the
+                                                 // confidence label of the old one, silently. Not reserved, for the
+                                                 // reason spelled out for splitEdges below.
     HashMap<std::uint64_t, char> splitEdges;     // C1: (from<<32|to) keys of edges that are an ARM of a k-way split the
                                                  // resolver could not choose between — the per-EDGE half of the per-SYMBOL
                                                  // ambOut counter, consumed below to stamp prov (outProv=3). ambOut says K
@@ -1652,7 +1846,22 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // keeps role="call": it IS a real call; only the RESOLUTION came from the binding — the same trust
         // level as Rule 2 receiver narrowing.
         bool narrowed = false;
-        // A bound ES name never falls through to the global spelling ladder. SCIP remains authoritative.
+        // ── ES named-import binding resolve — the JS/TS twin of the L3 block above, and BEFORE every
+        // receiver rule for the same reason: `import { f } from './m.js'` is a name-lookup FACT, so a
+        // bound ES name never falls through to the global spelling ladder. SCIP remains authoritative.
+        // The four outcomes are the taxonomy documented at JsImportOutcome; each lands on the gauge that
+        // MEANS what happened, which is the whole reason the enum exists rather than one kNoNode:
+        //   shadowed  a local declaration hides the import at this byte — a known-local call the tool
+        //             refuses to guess at, exactly like L3's `unresolvedOut` above.
+        //   External  the module is outside the tree: the Phase-5 VETO's own population, so it goes
+        //             through vetoExternal — `external=`, one `C external` census row, no edge. Counting
+        //             this into `unresolved=` would claim an in-repo def was found and then dropped.
+        //   Refused   contradictory in-tree evidence → unresolvedOut, no edge.
+        //   Unlisted  the module resolved, the name is not in our PARTIAL export table → fall THROUGH to
+        //             the unchanged ladder (a refusal here deletes edges the ladder resolved correctly),
+        //             unless the import renamed the binding, in which case the local spelling is private
+        //             to this file and any same-name ladder hit is a coincidence.
+        bool jsImportPinned = false;
         if( !scipPinned && r.role == RefRole::Call && r.recv == RecvKind::None && r.qualifier.empty()
             && ( r.lang == Lang::TypeScript || r.lang == Lang::JavaScript ) )
         {
@@ -1667,13 +1876,24 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         if( r.startByte >= span.startByte && r.startByte < span.endByte ) { shadowed = true; break; }
                     }
                 }
-                if( shadowed || imported->second == kNoNode )
+                const JsImportTarget& bound = imported->second;
+                if( !shadowed && bound.outcome == JsImportOutcome::External )
+                {
+                    vetoExternal( r );
+                    continue;
+                }
+                if( shadowed || bound.outcome == JsImportOutcome::Refused
+                    || ( bound.outcome == JsImportOutcome::Unlisted && bound.renamed ) )
                 {
                     ++g.unresolvedOut[ r.fromSymbol ];
                     continue;
                 }
-                cand.push_back( imported->second );
-                narrowed = true;
+                if( bound.outcome == JsImportOutcome::Pinned )
+                {
+                    cand.push_back( bound.node );
+                    narrowed       = true;   // the LATCH that stops the ladder below; see the census call site
+                    jsImportPinned = true;
+                }
             }
         }
         if( !scipPinned && !canonical && fnBindActive && r.role == RefRole::Call
@@ -2211,8 +2431,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // pincensus.h::classifyPin owns the precedence rule; this site only reports the stage outcomes.
         if( census )
         {
-            const PinDecision d = classifyPin( scipPinned, bindingPinned, nReal, canonical, narrowed,
-                                               censusCone, censusArity, censusLocality );
+            // `narrowed` is passed WITHOUT the import pin: it is a latch this loop sets so the receiver
+            // rules below cannot append more candidates, and on the ES-import path it says nothing about
+            // which stage decided. Reporting `receiver-rule` for a module binding — no receiver, no type,
+            // no include graph — is exactly the mislabel this census exists to prevent.
+            const PinDecision d = classifyPin( scipPinned, bindingPinned, jsImportPinned, nReal, canonical,
+                                               narrowed && !jsImportPinned, censusCone, censusArity, censusLocality );
             g.pinCensus.addRow( r.fromSymbol, r.calleeName, d.mech, d.flags, censusPreS6c, nReal, r.line );
             for( NodeId to : tier )
             {
@@ -2240,6 +2464,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             if( bindingPinned )
             {
                 bindingEdges[ekey] = 1; // A4-R5: remember (from,to) for prov="binding"
+            }
+            if( jsImportPinned )
+            {
+                importEdges[ekey] = 1;  // remember (from,to) for prov="import"
             }
         }
     }
@@ -2272,12 +2500,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }
     g.outTargets.resize( edges.size() );
     g.outVals.resize( edges.size() );
-    // provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists OR the
-    // resolver had to split at least one call — a corpus that resolves cleanly keeps it EMPTY so serialize
-    // emits no prov= at all (zero token cost, byte-identical to before; test/golden.xml is the standing proof).
+    // provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists OR an ES
+    // named-import binding pinned one OR the resolver had to split at least one call — a corpus that resolves
+    // cleanly keeps it EMPTY so serialize emits no prov= at all (zero token cost, byte-identical to before;
+    // test/golden.xml is the standing proof).
     //   1 = PRECISE (SCIP-pinned) → prov="scip";  2 = A4-R5 cross-language FFI binding → prov="binding";
-    //   3 = C1 one arm of a k-way split the resolver could not choose between → prov="split".
-    if( scip || !bindingEdges.empty() || !splitEdges.empty() )
+    //   3 = C1 one arm of a k-way split the resolver could not choose between → prov="split";
+    //   4 = an ES named-import binding named the module and the export → prov="import".
+    if( scip || !bindingEdges.empty() || !splitEdges.empty() || !importEdges.empty() )
     {
         g.outProv.assign( edges.size(), 0u );
     }
@@ -2301,6 +2531,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // resolved it (and already carries its own amb= mark), split says the resolver could not choose. A
             // binding edge that is also a split keeps the more specific label; prov= is single-valued, and the
             // symbol's amb= counts it either way, so nothing is lost by the ordering.
+            else if( !importEdges.empty() && importEdges.find( ( std::uint64_t( e.from ) << 32 ) | e.to ) != importEdges.end() )
+            {
+                g.outProv[ pos ] = 4u;                                             // (from,to) an ES named-import edge
+            }
             else if( !splitEdges.empty() && splitEdges.find( ( std::uint64_t( e.from ) << 32 ) | e.to ) != splitEdges.end() )
             {
                 g.outProv[ pos ] = 3u;                                             // (from,to) one arm of a k-way split

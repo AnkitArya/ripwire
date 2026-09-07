@@ -34,6 +34,15 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-07, ES NAMED IMPORTS (PR #45 + its review fixes, test/lib/jsimportalias.sh, test/lib/jsimportfacts.sh):
+#   kParserVer 77 -> 79 -> 80 and kCacheVersion 15 -> 16. 79 added three JS/TS ingest FACTS — a named ES import
+#   records local name + module + exported name (LocalBindKind::JsImport, RawBind gains `importedName`, so the
+#   cache RECORD FORMAT moved and kCacheVersion had to move with it), a direct exported declaration records
+#   JsExport, and a declaration shadowing an import records JsShadow. 80 widened JsExport to the CLAUSE forms
+#   `export { f }` / `export { f as g }` (JsExport's `importedName` now carries the local name the exported
+#   spelling binds); re-export and default clauses are deliberately still not recorded. quality.h's
+#   kIngestCacheVersionMirror / kIngestParserVerMirror were bumped to 16 / 80 in the same diff
+#   (qextractionkeycheck), no Snapshot-side function changed, kQSnapCacheScheme stays 8.
 # 2026-09-03, PHASE 5 — the external-name veto + the receiver MRO walk (test/externalvetocheck.sh, test/mrowalkcheck.sh,
 #   docs/EVALS.md "Phase 5"): kParserVer 76 -> 77 — three Python ingest FACTS moved: a `super()` call receiver
 #   classifies the new RecvKind::SuperObj (appended) instead of None; every import statement records the NAMES it

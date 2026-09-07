@@ -192,7 +192,10 @@ constexpr std::uint32_t kCacheVersion = 16;           // 16: RawBind gains impor
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 79;           // 79: ES import/export/shadow facts; skip 78 (77 rich-cache family).
+constexpr std::uint32_t kParserVer    = 80;           // 80: ES `export { f }` / `export { f as g }` CLAUSE exports join
+                                                      //    the export table (JsExport gains importedName = the local
+                                                      //    name); re-export/default clauses stay deliberately absent.
+                                                      // 79: ES import/export/shadow facts; skip 78 (77 rich-cache family).
                                                       // 77 = 2026-09-03 (Phase 5, docs/EVALS.md): two Python
                                                       //    ingest FACTS — (a) a `super()` call receiver classifies
                                                       //    RecvKind::SuperObj (appended) instead of None, so

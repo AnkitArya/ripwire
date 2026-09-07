@@ -9,7 +9,25 @@ namespace
 {
 
 // ES named imports carry three independent facts: local spelling, export spelling, and module.
-// Only direct exported declarations are resolved. Barrels and type-only imports remain known gaps.
+//
+// EXPORTS come in two shapes and BOTH are recorded, because the table is consulted as a REFUSAL: a name
+// the table cannot find is a call the resolver declines to hand to the global name ladder. Seeing only
+// the declaration form (`export function f(){}`) therefore does not merely miss `export { f }` — it
+// DELETES the edge the ladder used to resolve correctly, which is a regression, not a gap. So:
+//   * declaration form   `export function f(){}` / `export const f = () => {}` — the span is the
+//                        declaration itself, and only a symbol INSIDE it may be the export.
+//   * clause form        `export { f }` / `export { f as g }` — the exported name is the alias, the
+//                        binding it names is module-scoped and declared ANYWHERE in the file, so the
+//                        span is the whole program. `var` is the EXPORTED name (what an importer
+//                        writes) and `importedName` the LOCAL one (what the definition is called).
+// Re-export/barrel clauses (`export { f } from './m.js'`) are deliberately NOT recorded: the definition
+// lives in a third file this table does not chase, so recording the name would let a refusal fire on
+// evidence we do not have. Left out, the name is simply UNLISTED, and buildJsImportTables degrades an
+// unlisted import to the name ladder — the pre-import behaviour, which resolved barrels correctly.
+// `export default` is likewise absent, and so is its import side: a default import is an `identifier`
+// child of the import_clause, not an `import_specifier`, so no JsImport binding is recorded for it and
+// the whole default-export path stays on the unchanged name ladder rather than on a half-built table.
+// Type-only imports remain a known gap (recorded with an empty importedName, and refused, never sprayed).
 inline bool jsNodeIs( TSNode node, const char* kind )
 {
     return !ts_node_is_null( node ) && std::strcmp( ts_node_type( node ), kind ) == 0;
@@ -70,6 +88,44 @@ inline std::vector<std::string> jsPatternNames( TSNode pattern, std::string_view
     }
     std::sort( names.begin(), names.end() );
     names.erase( std::unique( names.begin(), names.end() ), names.end() );
+    return names;
+}
+
+// The (EXPORTED name, LOCAL name) pairs a `export { f }` / `export { f as g }` clause binds — the clause
+// form of an export, whose target may be declared anywhere in the file. Empty, deliberately, for the two
+// shapes this table must NOT claim to know: a RE-EXPORT (`export { f } from './m.js'`, whose definition is
+// in a third file), and `export type { F }` (which binds no value and must never mint a call edge). An
+// empty result leaves the name UNLISTED, which buildJsImportTables degrades to the name ladder.
+inline std::vector<std::pair<std::string, std::string>> jsExportClauseNames( TSNode stmt, std::string_view src )
+{
+    std::vector<std::pair<std::string, std::string>> names;
+    if( !ts_node_is_null( ts_node_child_by_field_name( stmt, "source", 6 ) ) || jsHasToken( stmt, "type" ) )
+    {
+        return names;
+    }
+    std::vector<TSNode> pending{ stmt };
+    while( !pending.empty() )
+    {
+        TSNode node = pending.back();
+        pending.pop_back();
+        if( jsNodeIs( node, "export_specifier" ) )
+        {
+            TSNode local = ts_node_child_by_field_name( node, "name", 4 );
+            TSNode alias = ts_node_child_by_field_name( node, "alias", 5 );
+            if( ts_node_is_null( alias ) ) { alias = local; }
+            if( jsNodeIs( local, "identifier" ) && jsNodeIs( alias, "identifier" ) && !jsHasToken( node, "type" ) )
+            {
+                names.emplace_back( std::string( pattern::nodeText( alias, src ) ), std::string( pattern::nodeText( local, src ) ) );
+            }
+        }
+        else if( jsNodeIs( node, "export_statement" ) || jsNodeIs( node, "export_clause" ) )
+        {
+            ChildCursor cursor( node );
+            std::vector<TSNode> nested;
+            collectChildren( node, cursor.cur, nested );
+            for( TSNode child : nested ) { pending.push_back( child ); }
+        }
+    }
     return names;
 }
 
@@ -135,7 +191,20 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         else if( jsNodeIs( stmt, "export_statement" ) && !jsHasToken( stmt, "default" ) )
         {
             TSNode decl = ts_node_child_by_field_name( stmt, "declaration", 11 );
-            if( ts_node_is_null( decl ) ) { continue; }
+            if( ts_node_is_null( decl ) )
+            {
+                // Clause form. The scope is the whole PROGRAM: a clause exports a module-scope binding and
+                // the declaration it names may sit anywhere in the file (hoisted, or simply above).
+                // importedName is spelled even when it equals `var` — it is what buildJsImportTables matches
+                // a DEFINITION by, and it is what keeps two specifiers of one clause (which share this
+                // statement's start byte) distinguishable to emitBindings' total order.
+                for( const auto& [ exportName, localName ] : jsExportClauseNames( stmt, src ) )
+                {
+                    record( stmt, LocalBindKind::JsExport, exportName, root );
+                    binds.back().importedName = localName;
+                }
+                continue;
+            }
             TSNode name = ts_node_child_by_field_name( decl, "name", 4 );
             if( jsNodeIs( decl, "function_declaration" ) || jsNodeIs( decl, "generator_function_declaration" )
                 || jsNodeIs( decl, "class_declaration" ) || jsNodeIs( decl, "abstract_class_declaration" ) )

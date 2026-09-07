@@ -109,5 +109,6 @@ monotonic_check()
 monotonic_check
 
 bash "$ROOT/test/lib/jsimportalias.sh" "$BIN" || fail=1
+bash "$ROOT/test/lib/jsimportfacts.sh" "$BIN" || fail=1
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

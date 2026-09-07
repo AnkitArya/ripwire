@@ -524,7 +524,12 @@ enum class LocalBindKind : std::uint8_t
                //     and shadow suppression all skip it by kind. Python captures these; a `from m import *`
                //     records nothing (no name is bound). APPENDED for the same cache reason as VarDecl.
     JsImport,  // named ES import: var=local name, typeName=module, importedName=export (empty for type-only).
-    JsExport,  // direct ES export declaration: var=exported name. No barrel/default-export inference.
+    JsExport,  // ES export: var=EXPORTED name; importedName=the LOCAL name it binds (empty on the declaration
+               //     form, where the two are the same word). spanStart/spanEnd is the region a definition must
+               //     sit inside to BE this export — the declaration itself for `export function f(){}`, the
+               //     whole program for a `export { f as g }` clause, whose target may be declared anywhere in
+               //     the file. Re-export (`export { f } from ...`) and default exports record nothing: see
+               //     ingest_jsimports.h for why an absent name must degrade rather than refuse.
     JsShadow,  // lexical declaration hiding an ES import; spanStart/spanEnd cover the declaring scope.
 };
 
@@ -543,7 +548,9 @@ struct Binding
                                           //   declarations) from its scope's start. See suppressShadowedReferences.
                                           //   {0,0} on every other kind and on a scope-less capture (contains nothing).
     std::string   var;                    // the declared variable identifier (`x`)
-    std::string   importedName;           // JsImport only: the requested export; never a global-name fallback.
+    std::string   importedName;           // JsImport: the requested export name; never a global-name fallback.
+                                          //   JsExport: the LOCAL name the exported spelling binds (empty when
+                                          //   the two are identical). Empty on every other kind.
     std::string   typeName;               // kind==Type: the written type's final segment (`Foo`), resolved to a
                                           //   class in buildGraph. kind==FnDecl/FnAssign: the bound FUNCTION
                                           //   name as written minus `&` (`alpha`, `ns::alpha`), or a sentinel.
