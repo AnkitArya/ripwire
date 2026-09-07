@@ -6,7 +6,7 @@ exceeds the agent harness time ceiling. This runs the same scripts concurrently 
 full verification fits in one window. It does NOT modify regression.sh.
 
 usage: pargates.py <repo-root> <ripwire-bin> [-j N] [--only substr] [--json out.json]
-                   [--shard K/N] [--shard-plan] [--budget-scale F]
+                   [--shard K/N] [--shard-plan] [--budget-scale F] [--exclude-list FILE]
 """
 import concurrent.futures as cf
 import hashlib
@@ -26,6 +26,7 @@ jsonout = None
 shard = None          # (k, n): run only the k-th of n deterministic slices of the gate list
 shard_plan = False    # print every slice's membership and predicted weight, run nothing
 budget_scale = 1.0    # multiply the DEFAULT per-gate budget (never the explicit overrides) -- CI passes >1
+exclude_list = None   # a committed file naming gates this leg does not run (one per line, # comments)
 args = sys.argv[3:]
 for i, a in enumerate(args):
     if a == "-j":
@@ -41,6 +42,8 @@ for i, a in enumerate(args):
             sys.exit(f"--shard K/N needs 1 <= K <= N, got {args[i + 1]}")
     elif a == "--shard-plan":
         shard_plan = True
+    elif a == "--exclude-list":
+        exclude_list = args[i + 1]
     elif a == "--budget-scale":
         budget_scale = float(args[i + 1])
         if budget_scale <= 0:
@@ -56,6 +59,26 @@ skip = {"regression.sh"}
 gates = [g for g in gates if g not in skip]
 if only:
     gates = [g for g in gates if only in g]
+
+# --exclude-list: a leg may decline a NAMED set of gates, and only by pointing at a committed file whose
+# every line says which gate and why. The use it exists for (2026-09-07): the macOS plain leg -- an -O0
+# binary on a 3-core runner -- was the critical path of the whole workflow at 33-37 min, and its four
+# slowest gates (binoverridecheck, knownitemcheck, ripwirepubliccheck, xmlwellformed) assert nothing
+# platform-specific and run unchanged on the macOS Release leg and all four Linux legs. Applied BEFORE the
+# shard split so the remaining gates rebalance; the count is printed so a log reader sees the omission
+# instead of inferring it from a shorter gate total. A name in the file that matches no gate is an error:
+# a stale exclusion silently excluding nothing is how a list like this rots.
+excluded = []
+if exclude_list:
+    with open(os.path.join(root, exclude_list)) as fh:
+        wanted = [ln.split("#", 1)[0].strip() for ln in fh]
+    wanted = [w for w in wanted if w]
+    unknown = [w for w in wanted if w not in gates and not (only and only not in w)]
+    if unknown and not only:
+        sys.exit(f"--exclude-list {exclude_list} names gates that do not exist: {' '.join(unknown)}")
+    excluded = [g for g in gates if g in wanted]
+    gates = [g for g in gates if g not in wanted]
+    print(f"exclude-list {exclude_list}: {len(excluded)} gate(s) not run on this leg: {' '.join(excluded)}")
 
 # --- longest-first (LPT) scheduling -----------------------------------------------------------
 # A greedy scheduler minimizes wall time by handing the slowest jobs to workers FIRST -- a long
