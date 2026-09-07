@@ -74,10 +74,19 @@ EOF
 # RE-PINNED 2170 -> 2260 (2026-09-05, lane L7 P8): ONE more FACT on every test-gate root, ccx_bar= (the cognitive-
 # complexity bar a <u> row's ccx= is read against — quality-delta's own, mirrored from quality.h), defined where the
 # reader meets it: +97 B. Measured 2108 -> 2205 B; 2260 leaves ~55 B, the same posture again.
-if [ "$legend" -le 2260 ]; then
-    ok "(a) --test-gate legend is $legend B (<= 2050 B budget; total=$total payload=$payload)"
+# RE-PINNED 2260 -> 2540 (2026-09-07, head-to-head vs Graft, F1). THREE new FACTS on every <t> row, row-gated
+# (the zero-row report still pays nothing): changed= (the test file is IN the change set — before this a diff
+# of {src, its test} exited 0 with nothing to run, the test's own symbols skipped as "the change"), partner=
+# (a test NAMED after a changed file, listed by convention when the graph never reaches it: rocksdb's
+# tiered_secondary_cache_test.cc builds through a factory) and hops= (caller-walk depth; 1 = a direct call),
+# plus the evidence ORDER the rows now come in. One clause, testmap.h's kTestRowEvidenceLegend, spliced by
+# --affected/--situ/--test-gate alike so the emitters cannot drift. Written long (477 B), measured, cut to
+# the shortest honest form (281 B). Measured on this fixture: 2205 -> 2486 B; 2540 leaves ~54 B — the same
+# posture as every pin above.
+if [ "$legend" -le 2540 ]; then
+    ok "(a) --test-gate legend is $legend B (<= 2540 B budget; total=$total payload=$payload)"
 else
-    no "(a) --test-gate legend is $legend B (> 2050 B budget) — the essay re-inflated"
+    no "(a) --test-gate legend is $legend B (> 2540 B budget) — the essay re-inflated"
 fi
 
 # (b) the honesty vocabulary + the §B12.5 cross-verb UNIT-collision anchors (test/testgatecheck.sh arm (g)

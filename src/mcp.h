@@ -238,7 +238,13 @@ inline constexpr std::string_view kMcpServerInstructions =
     "Map before reading files. Start a new task with explore; use from_trace for an error; use impact plus "
     "uses before changing a symbol; run edit_check after an edit and quality_delta before declaring work "
     "done. Use batch for several independent read queries in one turn. Fetch bodies only after ranked "
-    "retrieval. Counts marked as floors are not totals; zero means none found, not none exists.";
+    "retrieval. Counts marked as floors are not totals; zero means none found, not none exists. "
+    // H2H-Graft (2026-09-07, taken from Graft's src/mcp/instructions.ts): a host that DEFERS tool schemas
+    // hands the agent bare names and withholds descriptions, but this `instructions` string survives on its
+    // own track — so it is the one channel that can tell the agent to load the verbs in ONE lookup instead of
+    // paying a round trip per verb (31 verbs here; the deferral tax is the larger cost).
+    "If these tools arrive deferred (names shown, schemas withheld), load them all in ONE lookup rather than "
+    "one at a time.";
 inline constexpr std::string_view kMcpProtocolVersions[] =
 {
     kMcpLatestProtocolVersion,

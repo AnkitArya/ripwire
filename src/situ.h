@@ -456,7 +456,8 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     }
 
     // (1) blast radius — transitive callers (everything that reaches the changed symbols), per non-changed file
-    const std::vector<NodeId>  reach = transitiveCallers( g, changedSyms );
+    std::vector<std::uint32_t> situDepth;   // H2H-Graft F1: the SAME walk, keeping hops for the [2] rows
+    const std::vector<NodeId>  reach = transitiveCallersDepth( g, changedSyms, &situDepth );
     std::vector<std::uint32_t> fileReachers( F, 0 );
     for( NodeId n : reach )
     {
@@ -507,26 +508,31 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
         std::fprintf( out, "        %.*s  (%u dependent symbols)\n", int( rp.size() ), rp.data(), fileReachers[ affected[i] ] );
     }
 
-    // (2) tests to run — the test files among the dependents (the --affected set)
+    // (2) tests to run — the test files among the dependents (the --affected set), in EVIDENCE order
+    //     (H2H-Graft F1, testmap.h::rankTestRows): a test file IN the diff first (you edited it), then the
+    //     one NAMED after a changed file (the graph misses it when the test builds through a factory), then
+    //     by hops ascending — the row to run first is the first row.
+    const ChangedFileSplit     situSplit = splitChangedFiles( ing, changedFile );
+    const std::vector<TestRow> testRows  = rankTestRows( ing, reach, situDepth, nullptr, situSplit.src, situSplit.tests );
     std::vector<std::uint32_t> tests;
-    for( std::uint32_t f : affected )
+    for( const TestRow& r : testRows )
     {
-        if( isTestPath( ing.files[f] ) )
-        {
-            tests.push_back( f );
-        }
+        tests.push_back( r.fileId );
     }
     // §H6 (W3FIX): this header printed the FULL count then listed at most 25 rows, silently — on the one
     // section whose sibling --test-gate calls its <t> rows "the COMPLETE obligation".
     std::fprintf( out, "  [2] tests to run (%zu)%s%s", tests.size(), situShowingNote( kSituTestRowsShown, tests.size(), "tests" ).c_str(),
-                  tests.empty() ? ": (none transitively reach these files)\n" : ":\n" );
+                  tests.empty() ? ": (none transitively reach these files)\n"
+                                : " — evidence order: [changed] you edited it, [partner] named after a changed file, then hops (1 = calls a changed symbol directly):\n" );
     // §P11.4: this section says "tests to run" and named files that are not commands. The runner is appended
     // where one is DERIVABLE and omitted where it is not — see testmap.h; a guessed command is worse than none.
     const TestRunnerIndex situRunners( ing );
-    for( std::size_t i = 0; i < tests.size() && i < kSituTestRowsShown; ++i )
+    for( std::size_t i = 0; i < testRows.size() && i < kSituTestRowsShown; ++i )
     {
-        const std::string_view rp = situPathRel( tests[i] );
-        std::fprintf( out, "        %.*s%s\n", int( rp.size() ), rp.data(), runSuffixTextDisclosed( situRunners, tests[i] ).c_str() );
+        const TestRow&         r  = testRows[i];
+        const std::string_view rp = situPathRel( r.fileId );
+        std::fprintf( out, "        %.*s%s%s\n", int( rp.size() ), rp.data(), testRowEvidence( r, EvDialect::Text ).c_str(),
+                      runSuffixTextDisclosed( situRunners, r.fileId ).c_str() );
     }
     // §B7.3: this section inherits --affected's blind spot without --affected's disclosure — a shell harness
     // runs the compiled BINARY as a subprocess, which is not a call edge, so no test/*.sh gate can EVER be
@@ -603,7 +609,8 @@ struct SituationFacts
                                                                   //   and the MCP JSON emitted {"file":…} only, i.e. a blast radius with
                                                                   //   no size. Kept as a parallel array (SoA), not folded into a pair,
                                                                   //   so existing readers of blastRadius are untouched.
-    std::vector<std::uint32_t>                    tests;          // test files among blastRadius (path asc) — the tests to run
+    std::vector<TestRow>                          testRows;       // H2H-Graft F1: the tests to run, EVIDENCE order, with why
+    std::vector<std::uint32_t>                    tests;          // the same rows as file ids, same order (pre-F1 consumers)
     std::vector<std::pair<std::uint32_t, double>> forgotten;     // (file, co-change degree) usually edited together but NOT in the diff (deg desc, path asc)
     // F2 (round C): the WINDOW `forgotten` was mined in, and how many commits it actually saw. `forgotten`
     // is a COMPOSED number — --cochange, the component verb, refuses loudly (`commits="0" window="18mo@HEAD"`,
@@ -644,8 +651,9 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     }
 
     // (1) blast radius — files (non-changed) with ≥1 symbol transitively reaching the changed set, ranked by
-    //     dependent-symbol count then path. (2) tests — the test files among them.
-    const std::vector<NodeId>  reach = transitiveCallers( g, changedSyms );
+    //     dependent-symbol count then path. (2) tests — the test files among them, in EVIDENCE order (F1).
+    std::vector<std::uint32_t> factsDepth;
+    const std::vector<NodeId>  reach = transitiveCallersDepth( g, changedSyms, &factsDepth );
     std::vector<std::uint32_t> fileReachers( F, 0 );
     for( NodeId n : reach )
     {
@@ -672,14 +680,13 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     }
     VERIFY( facts.blastDependents.size() == facts.blastRadius.size() );
 
-    for( std::uint32_t f : facts.blastRadius )
+    // H2H-Graft F1: evidence-ordered rows (changed test files in the diff, stem partners, then hops asc)
+    const ChangedFileSplit factsSplit = splitChangedFiles( ing, changedFile );
+    facts.testRows                    = rankTestRows( ing, reach, factsDepth, nullptr, factsSplit.src, factsSplit.tests );
+    for( const TestRow& r : facts.testRows )
     {
-        if( isTestPath( ing.files[f] ) )
-        {
-            facts.tests.push_back( f );
-        }
+        facts.tests.push_back( r.fileId );
     }
-    std::sort( facts.tests.begin(), facts.tests.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
 
     // Σ cognitive complexity per changed file (the complexity axis of the hotspot signal).
     std::vector<std::uint64_t> ccxSum( F, 0 );
@@ -776,7 +783,8 @@ struct TestGateResult
 {
     std::uint32_t              changedFiles    = 0;   // # changed files (the <test-gate changed=> header)
     std::size_t                impactedSymbols = 0;   // blast-radius symbol count, non-changed files (impacted=)
-    std::vector<std::uint32_t> tests;                 // test files to run (path asc) — the --affected answer
+    std::vector<TestRow>       testRows;              // H2H-Graft F1: tests to run in EVIDENCE order, each with why
+    std::vector<std::uint32_t> tests;                 // the same rows as file ids, same order — the --affected answer
     ShellGateIndex             shellGates;            // registered shell gates with exact dependency evidence
     std::vector<NodeId>        untested;              // impacted symbols reached by NO test (ccx desc, file asc, name asc)
     bool                       hasObligations  = false; // !tests.empty() || !untested.empty()
@@ -815,14 +823,15 @@ inline TestGateResult computeTestGateFor( const IngestResult& ing, const Graph& 
 
     // blast radius — the ONE traversal (reused, not re-implemented): everything that transitively reaches the
     // changed symbols. Coverage — the forward dual from every test-file symbol (what the tests transitively call).
-    const std::vector<NodeId> reach = transitiveCallers( g, changedSyms );
+    std::vector<std::uint32_t> gateDepth;   // H2H-Graft F1: hops per reached node, for the <t> rows
+    const std::vector<NodeId>  reach = transitiveCallersDepth( g, changedSyms, &gateDepth );
 
     const std::vector<char>  ownedReach = testReachIn ? std::vector<char>{} : testSeedForwardReach( ing, g );
     const std::vector<char>& testReach  = testReachIn ? *testReachIn : ownedReach;
 
-    // tests to run — the test files among the impacted set (= --affected). untested — impacted, non-changed,
-    // non-test symbols that no test transitively reaches.
-    std::vector<char> testFileSeen( F, 0 );
+    // tests to run — EVIDENCE order (F1, testmap.h::rankTestRows; a changed test file is an obligation on its own
+    // evidence — it used to be skipped as "the change"). untested — impacted, non-changed, non-test, no test reaches.
+    const ChangedFileSplit gateSplit = splitChangedFilesOfSymbols( ing, changedSyms );
     for( NodeId n : reach )
     {
         const std::uint32_t f = ing.symbols[n].fileId;
@@ -831,10 +840,16 @@ inline TestGateResult computeTestGateFor( const IngestResult& ing, const Graph& 
             continue; // the changed symbols are the change, not its radius
         }
         ++r.impactedSymbols;
-        if( isTestPath( ing.files[f] ) ) { if( !testFileSeen[f] ) { testFileSeen[f] = 1; r.tests.push_back( f ); } }
-        else if( !testReach[n] )         { r.untested.push_back( n ); }
+        if( !isTestPath( ing.files[f] ) && !testReach[n] )
+        {
+            r.untested.push_back( n );
+        }
     }
-    std::sort( r.tests.begin(), r.tests.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
+    r.testRows = rankTestRows( ing, reach, gateDepth, &isChangedSym, gateSplit.src, gateSplit.tests );
+    for( const TestRow& row : r.testRows )
+    {
+        r.tests.push_back( row.fileId );
+    }
     std::sort( r.untested.begin(), r.untested.end(), [ & ]( NodeId a, NodeId b )
                {
                    if( ing.symbols[a].ccx != ing.symbols[b].ccx )
@@ -1065,8 +1080,11 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     // sentence defining it, which is what test/legendcoveragecheck.sh asserts.
     const bool        tgHasRows  = ( testRows > 0 || !r.untested.empty() );
     const std::string tgRootAttr = ( root.empty() || !tgHasRows ) ? std::string() : ( " root=\"" + ex( root ) + "\"" );
-    std::fprintf( out, "<!-- %s%s%s-->%s", kTestGateLegend,
-                  tgHasRows ? kTestGateRowLegend : "", tgHasRows ? kTestGateRunLegend.c_str() : "",
+    // H2H-Graft F1: the evidence clause (testmap.h's ONE wording) rides the rows-gated half, like the run= rule.
+    std::fprintf( out, "<!-- %s%s%.*s%s-->%s", kTestGateLegend,
+                  tgHasRows ? kTestGateRowLegend : "",
+                  tgHasRows ? int( kTestRowEvidenceLegend.size() ) : 0, kTestRowEvidenceLegend.data(),
+                  tgHasRows ? kTestGateRunLegend.c_str() : "",
                   rw::rootRelPathsLegend( !tgRootAttr.empty() ) );
     // §P11.4: this gate EXITS 4 on the obligation, so its rows carry the command that discharges it — where
     // one is derivable. Absent run= = not derivable (testmap.h states why a fallback would be a lie).
@@ -1083,9 +1101,10 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
                   pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
                   gitstamp::atAttr( root ).c_str(), tgRootAttr.c_str(),
                   nextAttrXml( testGateNextInvocation( ing, r, gateRunners ) ).c_str() );   // P3 (L7)
-    for( std::uint32_t f : r.tests )
+    for( const TestRow& row : r.testRows )
     {
-        std::fprintf( out, "<t p=\"%s\"%s/>", ex( tgPathRel( f ) ).c_str(), runAttrDisclosed( gateRunners, f, ex ).c_str() );
+        std::fprintf( out, "<t p=\"%s\"%s%s/>", ex( tgPathRel( row.fileId ) ).c_str(), testRowEvidence( row, EvDialect::Xml ).c_str(),
+                      runAttrDisclosed( gateRunners, row.fileId, ex ).c_str() );
     }
     for( const ShellGateObligation& gate : r.shellGates.obligations )
     {
@@ -1152,10 +1171,10 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
                  nextFieldJson( testGateNextInvocation( ing, r, gateRunnersJ ) ).c_str() );   // P3 (L7): the XML twin's next=
     const TestRunnerIndex gateRunners( ing );                       // §P11.4, the JSON sibling of the XML run=
     const auto            jesc = []( std::string_view s ) { return jsonStr( s ); };
-    for( std::size_t i = 0; i < r.tests.size(); ++i )
+    for( std::size_t i = 0; i < r.testRows.size(); ++i )
     {
-        std::fprintf( out, "%s{\"p\":\"%s\"%s}", i == 0 ? "" : ",", jsonStr( tgJPathRel( r.tests[i] ) ).c_str(),
-                      runFieldJsonDisclosed( gateRunners, r.tests[i], jesc ).c_str() );
+        std::fprintf( out, "%s{\"p\":\"%s\"%s%s}", i == 0 ? "" : ",", jsonStr( tgJPathRel( r.testRows[i].fileId ) ).c_str(),
+                      testRowEvidence( r.testRows[i], EvDialect::Json ).c_str(), runFieldJsonDisclosed( gateRunners, r.testRows[i].fileId, jesc ).c_str() );
     }
     for( std::size_t i = 0; i < r.shellGates.obligations.size(); ++i )
     {

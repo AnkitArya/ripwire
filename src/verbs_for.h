@@ -801,10 +801,12 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     const JsonSigLens lens{ /*metrics=*/true, in.fanIn, in.impure, in.churnPerFile, in.cloneMember,
                             in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex };
     JsonSigNoteCounts noteCounts;
-    const auto packSigs = [ & ]( std::FILE* dst, std::size_t budget, bool* outCapped, std::size_t* outDroppedPositive )
+    const auto packSigs = [ & ]( std::FILE* dst, std::size_t budget, bool* outCapped, std::size_t* outDroppedPositive,
+                                 std::vector<rw::NodeId>* outShownIds )
     { packSignaturesJson( dst, in.ing, in.rank, in.topN, lens, in.redact, in.packBudgetBytes, budget, outCapped, &noteCounts,
                           in.rootArg, /*hasRelevanceFloor=*/true,        // LB-A: same admission rule as the XML twin (R-R: root-relative p/id)
-                          outDroppedPositive ); };                      // A2: exact count, see droppedPositiveCount (serialize.h)
+                          outDroppedPositive,                            // A2: exact count, see droppedPositiveCount (serialize.h)
+                          outShownIds ); };                              // lane 2: the emitted rows' ids — the tail excludes these files
 
     // §B1.4: built once, used on both the degrade path below and the normal return — these three are plain
     // size_t values already computed by the caller (no rendering, no redaction seam), so unlike est_tokens
@@ -831,6 +833,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
 
     bool        sigsCapped         = false;
     std::size_t sigsDroppedPositive = 0;   // A2: set only by the memstream-buffered render below (nullptr on the ENOMEM degrade path)
+    std::vector<rw::NodeId> jsonShownIds;   // lane 2: the sigs rows actually emitted (the XML twin's shownSigIds)
     std::string sigsJson;
     {
         char*       jbuf = nullptr;
@@ -846,11 +849,11 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
             std::fwrite( surfaceCountsStanza.data(), 1, surfaceCountsStanza.size(), out );
             std::fwrite( tailStanza.data(), 1, tailStanza.size(), out );                   // the tail survives too (plain strings, nothing to fail)
             std::fputs( ",\"sigs\":", out );
-            packSigs( out, 0, nullptr, nullptr );
+            packSigs( out, 0, nullptr, nullptr, nullptr );
             std::fputs( "}", out );
             return 0;
         }
-        packSigs( jm, sigsBudget, &sigsCapped, &sigsDroppedPositive );
+        packSigs( jm, sigsBudget, &sigsCapped, &sigsDroppedPositive, &jsonShownIds );
         std::fflush( jm );  std::fclose( jm );
         if( jbuf ) { sigsJson.assign( jbuf, jsz );  std::free( jbuf ); }
     }
@@ -884,7 +887,9 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     const std::string budgetStanza      = forLensJsonBudgetStanza( in.tokenBudget );   // R1
 
     // DEEP-TAIL, explicit-regime fit (forLensJsonTailStanza above): residual-funded, sigs untouched.
-    tailStanza = forLensJsonTailStanza( *in.fileTail, in.tokenBudget, ceilingAllowance,
+    // lane 2: same rule as the XML twin — the tail excludes the files of the rows actually emitted, not the whole surface
+    const rw::FileTail jsonTail = rw::computeFileTail( in.ing, in.rank, jsonShownIds, in.rootArg );
+    tailStanza = forLensJsonTailStanza( jsonTail, in.tokenBudget, ceilingAllowance,
                                         header.size() + sigsJson.size() + notesStanza.size()
                                             + surfaceCountsStanza.size() + envelopeTextBytes
                                             + budgetStanza.size() );
@@ -1748,7 +1753,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         // DEEP-TAIL d2: the file-grain tail candidates — one shared walk (serialize.h computeFileTail) for
         // both dialects, computed from the SAME resolved surface <sigs> selects, so the two dialects (and
         // the MCP twin, which calls the same function) cannot select different tails.
-        const FileTail forFileTail = computeFileTail( ing, lensRank, lensSurfaceIds, flRootArg );
+        const FileTail forFileTail = computeFileTail( ing, lensRank, lensSurfaceIds, flRootArg );   // the DEGRADE paths' tail (surface = head)
+        // H2H-Graft lane 2 (2026-09-07): the tail served must exclude only the files of the sigs rows actually
+        // EMITTED. Excluding the whole 40-candidate surface left every row the byte ladder trimmed (rank 5..40)
+        // in neither section: on rocksdb, three single-file answers at candidate rank 5/10/5 were served nowhere.
+        std::vector<NodeId> shownSigIds;
 
         // L2: --json — the ranking ("sigs") bundle, plus (§B1.4) a COUNT of what <lego>/<compose>/<routes>
         // would have held on this same surface. They still stay XML-only — rendering them for real would
@@ -2007,7 +2016,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 notesPtr,                                    // L3: field-notes surfacing (inert when null)
                                 flRootArg,                                   // R-E: root-relative p=
                                 /*hasRelevanceFloor=*/true,                  // LB-A: shrink past the zero-score tail, never pad
-                                &forDroppedPositive );                       // A2: exact count, see droppedPositiveCount
+                                &forDroppedPositive,                         // A2: exact count, see droppedPositiveCount
+                                &shownSigIds );                              // lane 2: the rows actually emitted — the tail excludes THESE files
                 std::fflush( sm );  std::fclose( sm );
                 if( sbuf ) { sigsStr.assign( sbuf, ssz );  std::free( sbuf ); }
                 sigsPreRendered = true;
@@ -2155,7 +2165,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         // default regime by construction (nothing above charges these bytes), and under a hard ceiling the
         // weakest-evidence section is the one that trims. The pre-ladder headerStr sizes the residual (a
         // ladder rung can only SHRINK the header, so the fit stays conservative and deterministic).
-        const std::string tailStr = renderForFileTailXml( forFileTail, cfg.tokenBudget, bundleBudget,
+        const FileTail    forFileTailShown = sigsPreRendered ? computeFileTail( ing, lensRank, shownSigIds, flRootArg ) : forFileTail;
+        const std::string tailStr = renderForFileTailXml( forFileTailShown, cfg.tokenBudget, bundleBudget,
                                                            headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                                                + routeStr.size() + graphSection.xml.size() + detailSection.xml.size()
                                                                + autoSection.xml.size() + autoAttr.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve );

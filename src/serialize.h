@@ -18,6 +18,7 @@
 #include "sarif.h"       // R-E (2026-08-17): rootRelativeUri/rootPrefixOf — the same root= single-root-only
                           // strip --grep's emitGrepReport uses, reused here so the two verbs cannot diverge
 #include "prconverge.h" // W2-F: RankDisclosure + the pr_iters= / pr_converged= spellings (CLI and MCP share them)
+#include "gitmine.h"    // F3 (H2H-Graft): RecentFile — the map's <recent> rows are the churn-decay miner's own product
 
 #include <algorithm>
 #include <cstdint>
@@ -910,14 +911,14 @@ inline std::string renderFileTailJson( const FileTail& t, std::size_t shownCap )
 // dialect subtracts EXACTLY the bytes the clause adds (the kForAutoBundleLegend pattern). No "--" anywhere:
 // it rides inside an XML comment where "--" is ill-formed (G4).
 inline constexpr std::string_view kForFileTailLegend =
-    "; tail: file-grain tail, WEAKER evidence than the ranked rows (paths only): the remaining candidate "
-    "files with a positive score, best-symbol rank order; rows are t p=file; total=candidate files, "
+    "; tail: file-grain tail, WEAKER evidence than the ranked rows (paths only): every positive-score file "
+    "NOT among the shown sigs rows — the files of trimmed rows first, best-symbol rank order; rows are t p=file; total=such files, "
     "shown=printed, capped=1 when they differ. r= on a ranked row is its 1-based rank in this lens ranking, "
     "rows in r= order, p= the file (a gap = a budget-trimmed row)";
 // P1 (L7): the same two definitions for the compact dialect (verbs_for.h appendCompactForLegend) — nothing dropped,
 // the sentences shortened: the tail is file-grain and weaker, its counts are total/shown/capped, r= is the rank.
 inline constexpr std::string_view kForFileTailLegendCompact =
-    "; tail: file-grain tail (paths only, WEAKER than the ranked rows): <t p=> rows, total=/shown=/capped=1 when cut; "
+    "; tail: file-grain tail (paths only, WEAKER than the ranked rows): every positive-score file not among the shown sigs rows, trimmed rows' files first; <t p=> rows, total=/shown=/capped=1 when cut; "
     "r= = a ranked row's 1-based lens rank, rows in r= order, p= the file (a gap = a budget-trimmed row)";
 
 // Explicit-budget row fit: the largest shown count whose rendered XML fits `budgetBytes` (0 rows always
@@ -1386,6 +1387,11 @@ inline std::string overloadsAttr( std::uint32_t n )
 // and a 25th would have been indistinguishable from the 24th at the call site. Defaulted ⇒ every field
 // null ⇒ `<r>` stays exactly `<r>`, zero token cost, byte-identical golden map, and — the house rule this
 // exists to protect — NO git subprocess is ever added to the bare default path.
+// H2H-Graft F3 (2026-09-07): the map's <recent> rows are gitmine.h's RecentFile — the file-level "what changed
+// recently" answer that rank_by=churn-decay computes and, until now, threw away behind a 200-symbol map.
+// Head-to-head vs Graft on rocksdb, the six "what changed recently in <dir>" questions: the verb emitted 35 KB
+// of symbols on every one and a random path list at the same budget named more of the gold. A file with the
+// newest decayed weight is the answer's natural grain; the symbol map stays, this rides in front of it.
 struct MapAnnotations
 {
     // NOTE — the three fields below are initialized POSITIONALLY at the call site (main.cpp's mapAnn), so any
@@ -1470,8 +1476,33 @@ struct MapAnnotations
         std::uint32_t fanoutCut      = 0;       // symbols the fanout cap dropped that are absent from the whole answer (exact)
         bool          depthTruncated = false;   // ≥1 symbol one hop past the last emitted hop is absent
     };
+    // F3 (H2H-Graft): rank_by=churn-decay's file-level <recent> rows; null/empty ⇒ absent, byte-free. Positional
+    // slots 8 and 9 at main.cpp's mapAnn (seed below is filled by assignment, never positionally).
+    const std::vector<RecentFile>* recent   = nullptr;
+    std::size_t                    recentOf = 0;
     SeedDisclosure seed{};
 };
+
+// F3: the <recent> element — rank_by=churn-decay's file-level answer FIRST, paths + age in days at HEAD's clock +
+// decayed weight — written before the first <f> group so "what changed recently" is answered before the symbol
+// map, not buried behind it. Absent (byte-free) on every other map and under multi-root.
+template <typename PathRel>
+inline void writeRecentRows( XmlWriter& w, const MapAnnotations& ann, const PathRel& pathRel, std::vector<char>& esc )
+{
+    if( !ann.recent || ann.recent->empty() )
+    {
+        return;
+    }
+    char rc[ 64 ];
+    std::snprintf( rc, sizeof rc, "<recent n=\"%zu\" of=\"%zu\">", ann.recent->size(), ann.recentOf );
+    w.write( rc );
+    for( const RecentFile& r : *ann.recent )
+    {
+        std::snprintf( rc, sizeof rc, "\" age_d=\"%u\" w=\"%.3g\"/>", r.ageDays, r.weight );
+        w.write( "<rc p=\"" );  w.write( escapeXml( pathRel( r.fileId ), esc ) );  w.write( rc );
+    }
+    w.write( "</recent>" );
+}
 
 // ---- C2 (harvest B): the seeded map's BITE disclosure, attribute half and legend half -------------------
 // Kept beside each other and out of serialize() so the pair can never drift: an attribute this tool emits
@@ -1600,7 +1631,9 @@ inline constexpr const char* kChurnDecayRankLegend =
     "k= is PageRank re-run with the teleport biased by this decayed prior instead of the uniform one "
     "rank_by=pagerank uses, or the undecayed one rank_by=churn uses; top ranks can coincide with either "
     "sibling when structure and recent churn agree, and diverge where a stale-but-central symbol meets a "
-    "fresh, sparsely-called one -->";
+    "fresh, sparsely-called one. recent: the file-level answer to what changed recently, FIRST — the n= files the "
+    "NEWEST commits touched, of the of= files any commit touched, as rc p= age_d= (days since the file's newest "
+    "commit, at HEAD's clock) w= (its decayed weight), age_d asc then w desc then path; absent under multi-root -->";
 
 // Which churn legend belongs to which churn ranker — the table-driven form the sibling rankBy lookup uses,
 // so a third churn variant adds a row and not a branch.
@@ -2245,6 +2278,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             w.write( "\"/>" );
         }
     }
+    writeRecentRows( w, ann, pathRel, esc );   // F3: rank_by=churn-decay's file-level answer, before the symbol map
     for( std::uint32_t f : fileOrder )
     {
         w.write( "<f p=\"" );  w.write( escapeXml( pathRel( f ), esc ) );  w.write( "\"" );
@@ -3366,6 +3400,26 @@ inline void trimSigLadder( std::vector<EntryT>& entries, std::vector<FileT>& fil
 // test/fixedbufsweep.sh's population sweep instead: a new sig/body emitter shows up there as an
 // unclassified site. Reordering the parameter list is the real fix and belongs to a round that owns all four
 // files at once.
+// H2H-Graft lane 2 (2026-09-07): the ids of the sigs rows a packer actually EMITTED, in emitted order — ONE
+// mapping for both dialects (globalRank is 1-based into the packer's (score desc, id asc) `order`). The file-grain
+// tail used to exclude every file of the 40-candidate SURFACE, so a row the byte ladder trimmed (rank 5..40)
+// appeared in neither section: on rocksdb three single-file answers at candidate rank 5/10/5 were served
+// nowhere. The tail now excludes only the files of these rows (computeFileTail's headIds).
+inline void resetShownSigIds( std::vector<NodeId>* shownIdsOut )
+{
+    if( shownIdsOut )
+    {
+        shownIdsOut->clear();
+    }
+}
+inline void pushShownSigId( std::vector<NodeId>* shownIdsOut, const std::vector<NodeId>& order, std::uint32_t globalRank )
+{
+    if( shownIdsOut && globalRank >= 1 && globalRank <= order.size() )
+    {
+        shownIdsOut->push_back( order[ globalRank - 1 ] );
+    }
+}
+
 inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                             int topN, std::size_t budgetBytes,
                             bool metrics = false, const std::vector<std::uint32_t>* fanIn = nullptr,
@@ -3390,7 +3444,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                             bool hasRelevanceFloor = false,  // LB-A: drop the zero-score TAIL of the kept head rather
                                                              //   than padding the quota with it (relevanceFlooredKeep
                                                              //   above). Off ⇒ byte-identical to the pre-LB-A path.
-                            std::size_t* droppedPositiveOut = nullptr )   // A2 (survey card, 2026-09-03): how many
+                            std::size_t* droppedPositiveOut = nullptr,   // A2 (survey card, 2026-09-03): how many
                                                              //   POSITIVE-scored candidates (rank>0) within the kept
                                                              //   head never reached the emitted <sigs> — cut either
                                                              //   by the collection-phase byte budget or by the H1
@@ -3398,11 +3452,15 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                              //   (no extra cost). Only meaningful on the rank-adaptive
                                                              //   ladder path below; left at 0 on every other path —
                                                              //   see droppedPositiveCount above for the shared arithmetic.
+                            std::vector<NodeId>* shownIdsOut = nullptr )   // lane 2 (2026-09-07): the ids of the rows this call
+                                                             //   EMITTED, emitted order — see pushShownSigId. nullptr ⇒ not
+                                                             //   wanted. Filled on the flat lens path only.
 {
     if( droppedPositiveOut )
     {
         *droppedPositiveOut = 0;   // default: unset until the ladder path (below) computes the real count
     }
+    resetShownSigIds( shownIdsOut );
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F1): the MCP `for` verb has no byte budget, and 0 must never mean
     // "cap at zero bytes" (the cap fired before the first signature and emitted a bare <sigs></sigs>).
     // Matches buildRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
@@ -3735,6 +3793,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             {
                 continue;
             }
+            pushShownSigId( shownIdsOut, order, e.globalRank );   // lane 2
             w.write( e.head.c_str() );
             if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
             w.write( escapeXml( e.sig, esc ) );
@@ -7163,8 +7222,9 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
                                 bool hasRelevanceFloor = false,            // LB-A: the XML sibling's own admission rule,
                                                                            //   shared through relevanceFlooredKeep so the
                                                                            //   two dialects cannot select differently.
-                                std::size_t* droppedPositiveOut = nullptr ) // A2: the XML sibling's own out-param —
+                                std::size_t* droppedPositiveOut = nullptr, // A2: the XML sibling's own out-param —
                                                                            //   see packSignatures for the full contract.
+                                std::vector<NodeId>* shownIdsOut = nullptr ) // lane 2: the emitted rows' ids — see packSignatures
 {
     const bool rankAdaptivePayload = lens.rankAdaptivePayload;
     if( outCapped )
@@ -7175,6 +7235,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     {
         *droppedPositiveOut = 0;
     }
+    resetShownSigIds( shownIdsOut );
     if( outNotes )
     {
         *outNotes = JsonSigNoteCounts {};
@@ -7280,6 +7341,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         {
             continue;
         }
+        pushShownSigId( shownIdsOut, order, e.globalRank );   // lane 2: same mapping as the XML twin
         if( !first )
         {
             w.write( "," );

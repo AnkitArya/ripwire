@@ -99,6 +99,10 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-09-07 (head-to-head vs Graft, lane 2): both goldens +33 B, the tail legend clause only — the
+# file-grain tail now excludes the files of the sigs rows actually SHOWN instead of the whole 40-candidate
+# surface, and the clause defining the tail says so. Verified before re-pinning: with every comment and
+# est_tokens= normalized out, old and new documents are byte-identical on both fixtures.
 # RE-PIN 2026-09-05 (capture-audit wave-3 merge, L7 + V2): docdemotegolden_for.xml 5280 -> 5279 B (-1 B,
 # est_tokens="2112" UNCHANGED). Both lanes re-pinned this golden on their own trees: L7 (e2bbf64) for P3's
 # top-row next= (+43 B, est_tokens 2095 -> 2112) and V2 (77004e5) for F6's trailing "]" trim (-1 B). The merged

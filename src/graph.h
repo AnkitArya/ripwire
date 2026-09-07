@@ -4541,11 +4541,20 @@ inline std::vector<NodeId> shortestPath( const Graph& g, NodeId src, NodeId dst 
 //      Powers --impact (one seed symbol) and --affected (all symbols in the changed files). -------------
 // A SPAN at the seam (CONTRIBUTING §3): the seed list arrives as a std::vector from --impact/--affected and
 // as a per-file rw::SmallVec bucket from --pr-context. Both are contiguous; neither is copied.
-inline std::vector<NodeId> transitiveCallers( const Graph& g, std::span<const NodeId> seeds )
+// H2H-Graft F1 (2026-09-07): `depthOut`, when given, receives the depth at which each node was first reached
+// (per node; 0 = a seed or never reached). The seeds are the only depth-0 nodes and they are not in the
+// returned list, so a consumer reading depthOut for a returned node always sees >= 1 — which is what lets a
+// tests-to-run row say hops="1" (the test calls a changed symbol directly) rather than merely "reaches". ONE
+// walk, not a second BFS: a depth that disagreed with reachability by one edge would be invisible to every
+// gate that only checks the reached SET.
+inline std::vector<NodeId> transitiveCallersDepth( const Graph& g, std::span<const NodeId> seeds, std::vector<std::uint32_t>* depthOut )
 {
-    const std::size_t   N = g.wOutDeg.size();
-    std::vector<char>   seen( N, 0 );
-    std::vector<NodeId> q;
+    const std::size_t          N = g.wOutDeg.size();
+    std::vector<char>          seen( N, 0 );
+    std::vector<NodeId>        q;
+    std::vector<std::uint32_t> localDepth;                                  // the walk always keeps depth; a caller that
+    std::vector<std::uint32_t>& depth = depthOut ? *depthOut : localDepth;  // wants it hands in the vector it lands in
+    depth.assign( N, 0 );
     for( NodeId s : seeds )
     {
         if( s < N && !seen[s] )
@@ -4561,12 +4570,21 @@ inline std::vector<NodeId> transitiveCallers( const Graph& g, std::span<const No
     {
         const NodeId u = q[ head ];
         for( std::uint32_t k = ro[u]; k < ro[u + 1]; ++k )
-        { const NodeId c = ci[k]; if( c < N && !seen[c] ) { seen[c] = 1; q.push_back( c ); } }
+        {
+            const NodeId c = ci[k];
+            if( c < N && !seen[c] )
+            {
+                seen[c]  = 1;
+                depth[c] = depth[u] + 1;
+                q.push_back( c );
+            }
+        }
     }
     std::vector<NodeId> out( q.begin() + nSeed, q.end() );   // reached, minus the seeds
     std::sort( out.begin(), out.end() );
     return out;
 }
+inline std::vector<NodeId> transitiveCallers( const Graph& g, std::span<const NodeId> seeds ) { return transitiveCallersDepth( g, seeds, nullptr ); }
 
 // symbols transitively reachable FROM `seeds` via OUT-edges (everything the seeds call, transitively) — the
 // forward dual of transitiveCallers. Returns a per-node mask (seeds included). Used by --seams as testReach:
