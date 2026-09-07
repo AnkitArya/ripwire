@@ -1841,6 +1841,57 @@ constexpr double         kMaxCacheBlobAgeDays = 30.0;
 constexpr std::uintmax_t kMaxCacheDirBytes    = 2ull * 1024 * 1024 * 1024;   // 2 GB
 constexpr std::size_t    kMaxCacheBlobCount   = 4096;                         // bound every future hygiene scan
 
+// 2026-09-06 stranger audit: the advisory edit locks (mcpedit.h editLockPath — <cacheDir>/locks/<xx>/ripwire-edit-
+// <hash>.lock, one per distinct target path ever edited) are deliberately never unlinked by their holder, and the
+// blob sweep above deliberately never enters locks/. Nothing else did either: one machine had 45,765 of them.
+// A lock file is reclaimable when nobody holds it — flock(LOCK_EX|LOCK_NB) succeeding IS that test — and it
+// is old enough that a fresh open is unlikely to be racing us; the age bound keeps a lock created seconds ago
+// by a peer that has not yet flock'd it out of reach. The residual (a peer opens the path between our unlink
+// and our close, and a third process then opens a new inode) is the same window mcpedit.h already documents
+// as covered by its re-check-before-rename; the lock is the fast path, never the correctness floor.
+constexpr double kMaxEditLockAgeDays = 1.0;
+
+inline std::vector<std::string> staleEditLockPaths( const std::string& dir )
+{
+    namespace fs = std::filesystem;
+    std::vector<std::string> stale;
+    std::error_code          ec;
+    const auto               now = fs::file_time_type::clock::now();
+    fs::recursive_directory_iterator it( fs::path( dir ) / "locks", fs::directory_options::skip_permission_denied, ec ), end;
+    for( ; !ec && it != end; it.increment( ec ) )
+    {
+        std::error_code   sec;
+        const std::string name = it->path().filename().string();
+        if( name.rfind( "ripwire-edit-", 0 ) != 0 || !it->is_regular_file( sec ) || sec )
+        {
+            continue;
+        }
+        const auto mt = fs::last_write_time( it->path(), sec );
+        if( !sec && std::chrono::duration<double>( now - mt ).count() / 86400.0 >= kMaxEditLockAgeDays )
+        {
+            stale.push_back( it->path().string() );
+        }
+    }
+    return stale;
+}
+
+inline void sweepStaleEditLocks( const std::string& dir )
+{
+    for( const std::string& path : staleEditLockPaths( dir ) )
+    {
+        const int fd = ::open( path.c_str(), O_RDWR );
+        if( fd < 0 )
+        {
+            continue;
+        }
+        if( ::flock( fd, LOCK_EX | LOCK_NB ) == 0 )
+        {
+            ::unlink( path.c_str() );   // unheld and old: reclaim; a later editor recreates it on demand
+        }
+        ::close( fd );
+    }
+}
+
 inline void sweepStaleCacheBlobsOnce( const std::string& dir, const std::string& keepPath )
 {
     static std::atomic<bool> swept{ false };
@@ -1851,6 +1902,7 @@ inline void sweepStaleCacheBlobsOnce( const std::string& dir, const std::string&
     }
 
     evictOldCacheFamily( dir, "ripwire-", keepPath, kMaxCacheBlobCount, kMaxCacheBlobAgeDays, kMaxCacheDirBytes );
+    sweepStaleEditLocks( dir );
 }
 
 // The HEAD-snapshot INGEST cache family (ripwire-qheadsnap-<repoHex>-<exclHex>-<sha>.bin), capped per (repo,excl).

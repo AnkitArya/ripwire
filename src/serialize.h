@@ -1541,7 +1541,7 @@ inline const char* rankByLegendFor( const char* label ) noexcept
 // them — the §B7 shape, spread over eight surfaces. A shared constant rather than eight sentences, so the
 // definition cannot drift into eight wordings the way the truncation vocabulary did before §P8.
 inline constexpr const char* kAtStampLegend =
-    "<!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree "
+    "<!-- at= is the git commit these numbers were computed at; a trailing +shallow means the clone's history is truncated (a depth-limited clone: churn counts only the commits present), and a trailing +dirty means the working tree "
     "differed from that commit, so the numbers describe the tree, not the commit -->";
 
 // §A9.6 — the churn-ranked map's own legend clause, emitted ONLY on that path. The v1 legend is a fixed

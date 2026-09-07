@@ -1915,7 +1915,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               claim the doc is CURRENT and never marks a record.\n"
         "                               NOT CHECKED AT ALL: prose, Status lines, dates, 'N of M done' tallies, and whether a\n"
         "                               code block's body is still correct. Always exits 0 — a report, not a gate.\n"
-        "                               Root element carries at=\"<sha>[+dirty]\" (omitted on a non-git root) — the commit these\n"
+        "                               Root element carries at=\"<sha>[+dirty][+shallow]\" (omitted on a non-git root) — the commit these\n"
         "                               counts were computed against, so a number quoted from this report stays comparable\n"
         "                               across a HEAD that moves mid-session.\n"
         "    --doc-drift --gateability  turn \"CI stays non-gating\" into a finishable to-do list: for every doc that STILL has a\n"

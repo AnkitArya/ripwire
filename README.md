@@ -32,11 +32,14 @@ reading this page:
 
 ```bash
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
-ripwire . --for="incremental cache invalidation"
+export PATH="$HOME/.local/bin:$PATH"      # where it installed; the installer prints this line if you need it
+cd your-repo
+ripwire . --for="<the change you are about to make, in words>"
 ```
 
 One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks, and
-the tests that reach them. Run on this repository (2026-08-30), that second line answers in about
+the tests that reach them. The task is yours to phrase — ask about *your* code, not ours. Run on this
+repository (2026-08-30) with `--for="incremental cache invalidation"`, that last line answers in about
 4.3K tokens with:
 
 - **The ranked symbols, in rank order** — the cache-header constant `kCacheMagic` first (with its doc
@@ -49,6 +52,9 @@ the tests that reach them. Run on this repository (2026-08-30), that second line
   `exclConfigHex`; no second query needed to see the neighbourhood.
 - **Its own confidence** — this answer says `confidence="high"` with the score margin attached; a
   flat ranking says `low`, so it reads as a starting point instead of masquerading as an answer.
+  `confidence=` measures how clearly the ranking separates its head from the rest, not whether the
+  head is what you meant: ask a repository about a concept it does not contain and the best lexical
+  matches still rank, confidently. Phrase the task in your code's own words.
 
 ### If it works on your codebase, tell us what it got wrong
 
@@ -649,6 +655,7 @@ activation one-liner is printed instead:
 
 ```bash
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
+export PATH="$HOME/.local/bin:$PATH"      # not on PATH by default on macOS or most Linux shells; add it to your rc file
 ```
 
 **Building it yourself needs CMake 3.24+ and a C++23 compiler, and nothing else installed first** —

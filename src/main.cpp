@@ -1487,8 +1487,14 @@ int runDefaultMap( const MainDispatch& d )
                 return 1;
             }
         }
-        writeHtml( htmlOut, ing, rank, g, mapTopK,
-                   HtmlColorExtras{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy, kHtmlChurnWindow, cfg.rankBy }, mapRootArg );   // R-R
+        // 2026-09-06 stranger audit: the page names what it maps (last path segment only — the path itself never
+        // reaches the page), anchors to the commit like every XML root does, and says which binary drew it.
+        HtmlColorExtras       htmlColor{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy, kHtmlChurnWindow, cfg.rankBy };
+        const HtmlProvenance  htmlProv = htmlProvenanceFor( root, multiRoot );
+        htmlColor.atStamp  = htmlProv.atStamp;
+        htmlColor.rootName = htmlProv.rootName;
+        htmlColor.version  = kRipwireVersion;
+        writeHtml( htmlOut, ing, rank, g, mapTopK, htmlColor, mapRootArg );   // R-R
         if( htmlOut != stdout )
         {
             std::fclose( htmlOut );
