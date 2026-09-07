@@ -193,6 +193,7 @@ data = re.sub(r"(n0\[\")[^\"]*(<br/>)", r"\1@R@\2", data)            # --mermaid
 # fixtures here are named "a" and "d", so that is identity, not depth. Neutralise the name, never the path: the
 # path envelope (const ROOT) is still held to exactly one anchor by ARM5.
 data = re.sub(r"const ROOT_NAME = \"[^\"]*\"", "const ROOT_NAME = \"@NAME@\"", data)
+data = re.sub(r"const ROOT = \"[^\"]*\"", "const ROOT = \"@NAME@\"", data)          # since 2026-09-06 a two-segment label ('…/parent/name'), never the path
 data = re.sub(r"(<title>|<h1>)ripwire — [^<]*", r"\1ripwire — @NAME@", data)
 sys.stdout.write(data)
 ' "$1"; }

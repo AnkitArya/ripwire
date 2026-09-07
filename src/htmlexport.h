@@ -131,15 +131,23 @@ inline std::string stripHomePair( std::string_view root )
         }
     }
 
-    if( dropCount == 0 )
+    // 2026-09-06 stranger audit: a root with no home pair used to be emitted VERBATIM — a checkout under
+    // /Volumes, /srv, /work or a symlinked home shipped its whole absolute path into a page whose only use of
+    // ROOT is the caption's last-two-segments label. Nothing on the page needs more than that label, so the
+    // envelope IS the label now: the last two segments, with an ellipsis when anything was cut. The JS
+    // rootShort() is idempotent over this shape.
+    std::size_t begin    = first + dropCount;
+    bool        elided   = false;
+    if( parts.size() - begin > 2 )
     {
-        return std::string( root );                 // nothing to hide — keep the spelling as typed
+        begin  = parts.size() - 2;
+        elided = true;
     }
 
-    std::string out;
-    for( std::size_t i = first + dropCount; i < parts.size(); ++i )
+    std::string out = elided ? std::string( "\xE2\x80\xA6/" ) : std::string();
+    for( std::size_t i = begin; i < parts.size(); ++i )
     {
-        if( !out.empty() )
+        if( i != begin )
         {
             out += '/';
         }

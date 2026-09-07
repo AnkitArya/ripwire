@@ -2624,6 +2624,42 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
 // payload byte untouched), and written to the real stdout. Exit codes pass through unchanged. A run that
 // produced no XML root (a refusal already happened, or a text verb slipped past validateLegendModifier's
 // list) is refused here naming the flag — never served as if the posture had applied.
+// 2026-09-06 stranger audit: a root that exists but cannot be opened (chmod 000, another user's checkout) came
+// back as an EMPTY map at exit 0 — indistinguishable from "no source here". Probe the directory the way the
+// crawl will; refuse with the reason instead of serving nothing. A non-directory root is left to the crawl.
+static bool rootIsReadable( const std::string& resolvedRoot )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if( !fs::is_directory( fs::path( resolvedRoot ), ec ) || ec )
+    {
+        return true;
+    }
+    fs::directory_iterator probe( fs::path( resolvedRoot ), ec );
+    if( !ec )
+    {
+        return true;
+    }
+    std::fprintf( stderr, "ripwire: root path cannot be read: %s (%s) — fix its permissions, or point at a directory you can open\n",
+                  resolvedRoot.c_str(), ec.message().c_str() );
+    return false;
+}
+
+// 2026-09-06 stranger audit: --cache=<a directory> read as "corrupt", wrote nothing, and served a byte-identical
+// map at exit 0 — the fixed --cache=<nonexistent dir> bug's twin. The flag names a FILE; say so, with the form.
+static bool cachePathIsDirectory( const std::string& cachePath )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if( !fs::is_directory( fs::path( cachePath ), ec ) || ec )
+    {
+        return false;
+    }
+    std::fprintf( stderr, "ripwire: --cache=%s: that is a directory; --cache names the blob FILE to read and write, e.g. --cache=%s/ripwire.bin\n",
+                  cachePath.c_str(), cachePath.c_str() );
+    return true;
+}
+
 static int dispatchMain( const rw::Config& cfg, char** argv );
 
 // the key for a SHARED root (`r` = the map family, `ctx` = the bundle family), from the flags that shaped it
@@ -3317,6 +3353,10 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                 }
                 return 1;
             }
+            if( !rootIsReadable( resolvedRoot ) )
+            {
+                return 1;   // the refusal is on stderr (rootIsReadable)
+            }
         }
         resolvedRoots.push_back( resolvedRoot );
     }
@@ -3415,6 +3455,10 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         // The file need not EXIST — a cold first run is the normal case — but the directory that would hold
         // it must, or the write at the end of the run silently does nothing.
         const fs::path    cacheDir = fs::path( cachePath ).parent_path();
+        if( cachePathIsDirectory( cachePath ) )
+        {
+            return 1;   // the refusal is on stderr (cachePathIsDirectory)
+        }
         if( !cacheDir.empty() && !fs::is_directory( cacheDir, cacheEc ) )
         {
             std::fprintf( stderr, "ripwire: --cache=%s: the directory '%s' does not exist, so nothing could ever be written there "
