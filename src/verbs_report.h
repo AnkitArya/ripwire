@@ -909,10 +909,14 @@ inline constexpr const char* kCochangeRepoLegend =
     "the nominal 3 only when the window holds fewer commits than that. min_recur= appears when cochange-recur=K (the flag) filtered the rows, so a short "
     "list is explained rather than silent. "
     "window= is the mining window: the default 18 months, or the since=REV|DATE value when one resolved. "
-    "surprising= is only defined where BOTH sides could carry a static dependency at all (the same "
-    "dependency-capable predicate deps <health dep_files=> uses: source languages yes; sh, md, json, "
-    "ruby and binary/unknown files no). A pair with a dep-incapable side keeps its row and carries "
-    "dep_capable=0 instead, because for it \"shares no static dependency\" is vacuously true. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->";
+    "surprising= is only defined where BOTH sides could carry a static dependency at all, and that is a PAIR "
+    "question, not a per-file one: both sides must be dependency-capable (the set deps <health dep_langs=> "
+    "names) AND resolve in the SAME dialect, because a shell script cannot source a C++ translation unit and "
+    "an #include cannot name a shell script. md, json, toml, yaml and binary/unknown files are capable of "
+    "nothing; sh, rb, lua and ex became "
+    "capable at parser version 81 and each answers only its own kind. A pair that fails either half keeps its "
+    "row and carries dep_capable=0 instead, because for it \"shares no static dependency\" is vacuously true "
+    "rather than evidence. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->";
 
 inline constexpr const char* kCochangeFileLegend =
     "<!-- ripwire cochange: when you edit this file, git history says you also edit these (surprising=1 => no transitive #include either way). "
