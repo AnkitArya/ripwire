@@ -49,11 +49,12 @@ on every locality segment, won alone, and was then dropped at emission as a self
 edge at all, silently. Ruby's facade idiom surfaced it, but the shape is language-agnostic: the same fixture
 in PYTHON goes from `edges=0` to an honest 2-way split with `amb="1"` (`test/lpincheck.sh` arm (I), the
 language-agnostic pin — revert that one line and it goes red before any Ruby gate does). Measured across
-eight Ruby-FREE corpora (rocksdb, duckdb, ugrep, django, ccxt, mlflow, cpython, canyonraid48 —
+eight Ruby-FREE corpora (rocksdb, duckdb, ugrep, django, ccxt, mlflow, cpython and one large
+ObjC++ tree —
 `--no-cache --top-k=100000`, every row and every edge compared): the change is **edge-ADDITIVE, 0 edges lost
 anywhere**, `symbols=`, `unresolved=` and `external=` unchanged, `edges=` +0.02% (ccxt) to +0.33% (rocksdb),
 and `locality_pinned=` up where an edge that used to vanish is now emitted as a disclosed guess (rocksdb
-141 → 587, duckdb 171 → 575, cpython 556 → 709, canyonraid48 100 → 237). A control binary carrying every
+141 → 587, duckdb 171 → 575, cpython 556 → 709, the ObjC++ tree 100 → 237). A control binary carrying
 other change with only that line reverted is BYTE-IDENTICAL to the pre-merge tip on all eleven Ruby-free
 corpora — so nothing else in this change moves any other language.
 
