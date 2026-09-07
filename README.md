@@ -544,6 +544,464 @@ single-agent measurements. That the saving grows with the number of cold orienta
 fixed-cost mechanism but is **not a published result** — it is pre-registered and unrun. Treat the
 single-agent numbers as the measured ones.
 
+### Better Code: It automates the review judgments nobody has time to make — every lens from published research
+
+`--quality-panel` runs the calls a good reviewer makes by hand — is this function too tangled, is it
+named badly, does it hide control flow inside an idiom, does its history say it keeps breaking, must
+you read five other files to follow it, does it mutate state three hops away — as **six independent
+evidence families**, and ranks by how many of them *agree*, never as one blended score. Each family
+implements published work — McCabe on shape, Butler on naming, Gopstein's atoms of confusion on
+idiom, Nagappan & Ball on churn, Beck & Diehl on colocation, Henry & Kafura on state — with the
+lesson taken from each paper, and the rules measured and *withdrawn*, in
+[`docs/LINEAGE.md`](docs/LINEAGE.md). Pooled over five corpora (n = 27,889) the largest correlation
+between any two families is **+0.168**: they really are measuring different things, so two families
+firing on the same function is corroboration rather than one metric counted twice.
+
+<details>
+<summary>Why this matters most for code an agent wrote — empty-catch masking <b>+47%</b>, rewritten-within-two-weeks <b>+15%</b>, and reuse declining</summary>
+
+That matters most for code an agent wrote. Empty-catch error masking is **+47%** more common in
+AI-authored commits, a function rewritten again inside two weeks **+15%** more likely, and reuse is
+*declining* as AI's share of commits grows (GitClear, *AI Copilot Code Quality*, 2026). Each of
+`--quality-delta`'s 10 kinds targets one measured mode like those, and it reports **only what your
+change made worse** — then `--exemplar` shows the pattern in your own repo to copy, and `--test-gate`
+names the tests that must run before "done."
+
+</details>
+
+Tree-local numbers above are reproducible with the commands shown; the rest are dated, sourced
+measurements in [`docs/EVALS.md`](docs/EVALS.md) — each with its instrument, its corpus, and its
+counterexamples, because the losses ship beside the wins. Zero runtime dependencies, C++23, builds
+with the network off.
+
+Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, opencode, aider**, and any agent that can
+call a CLI.
+
+<details>
+<summary><b>What comes back</b> — real output from this repository, pretty-printed and trimmed (re-captured 2026-09-05; rows are served in rank order, each naming its file)</summary>
+
+```xml
+<ctx task="incremental cache invalidation" route="routed: subtoken+body BM25 (--for's default) — no strong
+     name hit, multi-word conceptual query" confidence="high" margin_pct="20"
+     bundle="compact" bodies="0" reason="compact-route" est_tokens="3995">
+  <sigs shown="23" total="40" capped="1">
+    <d l="106" n="kCacheMagic" p="src/ingest_cache.h" cx="0" ccx="0" in="0" churn="11" amp="71" pure="1" r="1"
+       next="--expand=src/ingest_cache.h:kCacheMagic"><doc>incremental cache (--cache): per-file content hash + raw facts so a re-run re-parses ONLY c…</doc>constexpr std::uint32_t kCacheMagic = 0x4b505443</d>
+    <d l="1307" n="spanTierMemoPath" id="src/ingest_astquery.h::rw::spanTierMemoPath" p="src/ingest_astquery.h" cx="1" ccx="0" in="2" churn="5" amp="44" r="2"><doc>Composed exactly the way every OTHER blob family is (quality.h): one fixed-width identity hex pe…</doc>inline std::string spanTierMemoPath( const std::string&amp; diskPath )</d>
+    <d l="247" n="ingestCommitTree" id="src/dmm.h::rw::dmm::ingestCommitTree" p="src/dmm.h" cx="6" ccx="5" in="1" churn="6" amp="27" r="3"><doc>Ingest the tree at `sha`, materialized out of `root`&apos;s object store. …</doc>inline bool ingestCommitTree( const std::string&amp; root, const std::string&amp; sha, … )</d>
+    <d l="841" n="mcpRefreshedThisRequest" id="src/mcpindex.h::rw::mcpRefreshedThisRequest" p="src/mcpindex.h" cx="1" ccx="0" in="2" churn="20" amp="43" r="4"><doc>P1-15 — the `_reingest` envelope field for a response whose handling ran an INCREMENTAL pass, …</doc>inline bool mcpRefreshedThisRequest( std::uint64_t passesAtEntry )</d>
+    …
+  </sigs>
+  <hops shown="2" total="6" capped="1" noedge="2">
+    <h l="1307" p="src/ingest_astquery.h" n="spanTierMemoPath">
+      <calls total="3"><c n="shaKeyedCachePath" l="1621"/><c n="headSnapRepoHex" l="1359"/><c n="exclConfigHex" l="1554"/></calls>
+    </h>
+    <h l="247" p="src/dmm.h" n="ingestCommitTree">
+      <calls total="10" shown="7" capped="1">…</calls>
+    </h>
+  </hops>
+</ctx>
+```
+
+The cache cluster, ranked and annotated in place: `cx`/`ccx` complexity, `in` reuse count, `churn`
+recent commits, `amp` change amplification, `tested` coverage — the fragile spots are visible
+*before* the agent touches them, in a few thousand tokens (`est_tokens="3995"`, self-reported in the
+header) instead of five whole files. This is a *conceptual* query, so the bundle is the **compact**
+shape: the ranked map plus one-hop callee edges, no inline bodies, and the root says so rather than
+leaving you to notice. Read the map, then `--expand=SYM` the one you want — or pass `--auto-bodies`
+to get bodies inline as before.
+
+</details>
+
+<details>
+<summary><b>What the quality panel shows</b> — real output from this repository, trimmed (legend comment elided)</summary>
+
+```xml
+$ ripwire . --quality-panel --limit=1
+<quality_panel preset="default" families="6" enabled_n="6" cut="2" eligible="6497" ranked="524" …>
+<s p="src/graph.h:723" n="buildGraph" fam="4" of="6" fired="structural,confusion,historical,colocation">
+<e f="structural" counted="1" why="ccx=764 loc=1368 nest=8 humps=34 deep=315 ev=98 rrank=1"/>
+<e f="confusion" counted="1" why="atom-embedded-crement*4"/>
+<e f="historical" counted="1" why="hrank=12 churn=36"/>
+<e f="colocation" counted="1" why="crank=32"/>
+</s>
+…
+</quality_panel>
+```
+
+Four of six independent evidence families corroborate on `buildGraph`, each with its own reason
+shown inline — never a single blended score. `eligible="6497"` narrows to `ranked="524"` (2-of-6
+agreement): an **8.1%** shortlist of this repository's own functions, not a guess (re-derived
+2026-08-23 — the corpus grew, the shortlist share did not move). Full six-family breakdown, real
+numbers per family → [The quality panel](#the-quality-panel) below.
+
+</details>
+
+Full retrieval tables — including the MRR figures behind the router numbers above — in
+[`bench/ANSWERQUALITY.md`](bench/ANSWERQUALITY.md) and [Measured](#measured).
+
+<p align="center">
+  <a href="present/ripwire-showcase.pdf"><img src="docs/assets/showcase-preview.png" alt="Three slides from the ripwire showcase deck: the head-to-head table, the ten-moments token table, and the quality-panel calibration" width="880"></a>
+</p>
+
+<p align="center">
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 29 slides</b></a> — every figure names the instrument that pins it<br>
+  <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
+</p>
+
+[What it answers](#what-it-answers) · [Quickstart](#quickstart) ·
+[The quality panel](#the-quality-panel) · [Benchmarks](#measured) ·
+[Honesty contract](#the-honesty-contract) ·
+[Agent setup](#set-it-up-in-your-coding-agent) · [Docs](#documentation)
+
+---
+
+## What it answers
+
+Around the core sit 179 long flags advertised in `--help`, across seven families — plus an MCP
+server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
+Not sure which of them fits the task in front of you? `ripwire . --help-task="<task in words>"`
+recommends ONE executable command with the evidence behind the pick — advice only, it never runs
+the recommendation — and abstains honestly when the evidence is too thin to name a winner.
+
+<details>
+<summary>Which surface is the authority — <code>--help</code> vs <code>docs/COMMANDS.md</code> — and the four reflex verbs worth memorising</summary>
+
+`./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
+[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every one of the 145 documented flags — 94 of them
+with a real invocation and its recorded output (counts re-derived 2026-08-23; `test/docscommandscheck.sh`
+fails if that documented set and the binary's own flag table ever disagree). Each family below links there.
+
+Four reflexes worth wiring into muscle memory: `--from-trace=FILE` for an error you have in hand,
+`--edit-check=SYM` right after an edit (did the contract change, and which callers are now provably
+incompatible), `--merge-scout=REF1,REF2` before landing parallel branches, and `--pack-task="…"` for
+ranking, bodies, callers and tests in one budgeted bundle.
+
+</details>
+
+| Family | The question | Representative flags |
+| --- | --- | --- |
+| [**understand a codebase cold**](docs/COMMANDS.md#understand-a-codebase-cold) | "What is this repo, and what matters in it?" | `--for` · `--help-task` · `--tree` · `--lego` · `--exemplar` · `--recall` · `--top-k` · `--token-budget` · `--max-tokens` |
+| [**navigate / answer a question**](docs/COMMANDS.md#navigate--answer-a-question) | "Who calls this? Is it safe to change? Which tests?" | `--callers` · `--callees` · `--uses` · `--impact` · `--path` · `--connect` · `--affected` · `--situ` · `--test-gate` · `--grep` |
+| [**zoom the detail ladder**](docs/COMMANDS.md#zoom-the-detail-ladder) | "Show me more — but only where it pays." | `--detail` · `--pack-signatures` · `--outline` · `--expand` · `--compress` |
+| [**assess quality / structure**](docs/COMMANDS.md#assess-quality--structure) | "Where is the risk, and did I just add some?" | `--quality-panel` · `--hotspots` · `--clones` · `--metrics` · `--deps` · `--lint` · `--quality-delta` · `--dmm` · `--edit-check` · `--pr-context` · `--merge-scout` |
+| [**self-diagnosis**](docs/COMMANDS.md#self-diagnosis) | "Is my setup actually working?" | `--doctor` |
+| [**security**](docs/COMMANDS.md#--scan-skillsdir) | "Is this agent skill file safe to install?" | `--scan-skill` · `--scan-skills` |
+| [**knobs / modes**](docs/COMMANDS.md#knobs--modes) | shape, format, cache, budget | `--json` · `--format` · `--mcp` |
+
+---
+
+## Quickstart
+
+**Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, built for **RHEL 8+**;
+every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
+[GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
+to `~/.local/bin`. From v0.2.2 the release tarball also ships the seventeen agent skills, and the
+installer stages them under `~/.local/share/ripwire/skills` **and activates them for every agent it
+detects** (Claude Code, Codex), printing one line per agent saying what it did. Sixteen of the
+seventeen are for using the tool; the one about compiling ripwire itself (`ripwire-opt-remarks`,
+`audience: contributor` in its front matter) stays staged unless you pass `--contributor` to
+`skills/install.sh`. An agent that is not
+installed is never given a skills directory, hooks are never registered without an explicit `--hook`,
+and `RIPWIRE_NO_ACTIVATE=1` stages without activating for image builds. When no agent is detected the
+activation one-liner is printed instead:
+
+```bash
+RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
+export PATH="$HOME/.local/bin:$PATH"      # not on PATH by default on macOS or most Linux shells; add it to your rc file
+```
+
+**Building it yourself needs CMake 3.24+ and a C++23 compiler, and nothing else installed first** —
+every dependency is vendored in-tree, so the build completes with the network off.
+
+```bash
+git clone https://github.com/redhat-et/ripwire.git
+cd ripwire
+cmake -S . -B build && cmake --build build -j
+./build/ripwire .          # the ranked map — start here on an unfamiliar repo
+```
+
+<details>
+<summary>Why there is no download step — vendored grammars, the offline-build proof, the languages parsed, and putting it on <code>PATH</code></summary>
+
+**Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler — that means clang 16+ /
+AppleClang 15+ (Xcode 15) / gcc 13+ / MSVC 19.36+, and if your distro's CMake is older than 3.24,
+`pip install cmake` or `brew install cmake` gets a current one everywhere. Nothing else —
+tree-sitter's core, the grammars listed in [THIRD_PARTY.md](THIRD_PARTY.md) and the test framework are vendored under `third_party/deps`,
+so there is no download step and no package manager to satisfy. Prove that with the network off:
+add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
+
+Two builds, two jobs — pick by what you are doing:
+
+```bash
+# building to USE it — the fast binary (Release implies LTO; scripts/pgobuild.sh adds PGO, what CI ships)
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release && cmake --build build-release -j
+
+# building to WORK ON it — plain configure, no build type (why that matters: the trap, under the fold below)
+cmake -S . -B build && cmake --build build -j
+```
+
+See [Languages](#languages) for supported source and document formats.
+
+To put it on `PATH`, `./install.sh` builds and atomically installs the binary plus the matching
+`skills/` and `hooks/` assets into a detected prefix (Homebrew's if present, `~/.local` otherwise;
+override with `RIPWIRE_INSTALL_PREFIX`). Set `RIPWIRE_ACTIVATE_CODEX=1` to also refresh Codex's skill
+links and advisory hooks from that same staged version; activation is otherwise explicit.
+
+</details>
+
+Wiring it into your agent takes one more minute — `wrap` **prints** the recipe for your client, it
+never edits your config:
+
+```bash
+ripwire wrap claude             # prints: claude mcp add ripwire -- ripwire --mcp
+ripwire wrap --all              # detect every installed agent, print each one's recipe
+skills/install.sh --codex       # Codex CLI: the task-shaped skills that say when to query — and when to stop
+```
+
+Four commands worth learning first:
+
+```bash
+ripwire .                                          # the ranked map — start here
+ripwire . --for="incremental cache invalidation"   # the task lens: what to touch, ranked
+ripwire . --callers=someFunction                   # who calls it
+ripwire . --test-gate                              # before you commit: which tests must run
+```
+
+<details>
+<summary>CLI or MCP, the <code>-DCMAKE_BUILD_TYPE=Release</code> trap, and the honesty contract in one line</summary>
+
+The CLI is the recommended baseline because it works in every shell-capable agent; the MCP server is
+optional, for agents whose workflow benefits from persistent tool registration. Full walkthrough,
+all six clients: [Agent setup](#set-it-up-in-your-coding-agent).
+
+> **The trap, spelled out:** never configure the *dev* tree (`build/`) with
+> `-DCMAKE_BUILD_TYPE=Release`. Release defines `NDEBUG`, which compiles the degrade-path alerts out
+> and blinds the gates that assert them — and every gate and bench number is measured against
+> `build/`, so changing that tree's flavour silently moves all of them at once. Release belongs in
+> its own tree (`build-release/` above; `./install.sh` builds its own `build-install/` the same way).
+> CI builds both flavours on purpose — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+**The honesty contract, in one line:** every count ripwire cannot prove is a total ships labelled a
+floor, every truncation is disclosed where it happens, and a zero means *none found* — never *none
+exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
+contract, gated on every pull request and every push to main, not a tendency.
+[The full discipline — and the losses published next to the wins →](#the-honesty-contract)
+
+</details>
+
+<!-- The name is the design: rip-grep for the retrieval half — a zero-runtime-dependency C++23
+     binary that crawls a tree, extracts symbols with tree-sitter, resolves references into a call
+     graph, ranks it with Personalized PageRank, and streams a deterministic minified XML map to
+     stdout — and trip-wire for the honesty half. -->
+
+---
+
+## The quality panel
+
+**Six independent evidence families, ranked by how many of them agree — never one blended score.**
+Pointed at this repository's **4,956** eligible functions, 2-of-6 agreement leaves **401** worth a
+second look: an **8.1%** shortlist. Pooled over five corpora (n = 27,889) no two families correlate
+above **+0.168**, which is what makes agreement corroboration rather than one metric counted twice.
+What each family actually looks at — on this repository's own source, not a synthetic example:
+
+| Family | Question | Backing verb | On this repo |
+| --- | --- | --- | --- |
+| **structural** | shape: complexity, size, nesting *and how much of the body is deep*, params, local-variable count — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=698 loc=1244 nest=8 humps=30 deep=283 locals=114` — **114 local variables invisible to every quality lens until this session**, because naming/size analysis has always stopped at a function's signature; `locals=` is a disclosed floor (`locals_floor="1"`), threaded through the same walk that already computes `ccx`/`nest`, at zero extra parsing cost |
+| **lexical** | identifier text: the 10 `naming-*` lint rules (short, wordy, case-mixed, uninformative, …) | `--lint`, `--naming-consistency`, `--lint --naming-locals` | see below — the one family with a fix, not just evidence |
+| **confusion** | syntactic idiom: the 7 `atom-*` rules (implicit predicates, nested ternaries, embedded `++`/`--`, …) | `--lint` | corpus-wide finding counts, not a per-function claim to spotlight here |
+| **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest. One caveat the panel's own legend states and this table must too: churn is measured **per file**, so every symbol in a file carries that file's `churn=`/`hrank=` verbatim — this family is file evidence *inherited* by the row, never the row's own history |
+| **colocation** (local reasoning) | how much you must read that isn't in front of you | `--context-ratio` | `computeQualityDelta` (`src/mcpverbs.h:2031`), ~50 lines, **87.0%** of its distinct references resolve outside its own file — by the tokens a reader must actually read, **99.6%**. A refinement of Beck & Diehl's per-class congruence (FSE 2011); Martin's instability `I = Ce/(Ca+Ce)` is its cruder ancestor |
+| **state** (unintended side effects) | mutable state a change here can perturb, that `--impact` (who calls you) never asks about | `--nonlocal-state` | `ensure_global_init` (`src/infra/profilePmc.h:288`) reaches 3 distinct global/static cells through its own body and callees — a tiny, innocent-looking call site can still break state three hops away. Unsound by construction (no pointer aliasing, no indirect calls), so every count is a floor |
+
+<details>
+<summary>How the six families are joined, the churn caveat, and the <code>nest=</code> profile deep-dive</summary>
+
+`--quality-panel` joins **six independent evidence families** (structural shape, lexical naming,
+syntactic-confusion idioms, git churn history, cross-file colocation, and non-local mutable state)
+and ranks by the *count* of families agreeing, never a weighted composite — averaging correlated
+metrics and calling it several is the Maintainability Index's well-known failure mode. On this
+repository the panel measures **4,956** eligible functions and narrows them to **401** worth a
+second look at 2-of-6 agreement — an **8.1%** shortlist, not a guess — and the largest correlation
+between any two families, pooled across five independent corpora (n = 27,889), is **+0.168**: the
+families really are measuring different things. The six-family table above shows what each finds on
+this repository's own source; the sections below are the parts that need more than a row.
+
+### `nest=` is a max, so it cannot tell a long function from a tangled one
+
+The structural family's `nest=` reports the single deepest line in a function. One line at depth 9 and
+a thousand lines at depth 9 produce the same number — which means a long **blocked-sequential** body (a
+run of shallow scoped steps, its max set by one inner loop nobody has to hold in their head) is
+indistinguishable from a **tangled** one that sustains depth for hundreds of lines. Every consumer of
+`nest=` inherited that blindness: the panel's structural family, `--readability`'s rank, the ensemble join.
+
+`--metrics` now emits the **profile** beside the max — `humps=` (how many maximal regions reach the
+nesting bar, CodeScene's "bumpy road": a rise above the threshold then a fall, so repeated missing
+abstractions read differently from one deep tangle) and `deep=` (how many lines lie inside them, against
+the `loc=` already on the row). Both come from the same fused walk that already computes `ccx`/`nest`, at
+zero extra parsing cost; `deep=` is a disclosed floor (`deep_floor="1"`). Both are **absent** exactly when
+`nest <` the bar — not-deep, never a hidden `0`. `deep` counts **lines** and `humps` counts **regions**,
+and two regions can share a line — a one-line `if(c){x;}else{y;}` at the bar is two regions on one line —
+so `deep` below `humps` is legal output rather than a defect. On this repository's own source:
+
+| function | `loc` | `nest` | `humps` | `deep` | deep/loc | reading |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ingest` (`src/ingest.cpp`) | 1632 | 8 | 25 | 467 | **29%** | genuinely tangled |
+| `buildGraph` (`src/graph.h`) | 1244 | 9 | 30 | 308 | **25%** | genuinely tangled |
+| `main` (`src/main.cpp`) | 1061 | 6 | 29 | 111 | **10%** | long, mostly shallow steps |
+| `dispatchMcpLine` (`src/mcp.h`) | 1099 | 7 | 22 | 102 | **9%** | a dispatch table, not a tangle |
+| `runDefaultMap` (`src/main.cpp`) | 650 | 4 | 7 | 15 | **2%** | blocked-sequential |
+| `ur_walkTree` (`src/ingest.cpp`) | 87 | 7 | 1 | 43 | **49%** | *small* and tangled |
+
+`loc` and `nest` alone rank `main` and `dispatchMcpLine` beside `ingest` and `buildGraph`; the profile
+separates them, and it promotes `ur_walkTree` — 87 lines, so no size bar fires, yet proportionally the
+densest thing in the table. **This changes no ranking**: `humps > 0` is exactly `nest >= bar`, which is
+precisely when the `nest` bar already fired, so the family count and the panel's shortlist are untouched.
+It is strictly more evidence on rows that already appear — a reader can tell the two shapes apart without
+opening the file.
+
+The panel also carries **one join, and it is deliberately not a seventh family**: a row whose structural
+evidence includes `deep=` (a body that *sustains* depth at the nesting bar) and that no indexed test
+reaches is annotated `join="deep+untested"` — the pair where a refactor is most wanted and least safe,
+put side by side because both facts are already on the row. It changes nothing: not `fam=`, not `of=`,
+not the order, not which rows appear (counting it would be the structural family wearing a second hat).
+The root reports `tested_scope=` (symbols any indexed test reaches — the join's honest denominator) and
+`deep_untested=` (rows carrying the annotation across the whole row set); at `tested_scope="0"` no
+indexed test reaches *anything* here, so "untested" would be a fact about what was crawled rather than
+about the code, and the annotation is emitted on **no** row.
+
+</details>
+
+**Five lenses sit *beside* the six-family join — deliberately outside its vote.** Each is out for a
+stated reason, not an oversight:
+
+| Lens | Asks | Why beside the join | On this repo |
+| --- | --- | --- | --- |
+| `--field-affinity` | which struct fields are read together but declared far apart; each loop's access shape (index vs pointer-chase) | its subject is a **type**, not a function — attributing a struct's finding to the functions touching it is a claim the lens never makes | `MainDispatch`: **12** findings at separation cost **92.88**; **1,374** loops classified, **5** genuine pointer-chases |
+| `cache-*` lint rules + `--with-profile` | cache-hostile access shapes (alloc-in-loop, `p=p->next`, `a[b[i]]`, node containers, …), then which are *measured* hot | rows are facts about **sites**, joined to per-scope hardware counters — not per-function evidence a family vote could count | aggressive rules: **0** hits in shipping `src/`; **327** findings adversarially triaged → **0** fix-worthy; the one open refactor settled by measurement (5.2 ms) |
+| `--readability` | least-readable-first ordering (Halstead volume, Posnett sigmoid) | the fitted score **saturates past 20 lines** — only the ordering is meaningful, and an ordering cannot vote in a count | ordering only, never a grade |
+| `--naming-consistency` | off-convention names, each with a computed `propose=` | the one lens that emits **advice** — a fix is not evidence, so it does not vote | camelCase dominant at **93.0%**; **136** names flagged with proposals |
+| `--lint --naming-locals` | the naming rules pointed at local variables inside already-flagged functions | **opt-in and unvalidated** — stays outside any join until a real-corpus audit clears it (the withdrawn-rule lesson) | +**973** findings that were structurally invisible before |
+
+<details>
+<summary>The depth on each lens — citations, caveats, and the withdrawn-rule note</summary>
+
+**Two verbs sit *beside* the panel, not inside its six-family join** — worth knowing the boundary
+rather than blurring it:
+
+- **`--field-affinity`** (cache-friendly co-access) is explicitly **not** a panel family, by unit: it
+  measures which struct fields are read together but declared far apart, and its subject is a *type*,
+  not a function — attributing a struct's finding to the functions that touch it would be a claim the
+  lens itself never makes (`docs/EVALS.md` §9.9.2). `MainDispatch` (`src/main.cpp:1335`, the 144-byte
+  struct threaded through nearly every verb) still carries **12** real findings against a separation
+  cost of **92.88** — fields read together in the same call routinely cross cache-line boundaries.
+  Chilimbi, Davidson & Larus's cache-conscious structure definition (PLDI 1999), validated on real
+  hardware counters; the advice-not-transform posture (report a split, never auto-reorder a struct)
+  follows Hundt, Mannarswamy & Chakrabarti (CGO 2006). **This is a genuinely rare kind of tool**: code
+  review catches cache-unfriendly patterns constantly, but every adjacent tool that reasons about
+  memory-access shape (Intel Advisor's pattern classifier, DMon, PerfLint) does it by *running the
+  program first* — a two-round adversarial literature and patent search found no shipping tool and no
+  published work that does this **statically, before a line executes** (tier: RARE BUT REAL, the full
+  citation trail and hedged claim wording in [`docs/LINEAGE.md`](docs/LINEAGE.md)). The same verb now
+  also classifies each loop's access shape — `index`/handle-based (predictable, the hardware
+  prefetcher can hide the latency) vs. pointer-chase (data-dependent, no struct layout fixes an
+  unhideable per-hop stall) — and, for genuine chases, checks whether the pointer you dereference to
+  *reach* the next node sits next to the payload you're about to read, since that cache-line fetch is
+  unavoidable and colocating there is a strictly higher-value fix than generic field reordering. On
+  this repository: **1,374** loops classified, **5** genuine pointer-chases found in a codebase
+  deliberately built handle-based rather than pointer-linked (guardrail G2) — the lens staying quiet
+  on code written to avoid the problem is itself a check that it isn't firing at random. **Ships
+  entirely report-only**: an A/B benchmark against a real 64 MB shuffled linked list measured a
+  mostly-null result, so the ranking-affecting half of this feature is a provable no-op until a
+  blind real-corpus validation session clears it — reported here at the same honesty level as
+  everything else in this table, not oversold ahead of the evidence.
+- **The `cache-*` lint pack + `--with-profile`** (cache-friendly *access patterns* — the other half
+  of the locality story, shipped 2026-08-07/08) covers what `--field-affinity` deliberately does not:
+  eight AST shapes practitioners agree hurt — node-based containers, `vector<T*>`/vector-of-indirect
+  (the "matrix as vector of vectors"), heap allocation inside loops, `p = p->next` chase advances,
+  `a[b[i]]` gather subscripts, by-value `shared_ptr` parameters, and existing manual prefetches
+  flagged for re-measurement — loop-fenced by span algebra, C-family only, facts never verdicts. The
+  honesty numbers, both directions: on this repository the aggressive rules fire **only in benches
+  and test fixtures, zero in shipping `src/`** (guardrail G2 holding is itself the check the rules
+  aren't firing at random), and a 13-agent adversarial triage of all 327 findings confirmed **zero**
+  as fix-worthy — every plausible refactor died on "win unmeasurable without a profile". That gap is
+  exactly what **`--lint --with-profile=FILE`** closes: it joins a `RIPWIRE_PROFILE` build's own
+  per-scope hardware counters (`#PROF_TSV`) onto findings, so a row carries `heat_total_ms` /
+  `heat_l1d_mpki` from a real run — static shape × measured PMU weight, the two halves of SYZYGY's
+  advice mode (Hundt, CGO 2006) finally in one command. Worked example: the one surviving refactor
+  candidate (flattening the Louvain adjacency) was settled by its new `PROFILE_SCOPE` in a single
+  measured run — **5.2 ms, 5.9% of the verb** — a wasted afternoon prevented by a number
+  ([`docs/CACHELINT.md`](docs/CACHELINT.md) holds the full catalog, the wave-2 specs, and the
+  compiler-handled myths deliberately *not* checked).
+- **`--readability`** is a sibling lens, not a panel family either — the one classic model in the tree
+  with a published closed form: Halstead volume (Halstead, *Elements of Software Science*, 1977) and
+  the Posnett/Hindle/Devanbu sigmoid fit (MSR 2011, [doi:10.1145/1985441.1985454](https://doi.org/10.1145/1985441.1985454)),
+  fitted on snippets of 20 lines or fewer — past that the fitted score saturates and only the
+  *ordering* stays meaningful, which is exactly how the verb is used: least-readable-first, never as a
+  grade. Halstead's volume specifically (not the later, less-trusted difficulty/effort derivatives) is
+  among the metrics shown to track measured cognitive load directly (Peitek, Apel, Parnin, Brechmann &
+  Siegmund, ICSE 2021, [doi:10.1109/ICSE43902.2021.00056](https://doi.org/10.1109/ICSE43902.2021.00056)) —
+  `--readability` emits volume and stops there; difficulty and effort are computed nowhere in this
+  tree.
+- **`--naming-consistency`** is the *lexical* family's one exception to "evidence, never advice": every
+  other lens in this panel tells you WHAT is wrong, never a computed fix. Case-style consistency is
+  the one property with a corpus-derivable answer — on this repository's `src/`, camelCase is the
+  dominant convention at **1,677/1,803 (93.0%)** agreement, and the verb flags **136** off-convention
+  names with a mechanically recombined `propose=` value for each (no dictionary, no synonym judgment —
+  see [What it answers](#what-it-answers)).
+- **`--lint --naming-locals`** points those same naming rules at local variable names — the thing a
+  human reviewer flags immediately in a sprawling function and no static tool measured until this
+  session. Opt-in, off by default: on this repository, a plain `--lint` finds **2,225** findings;
+  adding `--naming-locals` finds **3,198** — **973 findings that were structurally invisible**
+  a moment ago, scoped tightly (only inside functions already flagged large/complex, only locals
+  nested two blocks deep for the short-name rule) so it doesn't just relabel every loop counter in
+  the tree. Ships disabled by default on purpose: this repository's own history includes a naming
+  rule that shipped on plausibility and was later measured to flag its *best*-named functions — see
+  the withdrawn-rule note below — so a rule this new stays opt-in until a real-corpus audit clears it.
+
+</details>
+
+Full citation table, evidence tiers, and what got measured and *withdrawn* (a naming rule that
+flagged this repository's best-named functions, kept as the standing argument for measuring before
+shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
+
+---
+
+## Real runs
+
+**Four real invocations against this repository**, each printed as the binary actually prints it:
+`--callers` (and why its count is a floor), the default ranked map (and what `amb=` admits),
+`--test-gate` (exit 4 while obligations remain), and `--from-trace` (feed it the error itself, not a
+paraphrase of one).
+
+<details>
+<summary>How these excerpts were edited — minified output wrapped for reading, and exactly which numbers are elided</summary>
+
+Output is minified — one line, no whitespace between tags — so the excerpts below are wrapped for
+reading, and each one's leading legend comment is elided. Nothing else is edited, except that
+corpus-size numbers (file/symbol/edge counts, the ranked-map header's token/ambiguity tallies,
+PageRank `k=` values, and the test-gate example's
+`script_gates_unmodelled=` — a count of the script runners under `test/`, recursively) drift as this repository
+grows: **the ranked map** elides those specifically, and says so again at the point of use, and **the
+test gate** additionally trims its `<u>` rows down to 2 of the 25 the real run prints, behind a
+trailing `…`.
+
+</details>
+
+<details>
+<summary><code>--callers</code> — a call graph built on the spot, and why <code>count="6"</code> ships labelled a floor</summary>
+
+**Ten seconds, no index server, no embeddings, no API key** — a parse and a call graph, built on the
+spot:
+
+```
+$ ripwire . --callers=rankGraphTeleport
+<callers of="rankGraphTeleport" defs="1" count="6" root="." hop_tested="0" hop_untested="6" counts_floor="1">
+<s t="fn" n="runEval" p="src/eval.h:169"/>
+<s t="fn" n="rankGraph" p="src/graph.h:2969"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:3518"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:986"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:1104"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:1104"/>
 </callers>
 ```
