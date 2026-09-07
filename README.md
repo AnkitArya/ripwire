@@ -648,7 +648,10 @@ every release is smoke-tested on a RHEL 9 userland before it publishes). Downloa
 [GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
 to `~/.local/bin`. From v0.2.2 the release tarball also ships the eighteen agent skills, and the
 installer stages them under `~/.local/share/ripwire/skills` **and activates them for every agent it
-detects** (Claude Code, Codex), printing one line per agent saying what it did. An agent that is not
+detects** (Claude Code, Codex), printing one line per agent saying what it did. Seventeen of the
+eighteen are for using the tool; the one about compiling ripwire itself (`ripwire-opt-remarks`,
+`audience: contributor` in its front matter) stays staged unless you pass `--contributor` to
+`skills/install.sh`. An agent that is not
 installed is never given a skills directory, hooks are never registered without an explicit `--hook`,
 and `RIPWIRE_NO_ACTIVATE=1` stages without activating for image builds. When no agent is detected the
 activation one-liner is printed instead:
@@ -1668,6 +1671,7 @@ skills/install.sh --codex         # → ${AGENTS_HOME:-~/.agents}/skills (canoni
 skills/install.sh --codex --hook  # → also install Codex's task router, CLI nudge + session primer
 skills/install.sh --codex-legacy  # → ${CODEX_HOME:-~/.codex}/skills (older Codex installs)
 skills/install.sh /some/path      # → an explicit destination
+skills/install.sh --contributor   # → also the contributor-facing skill (compiling ripwire itself)
 ripwire --scan-skills=skills      # read the security scanner's verdict first, if you would rather
 ```
 

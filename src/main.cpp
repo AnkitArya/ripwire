@@ -768,8 +768,11 @@ std::optional<int> runNotes( const MainDispatch& d )
         std::string date = rw::quality::gitCommitterDateIso( d.root );
         if( date.empty() )
         {
-            DEGRADED_PATH_ALERT( "notes: non-git root — dating the note at the fixed epoch 1970-01-01 for determinism" );
-            date = "1970-01-01";
+            // 2026-09-06 stranger audit: this used to store 1970-01-01 — an epoch nobody explained, read as a
+            // real date by every consumer. "undated" is the honest value: there is no committer date to anchor to.
+            DEGRADED_PATH_ALERT( "notes: non-git root — the note is stored undated" );
+            date = "undated";
+            std::fprintf( stderr, "ripwire: --note-add: %s is not a git checkout — the note is stored undated (d=\"undated\"; a git checkout stamps the committer date)\n", d.root.c_str() );
         }
         // provenance stamp (the day's costliest lesson): anchor the note to the commit it was written under.
         // gitHeadSha resolves empty exactly when date's own gitCommitterDateIso lookup would have (same
@@ -841,7 +844,7 @@ std::optional<int> runNotes( const MainDispatch& d )
             char hdr[ 512 ];
             std::snprintf( hdr, sizeof( hdr ),
                            "<ctx><!-- ripwire field notes: notes=%zu targets=%zu dangling=%zu (a target with no matching indexed symbol/file — legal: listed here, surfaced nowhere)."
-                           " Each note row: d= is the ISO date it was recorded; sha= the abbreviated commit and branch= the branch checked out at record time,"
+                           " Each note row: d= is the ISO date it was recorded (\"undated\" when the root was not a git checkout at record time); sha= the abbreviated commit and branch= the branch checked out at record time,"
                            " both omitted entirely on a note stored before provenance stamping (absent means none recorded, never empty) -->",
                            all.size(), targetCount, danglingCount );
             w.write( hdr );

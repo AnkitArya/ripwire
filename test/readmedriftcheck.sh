@@ -122,7 +122,7 @@ fi
 # ── (D) cross-check — must equal flagsurfacecheck.sh's own harvest of the same --help text ──────────
 # Runs the sibling gate itself (not a hand-copied re-derivation) so a future edit to EITHER script's
 # scrape regex shows up here as a disagreement instead of two silently-diverging notions of "the count".
-FLAGSURFACE_OUT="$( bash "$ROOT/test/flagsurfacecheck.sh" 2>&1 )"
+FLAGSURFACE_OUT="$( bash "$ROOT/test/flagsurfacecheck.sh" "$BIN" 2>&1 )"   # 2026-09-06: forward $BIN — without it the sibling defaulted to build/ripwire and this arm was red in any tree without one
 flagsurface_count="$( printf '%s\n' "$FLAGSURFACE_OUT" | grep -oE 'harvested [0-9]+ advertised long flags' | head -1 | grep -oE '[0-9]+' )"
 if [ -z "$flagsurface_count" ]; then
     no "(D) could not find flagsurfacecheck.sh's 'harvested N advertised long flags' line — did its output format change?"

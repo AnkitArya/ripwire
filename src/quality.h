@@ -3090,13 +3090,27 @@ inline bool baselineHeaderIsForeign( const std::string& line ) noexcept
     return line.rfind( "# ripwire quality baseline v", 0 ) == 0 && line.find( " v4 " ) == std::string::npos;
 }
 
-inline bool readBaseline( const std::string& path, Snapshot& out )
+// 2026-09-06 stranger audit: the sidecar readers dropped what they could not parse with no trace a Release
+// binary keeps. These files are COMMITTED and MERGED, so a bad line is ordinary; what the reader did about it
+// has to reach the document (baseline_bad_lines=, acks_bad_lines=) and the marker has to distinguish "no
+// sidecar" from "a sidecar I could not read".
+struct BaselineReadStats
 {
+    bool        present        = false;   // the file opened
+    bool        unrecognizable = false;   // opened, but no line of the format's structure in it
+    bool        preQ1          = false;   // structure, but no per-symbol loc records: origin cannot be classified
+    std::size_t badLines       = 0;       // lines of a known kind whose payload did not parse — skipped
+};
+
+inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadStats& stats )
+{
+    stats = BaselineReadStats{};
     std::ifstream f( path );
     if( !f )
     {
         return false;
     }
+    stats.present = true;
     std::size_t recognizedLineCount = 0;
     std::string line;
     while( std::getline( f, line ) )
@@ -3123,14 +3137,14 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
         // gracefully so forward/backward baseline versions never crash.
         const auto readValMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint32_t>& m, const char* what )
         { std::uint64_t h = 0; std::uint32_t v = 0; is >> std::hex >> h >> std::dec >> v;
-          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); return; } m[h] = v; };
+          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); ++stats.badLines; return; } m[h] = v; };
         const auto readSet = [ & ]( std::vector<std::uint64_t>& v, const char* what )
         { std::uint64_t h = 0; is >> std::hex >> h;
-          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); return; } v.push_back( h ); };
+          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); ++stats.badLines; return; } v.push_back( h ); };
         // "<kind> <hexkey> <hexval>" — both 64-bit hex (the raw-body-hash map). Malformed → degrade + skip.
         const auto readHashMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint64_t>& m, const char* what )
         { std::uint64_t h = 0, v = 0; is >> std::hex >> h >> v;
-          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); return; } m[h] = v; };
+          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); ++stats.badLines; return; } m[h] = v; };
 
         if( kind == "ccx" || kind == "loc" || kind == "nest" || kind == "params" || kind == "mask" || kind == "body" || kind == "clone" || kind == "dead" || kind == "api" || kind == "head" || kind == "defs" )
         {
@@ -3182,6 +3196,18 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
     if( recognizedLineCount == 0 )
     {
         DEGRADED_PATH_ALERT( "quality: baseline file is empty/unrecognizable — treating it as absent" );
+        stats.unrecognizable = true;
+        out = Snapshot{};
+        return false;
+    }
+    // A pre-Q1 sidecar has per-symbol records but no `loc` rows, so no finding's ORIGIN can be classified
+    // (computeDelta would gate every one and name phantom findings). Refuse it the way the foreign-header
+    // sidecar above is refused: loudly, with the re-pin, instead of comparing against a floor it cannot read.
+    const bool whollyEmpty = out.locBySym.empty() && out.ccxBySym.empty() && out.nestBySym.empty() && out.paramsBySym.empty()
+                          && out.maskBySym.empty() && out.bodyHashBySym.empty() && out.cloneGroups.empty() && out.dead.empty() && out.publicApi.empty();
+    if( out.locBySym.empty() && !whollyEmpty )
+    {
+        stats.preQ1 = true;
         out = Snapshot{};
         return false;
     }
@@ -3315,6 +3341,8 @@ struct BaselineSelection
     BaselineSource source = BaselineSource::Absent;
     const char*    marker = "git-HEAD";                        // static storage; safe to hold as a bare pointer
     bool           staleFileRemoved = false;                   // Stale only: the unlink LANDED (file gone from disk)
+    bool           sidecarUnreadable = false;                  // a sidecar EXISTS but could not be read (unrecognizable or pre-Q1): ignored, named
+    std::size_t    sidecarBadLines   = 0;                      // honored sidecar: lines skipped as unparseable
 
     bool isSidecarHonored() const noexcept { return source == BaselineSource::Sidecar; }
     bool isSidecarStale()   const noexcept { return source == BaselineSource::Stale; }
@@ -3337,13 +3365,20 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
     VERIFY( !sidecarPath.empty() );
 
     BaselineSelection sel;
-    if( !readBaseline( sidecarPath, sel.snapshot ) )
+    BaselineReadStats readStats;
+    if( !readBaseline( sidecarPath, sel.snapshot, readStats ) )
     {
         sel.snapshot = Snapshot{};                             // readBaseline already clears on the unrecognizable path; belt and braces
         sel.source   = BaselineSource::Absent;
         sel.marker   = "git-HEAD";
+        if( readStats.present && ( readStats.unrecognizable || readStats.preQ1 ) )
+        {
+            sel.sidecarUnreadable = true;                      // 2026-09-06: never "no sidecar existed" about a file that is right there
+            sel.marker            = "git-HEAD (sidecar unreadable)";
+        }
         return sel;
     }
+    sel.sidecarBadLines = readStats.badLines;
 
     // R3: STRICT equality, no reachability hop. Note the ordering — gitHeadSha's ~15 ms popen is paid only
     // when a sidecar actually exists, exactly as before.
@@ -4140,8 +4175,17 @@ inline void mergeDuplicateAckRecord( AckRecord& row, AckRecord&& incoming )
     row.reason = folded;
 }
 
+inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string& path, std::size_t& badLines );
+
 inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string& path )
 {
+    std::size_t ignored = 0;
+    return readAckRecords( path, ignored );
+}
+
+inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string& path, std::size_t& badLines )
+{
+    badLines = 0;
     gtl::btree_map<std::string, AckRecord> out;
     std::ifstream f( path );
     if( !f )
@@ -4164,7 +4208,7 @@ inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string&
         std::uint64_t key = 0;
         std::uint32_t ackNow = 0;
         is >> tag >> kind >> std::hex >> key >> std::dec >> ackNow;
-        if( tag != "ack" || is.fail() ) { DEGRADED_PATH_ALERT( "quality: malformed ack line skipped" ); continue; }
+        if( tag != "ack" || is.fail() ) { DEGRADED_PATH_ALERT( "quality: malformed ack line skipped" ); ++badLines; continue; }
         kind = normalizeLegacyAckKind( kind, ackNow );               // P0.3 migration — see the note at ackKindToken
         std::string reason;
         std::getline( is, reason );
