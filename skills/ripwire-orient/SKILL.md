@@ -1,10 +1,10 @@
 ---
 name: ripwire-orient
 description: >
-  Landing COLD in an unfamiliar repo or subsystem: the lay of the land, 'how does X work / where is
-  Y', an architecture overview — or compacted mid-task, rebuilding what you knew. A ladder from a one-
-  screen map upward; --skipped when the map looks short. A NAMED symbol → navigate. Stop at the first
-  rung that answers.
+  Landing COLD in an unfamiliar repo or subsystem: main subsystems and entry points, 'how does X work
+  / where is Y' — or compacted mid-task, rebuilding what you knew. A ladder from a one-screen map
+  upward; --skipped when the map looks short. A NAMED symbol → navigate. Stop at the first rung that
+  answers.
 allowed-tools: Bash, Read
 ---
 
