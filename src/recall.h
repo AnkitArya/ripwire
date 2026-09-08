@@ -1081,6 +1081,29 @@ inline std::size_t recallSectionNoteGrowthBound( std::size_t selectedCount )
     return 39 + 2 * std::to_string( selectedCount ).size();
 }
 
+// §RP4 — the note MINUS its lines= list: the part a document owes whatever the budget admits. The
+// ranges are not charged here; they ride with the units that produce them (recallUnitCostBytes).
+inline std::size_t recallSectionNoteFixedBytes( const RecallSectionBody& sec )
+{
+    return formatRecallSectionNote( sec.units.size(), sec.units.size(), sec.sectionCount, sec.wholeBytes, "" ).size();
+}
+
+// §RP4 — what ONE unit costs the budget: its own bytes, the newline that may join it to the unit
+// before it, and the `LO-HI,` it adds to the note's lines= list.
+//
+// Charging the range to the UNIT rather than to the document's fixed overhead is not bookkeeping
+// taste; it fixes a measured defect. A 300-section document's FULL-selection lines= list is ~2.7 KB.
+// Charged up front against that document's ~3.4 KB payload budget it left 168 bytes for prose — so
+// `--max-tokens=1500` cut the top-ranked section three lines in, and the budget went almost entirely
+// on an attribute that, once the budget bound, listed three ranges and cost thirty bytes. Charged per
+// unit the accounting is exact in both directions, and because it is still a FIXED per-unit price the
+// admitted set remains a prefix of the rank order, and so remains monotone in the budget.
+inline std::size_t recallUnitCostBytes( const RecallSectionUnit& unit )
+{
+    return std::size_t( unit.bodyLength ) + 1
+           + std::to_string( unit.lineLo ).size() + std::to_string( unit.lineHi ).size() + 2;
+}
+
 // §RP3.2 — WHICH units an allowance admits: walk the RANK order, take each whole unit while it fits,
 // and STOP at the first one that does not. No skip-ahead to a smaller unit further down the ranking.
 //
@@ -1094,10 +1117,10 @@ inline std::size_t recallSectionNoteGrowthBound( std::size_t selectedCount )
 // a different combination happened to pack better. The remainder is disclosed (dropped_by_budget=);
 // the non-monotonicity would not have been.
 //
-// The +1 per unit over-charges by at most one byte (the first admitted unit needs no join, and neither
-// does one whose predecessor already ends in '\n'). It is deliberately fixed rather than exact: a price
-// that depended on which neighbours were admitted would stop being a prefix rule, and the guarantee
-// above is a property of the prefix, not of the arithmetic.
+// The per-unit price (recallUnitCostBytes) over-charges by at most a byte or two — the first admitted
+// unit needs no joining newline, and the last needs no comma in lines=. It is deliberately fixed rather
+// than exact: a price that depended on which neighbours were admitted would stop being a prefix rule,
+// and the guarantee above is a property of the prefix, not of the arithmetic.
 struct RecallUnitAdmission
 {
     std::vector<char> isAdmitted;          // per unit, DOCUMENT order (RecallSectionBody::units' own indexing)
@@ -1111,7 +1134,7 @@ inline RecallUnitAdmission admitRecallUnits( const RecallSectionBody& sec, std::
     std::size_t spentBytes = 0;
     for( const std::uint32_t u : sec.rankOrder )
     {
-        const std::size_t unitCost = std::size_t( sec.units[u].bodyLength ) + 1;
+        const std::size_t unitCost = recallUnitCostBytes( sec.units[u] );
         if( spentBytes + unitCost > allowanceBytes )
         {
             break;
@@ -1423,13 +1446,15 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
     // through, and at LOAD the budget is not known yet: allocateRecallShares has not run. `sep` therefore
     // carries everything that IS decided at load time (path, relevance, the generated-doc verdict) and the
     // note rides beside it, in its full-selection form, until EMIT either confirms or rewrites it. What
-    // `overhead` charges is the full-selection form, which is what makes the unbound case free.
+    // `overhead` charges is the note's FIXED part only — the lines= ranges are priced per unit, for the
+    // reason recallUnitCostBytes states.
     struct LoadedDoc
     {
         std::string                      sep;           // "━━ path (relevance …) ━━[generated_demoted: …]"
         std::string                      sectionNote;   // §RP4, full-selection form; "" on the whole-doc path
         std::string                      wholeBody;     // the whole-doc path's prose
         std::optional<RecallSectionBody> sections;      // the section path's prose AND its units
+        std::size_t                      demandBytes = 0;   // what serving it WHOLE costs the budget
 
         // The emitted prose, wherever it lives. An accessor rather than a second member holding a copy of a
         // 600 KB string that then has to be kept in step with the units indexing into it.
@@ -1459,10 +1484,15 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         {
             doc.sections    = std::move( granular );
             doc.sectionNote = fullRecallSectionNote( *doc.sections );
+            for( const RecallSectionUnit& unit : doc.sections->units )
+            {
+                doc.demandBytes += recallUnitCostBytes( unit );
+            }
         }
         else if( auto loaded = loadRecallBody( ing, r.fileId, redact ) )
         {
-            doc.wholeBody = std::move( *loaded );
+            doc.wholeBody   = std::move( *loaded );
+            doc.demandBytes = doc.wholeBody.size();
         }
         else
         {
@@ -1473,8 +1503,10 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         const std::string_view sepPath     = rootArg.empty() ? std::string_view( ing.files[ r.fileId ] )
                                                              : rw::sarif::rootRelativeUri( ing.files[ r.fileId ], recallRootPrefix );
         doc.sep = formatRecallSeparator( sepPath, r.score, demotedNote );
-        overhead.push_back( doc.sep.size() + doc.sectionNote.size() + 2 );   // 2 = the separator's own newline + the body's
-        demand.push_back( doc.body().size() );
+        // 2 = the separator's own newline + the body's. The section note's FIXED part is overhead; its
+        // lines= ranges are demand, priced with the units that put them there.
+        overhead.push_back( doc.sep.size() + 2 + ( doc.sections ? recallSectionNoteFixedBytes( *doc.sections ) : 0 ) );
+        demand.push_back( doc.demandBytes );
         loadedDocs.push_back( std::move( doc ) );
     }
 
@@ -1492,7 +1524,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
     for( std::size_t i = 0; i < emitCount; ++i )
     {
         LoadedDoc&  doc             = loadedDocs[i];
-        const bool  isOverAllowance = maxBytes && doc.body().size() > shares.alloc[i];
+        const bool  isOverAllowance = maxBytes && doc.demandBytes > shares.alloc[i];
         std::string sectionNote     = doc.sectionNote;   // the full-selection form, unless the budget rewrites it
         std::string truncNote;
         bool        wasReduced      = false;
