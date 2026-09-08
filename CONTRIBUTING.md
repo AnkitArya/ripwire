@@ -284,6 +284,28 @@ already knew about the others, several while fixing one. So the rule is mechanic
   a caller-owned arena.
 - **Symmetric bare scopes** for deterministic RAII teardown.
 
+### Output: `std::format` now, `std::print` when the floor allows — never a new printf-family site
+
+- **The target is `std::print` / `std::println`** (C++23 `<print>`). The tree is printf-family by
+  history, not by preference — ~1,500 `fprintf`/`printf`/`snprintf` sites, 0 `std::cout` — and the
+  conversion has started: `lintPrintOut` / `lintPrintErr` in `src/verbs_lint.h` are the pilot's shape.
+  Emit through them, or a same-shaped local shim, for anything new. **No new printf-family call site**
+  (rule landed 2026-09-08).
+- **Why the shim renders with `std::format` and writes with `std::fputs` instead of calling `std::print`:**
+  the ubuntu CI legs build with the system gcc 13, whose libstdc++ has `<format>` but not `<print>` (that
+  arrives in 14; the RHEL and release legs are already on gcc-toolset-14). When every leg reaches libstdc++
+  14 the shim body becomes one `std::print` call and nothing else changes. Do not vendor `fmt` to get there
+  sooner — the standard library has the feature, so a vendored copy is a G3 regression.
+- **A conversion is byte-parity-fenced, not reviewed by eye.** `test/printffmtparitycheck.sh` hashes
+  stdout and stderr per verb against `test/printf_parity.manifest`; a moved byte is a FAIL naming the verb
+  and the stream. The trap it exists for is float rendering — `%g` prints six significant digits, `{}`
+  prints the shortest round-trip (`0.3` versus `0.30000000000000004`) — so a per-specifier swap is never
+  mechanical. Every emitted byte feeds G4, the determinism gate, and the stored captures.
+- **Until a string is converted it is a printf FORMAT, not text.** The `--help` table in `src/cli.h` is one:
+  a literal `%` in a help line is a conversion (`% /`, `% o` and `% c` all parse), and the generated
+  `docs/COMMANDS.md` then carries garbage where the number was. Write `%%` there, and treat the regeneration
+  arm (`test/docscommandscheck.sh` arm G) as the fence for that surface.
+
 ### Tests
 
 - **Float comparisons assert a tolerance band, never bit-exactness.** Fast-math and threaded
