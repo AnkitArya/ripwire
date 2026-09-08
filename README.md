@@ -15,6 +15,8 @@
 deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
 around and reading whole files.
 
+***Paddle out with a map.***
+
 <details>
 <summary><b>Fifty years of software-engineering results, and research from last month.</b> 42 repositories and 67 papers folded — McCabe (1976) through to <b>seven papers published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in, all of it put into a single blazing-fast compiled executable</summary>
 
