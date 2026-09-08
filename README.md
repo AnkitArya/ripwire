@@ -262,7 +262,13 @@ top of the real output, which also self-reports the bundle's cost — `est_token
 | greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="3995"` on this repository (re-derived 2026-09-05, the run above) |
 | reads whole files to find the symbols that matter | those symbols, with complexity, churn and test coverage inline |
 | finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
-| pays for every line it read, right or wrong | measured at **5.0%** of what that grep-and-read pass spends (re-derived 2026-08-23) |
+| pays for every line it read, right or wrong | **5.0%** of what that grep-and-read pass spends — on a 12-question set where it strictly satisfied **5** to the naive arm's **11** (re-derived 2026-08-23) |
+
+**Both halves of that sentence, because one without the other is an overclaim.** The 5.0% is context
+compression, not equal task completion: on the five questions *both* arms strictly satisfied, ripwire
+spends **5.2%** of what the naive pass spends. Cheap context that answers less is not a saving if the
+agent then retries. The full adjudication, the four ranking defects behind the eleven-to-five gap, and
+the run where this number got **worse** are in [Measured](#measured).
 
 <details>
 <summary><b>58.3%</b> of instances with <b>all</b> gold files in the top 10 — the best alternative lands <b>40.0%</b>, while indexing in <b>0.31 s</b></summary>
