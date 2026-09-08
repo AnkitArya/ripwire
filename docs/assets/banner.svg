@@ -15,6 +15,7 @@
       <tspan fill="#56D6E8">rip</tspan><tspan fill="#F2B84B">wire</tspan>
     </text>
     <text x="42" y="132" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="19" fill="#E6EDF3" font-weight="600">The ripgrep of AI context.</text>
+    <text x="42" y="157" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="16" fill="#56D6E8" font-style="italic">Paddle out with a map.</text>
     <!-- right column: the two halves -->
     <text x="400" y="46" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
       <tspan fill="#56D6E8" font-weight="700">rip</tspan><tspan fill="#8B95A5">  structural answers in tens of milliseconds,</tspan>
