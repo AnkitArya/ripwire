@@ -1501,9 +1501,13 @@ inline RubyConstantIndex buildRubyConstantIndex( const IngestResult& ing )
 }
 
 // Resolve one symbolic Ruby directive to its (offset, count) run in `ix.files` — {0,0} when nothing in the
-// tree defines it. `memo` is keyed by (innermost nesting constant, written target): two sites with the same
-// nesting and spelling — the whole of a Rails controller's `include`s, every model's `< ApplicationRecord`
-// — resolve once. Deterministic: a pure function of the index and the site.
+// tree defines it. `memo` is keyed by (the WHOLE nesting chain, written target): two sites with the same
+// Module.nesting and spelling — the whole of a Rails controller's `include`s, every model's `< ApplicationRecord`
+// — resolve once. The key must be the chain, not its innermost open: `module A; module B` and the compact
+// `module A::B` share the innermost FQN A::B but look `Name` up along different chains (A::B::Name, A::Name,
+// Name vs A::B::Name, Name), so keying on the innermost open alone let whichever site came first fix the other's
+// answer — and cold and warm caches visit the sites in different orders (test/rubyconstcheck.sh pins both).
+// Deterministic: a pure function of the index and the site.
 inline std::pair<std::uint32_t, std::uint32_t> resolveRubyConstant( const RubyConstantIndex& ix,
                                                                     HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>>& memo,
                                                                     std::uint32_t fileId, std::uint32_t byte, std::string_view written )
@@ -1515,7 +1519,12 @@ inline std::pair<std::uint32_t, std::uint32_t> resolveRubyConstant( const RubyCo
     }
     const std::vector<RubyOpenRec>& opens = ix.opensByFile[ fileId ];
     const std::uint32_t             inner = rubyInnermostOpen( opens, byte );
-    std::string key = ( inner == kNoFile ) ? std::string{} : opens[ inner ].fqn;
+    std::string key;
+    for( std::uint32_t k = inner; k != kNoFile; k = opens[ k ].parent )
+    {
+        key += opens[ k ].fqn;
+        key += '\x1e'; // one segment per open on the chain — the whole Module.nesting, innermost first
+    }
     key += '\x1f';
     key += written;
     if( const auto hit = memo.find( key ); hit != memo.end() )

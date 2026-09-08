@@ -85,11 +85,16 @@ an `autoload`, as it does for a function-body `require()`.
 captured" since parser version 81. It now is (12 directives on that fixture, not 11; `lib/helper.rb`
 afferent 2 → 3), and the arm was inverted rather than deleted so the expiry is on the record.
 
-Gate: `test/rubyconstcheck.sh` + `test/rubyconstfix/` (27 files — nesting, compact and absolute names,
+Gate: `test/rubyconstcheck.sh` + `test/rubyconstfix/` (30 files — nesting, compact and absolute names,
 lexical shadowing, the three mixin verbs, `autoload` plain / in `eager_autoload do` / in `autoload_under
-do` / with a path, a monkey-patched in-tree class, a patched core class, a namespace with 20 wrapper opens
+do` / with a path, a monkey-patched in-tree class, a patched core class, a namespace with 23 wrapper opens
 and one real body, a wrapper-only reopen, out-of-tree constants, a same-basename decoy, a same-file
-reference, root-spelling parity, determinism, warm == cold, well-formedness). Written red first: 24 arms
+reference, two sites sharing an innermost open but not a nesting chain — `module A; module B` versus the
+compact `module A::B`, where only the first can see `A::Helper` — root-spelling parity, determinism,
+warm == cold, well-formedness). The chain pair was added after review: the resolver's memo was keyed on
+the innermost open alone, so whichever site was visited first fixed the other's answer, and cold and warm
+caches visit the sites in different orders — the fixture gave the helper two importers cold and none warm.
+The memo is now keyed on the whole chain. Written red first: 24 arms
 fail against the parser-version-81 binary, every mutation-control and floor arm passes there. 557 → 558
 gate scripts.
 

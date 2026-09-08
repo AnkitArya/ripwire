@@ -27,7 +27,7 @@
 #     a reference to that constant edges to EVERY real definer — change any of them and the constant changes.
 #     Multiplicity (every answer is right) is not specifier ambiguity (exactly one is); only the latter degrades.
 #
-# Fixture test/rubyconstfix (crawl root = the fixture; 27 .rb files under lib/):
+# Fixture test/rubyconstfix (crawl root = the fixture; 30 .rb files under lib/):
 #   lib/app/user.rb           < Base, include Trackable, extend Searchable, prepend Audited → 4 edges
 #   lib/app/audited.rb        `module App::Audited` — compact form, indexed as App::Audited
 #   lib/app/admin/user.rb     < ::App::User                → absolute, lib/app/user.rb
@@ -37,7 +37,8 @@
 #   lib/app/services.rb       extend ActiveSupport::Autoload (out of tree), autoload :Mailer, :Job (inside
 #                             eager_autoload do), :Worker (inside autoload_under "impl" do — a PATH rule would
 #                             need to model autoload_under; the index does not), autoload :Legacy, "lib/legacy_impl"
-#   lib/app/dup.rb + lib/other/dup.rb   both define App::Dup → uses_dup.rb's `< Dup` resolves to neither
+#   lib/app/dup.rb + lib/other/dup.rb   both OPEN App::Dup; other/dup.rb is a wrapper (one nested class) → uses_dup.rb's
+#                             `< Dup` edges to lib/app/dup.rb only
 #   lib/app/external.rb       < ActiveRecord::Base, include Comparable → rows, no edge (outside the tree)
 #   lib/decoy/user.rb         Decoy::User — same basename as app/user.rb; nothing names it
 #   lib/app/selfref.rb        `class UsesInner < Inner` in one file → directive shown, self-include dropped
@@ -46,8 +47,12 @@
 #   lib/app/user_ext.rb       MONKEY PATCH: reopens App::User with a method → admin/user.rb's `::App::User` edges to
 #                             user.rb AND user_ext.rb
 #   lib/core_ext/string.rb    MONKEY PATCH of a core class: the tree's only definer of String → shouty.rb's `< String`
-#   lib/app.rb + uses_ns.rb   `module App` is opened by 20 wrapper files and given a body by ONE; `include ::App`
+#   lib/app.rb + uses_ns.rb   `module App` is opened by 23 wrapper files and given a body by ONE; `include ::App`
 #                             edges to that one file only
+#   lib/app/geometry/nested_shape.rb + compact_shape.rb   SAME innermost open (App::Geometry), DIFFERENT chains:
+#                             `module App; module Geometry` sees App::Helper (lib/app/helper.rb), `module App::Geometry`
+#                             does not (Ruby raises NameError). The resolver's memo must be keyed on the whole chain
+#                             — keyed on the innermost open alone, whichever file is crawled first fixes the other's answer
 #
 # Usage:  test/rubyconstcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/rubyconstcheck.sh
 # Exit:   0 = clean · 1 = an arm failed · 2 = usage / missing prerequisite
@@ -118,6 +123,10 @@ expect Worker     '<f via="import" p="lib/app/services.rb" lazy="1"/> ' 'resolve
 expect LegacyImpl '<f via="import" p="lib/app/services.rb" lazy="1"/> ' 'resolve: `autoload :Legacy, "lib/legacy_impl"` → the PATH lands through the load-path rule, lazy'
 expect String     '<f via="import" p="lib/app/shouty.rb" lazy="0"/> '   'resolve: MONKEY PATCH of a core class — `< String` lands on the tree'"'"'s one definer of String (lib/core_ext/string.rb)'
 expect lib/app.rb:App '<f via="import" p="lib/app/uses_ns.rb" lazy="0"/> ' 'resolve: NAMESPACE — `include ::App` edges to lib/app.rb, the one open of App with a body of its own'
+expect Helper     '<f via="import" p="lib/app/geometry/nested_shape.rb" lazy="0"/> ' 'resolve: CHAIN — `< Helper` under `module App; module Geometry` reaches App::Helper; under compact `module App::Geometry` (same innermost open) it must NOT — the memo is keyed on the whole nesting chain'
+printf '%s' "$DEPS" | grep -q '<f p="lib/app/geometry/compact_shape.rb" includes="1" afferent="0" instab="0.00"' \
+    && ok 'resolve: CHAIN — compact_shape.rb'"'"'s `< Helper` is shown and resolves to nothing (App::Helper is not on its nesting chain)' \
+    || no "resolve: CHAIN — compact_shape.rb row wrong: $( frow lib/app/geometry/compact_shape.rb )"
 
 # ── 3. MUTATION CONTROLS ─────────────────────────────────────────────────────────────────────────────
 expect lib/app/services.rb:App '' 'mutation control: the WRAPPER open of App in services.rb (nested opens only) received nothing from `include ::App`'
@@ -142,8 +151,8 @@ printf '%s' "$DEPS" | grep -qE '<f p="lib/(app/external|app/uses_point|app/selfr
     || no "mutation control: an unresolved directive minted an edge: $( frow lib/app/external.rb )"
 
 # ── 4. CAPABILITY ────────────────────────────────────────────────────────────────────────────────────
-printf '%s' "$DEPS" | grep -q '<health files="27" dep_files="27"' \
-    && ok 'capability: all 27 .rb files are dependency-capable' \
+printf '%s' "$DEPS" | grep -q '<health files="30" dep_files="30"' \
+    && ok 'capability: all 30 .rb files are dependency-capable' \
     || no "capability: health wrong: $( printf '%s' "$DEPS" | grep -oE '<health [^/]*/>' )"
 
 # ── 5. root spelling, determinism, warm == cold, well-formed XML ─────────────────────────────────────
