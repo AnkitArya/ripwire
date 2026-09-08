@@ -144,7 +144,11 @@ mkdir -p "$TMP/notskills"; printf 'int main(){return 0;}\n' >"$TMP/notskills/m.c
 #     H1: ripwire-opt-remarks, added 08-05, shipped with 0 permitted rows and stole top-1 on several
 #     for-routed prompts + a bm25-desc negative fire before anyone had a row to prove it wrong). ripwire-
 #     router is exempt: it is the fallback map, never a legal label (see gate 9 above).
-skillDirs=$( find "$SKILLS" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort )
+# A SKILL is a directory that CONTAINS a SKILL.md — not merely a directory under skills/. Namespaced
+# agent formats live in their own subtree (skills/hermes/<skill>/SKILL.md), so a bare -maxdepth 1 -type d
+# sweep counted the NAMESPACE "hermes" as a skill, found it had zero labelled rows in the routing corpus,
+# and failed. Third of three enumeration sites; the other two were updated when the namespace landed.
+skillDirs=$( for _d in "$SKILLS"/*/; do [ -f "$_d/SKILL.md" ] && basename "$_d"; done | sort )
 missingSkills=""
 for sd in $skillDirs; do
     [ "$sd" = "ripwire-router" ] && continue
