@@ -154,13 +154,18 @@ done < "$TMP/shown"
 # recipe header prints the product name ("Claude Code"), not the row key — matching on the key would
 # have made this arm silently unfailable for half the table.
 mkdir -p "$TMP/all-none"
-BASE="$( HOME="$TMP/all-none" "$BIN" wrap --all 2>/dev/null | grep -c '^# ripwire ->' )"
+# HOME ALONE DOES NOT ISOLATE THIS. opencode resolves its config through xdg-basedir, so a set
+# XDG_CONFIG_HOME sends detection somewhere other than the fixture and the row goes undetected for a
+# reason that has nothing to do with the table. Unset on macOS, commonly SET on Linux CI — which is
+# exactly how this gate passed here and failed all four Linux legs of shard 1/4 on ff502d94.
+# (Same defect PR #55 fixes for the installer gates, shipped into a gate on the same day.)
+BASE="$( env -u XDG_CONFIG_HOME HOME="$TMP/all-none" "$BIN" wrap --all 2>/dev/null | grep -c '^# ripwire ->' )"
 while IFS= read -r row; do
     name="$(    printf '%s' "$row" | awk -F'"' '{ print $2 }' )"
     homedir="$( printf '%s' "$row" | awk -F'"' '{ print $10 }' )"
     case "$homedir" in "~/"*) ;; *) continue ;; esac
     H="$TMP/all-$name"; mkdir -p "$H/${homedir#\~/}"
-    n="$( HOME="$H" "$BIN" wrap --all 2>/dev/null | grep -c '^# ripwire ->' )"
+    n="$( env -u XDG_CONFIG_HOME HOME="$H" "$BIN" wrap --all 2>/dev/null | grep -c '^# ripwire ->' )"
     [ "$n" -gt "$BASE" ] \
         || fail "(K) '$name': its home dir $homedir exists, yet 'wrap --all' emits $n surfaces, no more than an empty HOME ($BASE) — detection is not reading the table"
 done < "$TMP/rows"
