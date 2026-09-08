@@ -697,7 +697,7 @@ $ ./build/ripwire . --callees=rankGraphTeleport
 </callees>
 ```
 
-**Shaped by:** `--impact`, `--exercises`, `--format`, `--json`, `--limit`
+**Shaped by:** `--impact`, `--exercises`, `--format`, `--legend`, `--json`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -730,7 +730,7 @@ $ ./build/ripwire . --uses=rankGraphTeleport
 </uses>
 ```
 
-**Shaped by:** `--impact`, `--naming-consistency`, `--edit-check`, `--edit-target-file`, `--safe-delete`, `--doctor`, `--format`, `--limit`
+**Shaped by:** `--impact`, `--naming-consistency`, `--edit-check`, `--edit-target-file`, `--safe-delete`, `--doctor`, `--format`, `--legend`
 
 **Caveats (stated by the binary):**
 
@@ -889,7 +889,7 @@ $ ./build/ripwire . --impact=rankGraphTeleport
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--uses`, `--metrics`, `--safe-delete`, `--slice-flow`, `--format`, `--json`, `--limit`
+**Shaped by:** `--uses`, `--metrics`, `--safe-delete`, `--slice-flow`, `--format`, `--legend`, `--json`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -966,7 +966,7 @@ $ ./build/ripwire . --affected=src/graph.h
 </affected>
 ```
 
-**Shaped by:** `--mentions`, `--exercises`, `--test-gate`, `--edit-target-file`
+**Shaped by:** `--mentions`, `--exercises`, `--test-gate`, `--edit-target-file`, `--legend`
 
 **Caveats (stated by the binary):**
 
@@ -4223,7 +4223,7 @@ $ ./build/ripwire . --callers=rankGraphTeleport --format=bogus
 
 **Answers:** output legend posture for EVERY XML verb.
 
-full is byte-identical to the default. compact keeps every row byte and every data/completeness attribute (counts_floor= capped= shown= total= has_more= next_offset= est_tokens= at= root= graph_ambiguous= …), adds a versioned schema id on the root (schema="ripwire.<verb>/v1") and replaces the explanatory prose with ONE <=400 B legend naming those attributes — the meanings live here and in the full legend. DATA comments stay (the map header, pack-task's body-omitted rows, +more). Per call this drops 2.9-5.2 KB on the navigation verbs (--edit-check 5.2 KB -> <0.4 KB); the MCP twin is the argument legend: on every XML-answering verb, where compact is the DEFAULT and legend:"full" restores this prose (M1, 2026-09-05: the ten-verb MCP edit loop pays 2,866 B of legend instead of 30,839 B). The CLI default stays full. Runs with nothing to compact refuse it, naming the verb: prose/markdown/JSON answers (--situ --recall --report --mermaid --html --plan-lanes --sarif --eval*) and the writers (edit verbs, --note-add, --quality-baseline/--quality-ack, --index-out, --export).
+MAKING REPEATED CALLS (an agent, a script, a benchmark harness)? USE compact. The legend is a FIXED ~3 KB per call, so its share is a function of ANSWER SIZE, not of the verb: at least 50% of a small --callers/--uses/--impact/--affected answer (and more on --callees and --edit-check), a little of a large --for bundle. Every ROW is byte-identical; the only payload change is a schema="ripwire.<verb>/v1" attribute the root GAINS. The CLI default is full because a human reading ONE map needs the prose; the MCP server already defaults to compact, so the CLI is the path that pays. full is byte-identical to the default. compact keeps every row byte and every data/completeness attribute (counts_floor= capped= shown= total= has_more= next_offset= est_tokens= at= root= graph_ambiguous= …), adds a versioned schema id on the root (schema="ripwire.<verb>/v1") and replaces the explanatory prose with ONE <=400 B legend naming those attributes — the meanings live here and in the full legend. DATA comments stay (the map header, pack-task's body-omitted rows, +more). Per call this drops 2.9-5.2 KB on the navigation verbs (--edit-check 5.2 KB -> <0.4 KB); the MCP twin is the argument legend: on every XML-answering verb, where compact is the DEFAULT and legend:"full" restores this prose (M1, 2026-09-05: the ten-verb MCP edit loop pays 2,866 B of legend instead of 30,839 B). The CLI default stays full. Runs with nothing to compact refuse it, naming the verb: prose/markdown/JSON answers (--situ --recall --report --mermaid --html --plan-lanes --sarif --eval*) and the writers (edit verbs, --note-add, --quality-baseline/--quality-ack, --index-out, --export).
 
 **Try it**
 
