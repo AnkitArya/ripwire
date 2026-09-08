@@ -18,7 +18,7 @@ around and reading whole files.
 ***Paddle out with a map.***
 
 <details>
-<summary><b>Fifty years of software-engineering results, and research from last month.</b> 43 repositories and 67 papers folded — McCabe (1976) through to <b>seven papers published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in, all of it put into a single blazing-fast compiled executable</summary>
+<summary><b>Fifty years of software-engineering results, and research from last month.</b> 43 repositories and 69 papers folded — McCabe (1976) through to <b>seven papers published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in, all of it put into a single blazing-fast compiled executable</summary>
 
 Beside those sits a labelled survey of **237 tools** that contributed nothing and says so. The two
 sets are disjoint by construction, so they add rather than nest — a tool that gave a lesson is never
@@ -129,7 +129,8 @@ per-frame grep would eventually find, mixed with call sites and comments; `--sit
 names the same 6 real test harnesses, 2 of which a filename grep across `test/` cannot find even
 after opening every one of its 41 candidates — a completeness gap, not just a byte one; `--pr-context`
 surfaces co-change partners (`test/regression.sh`, `src/main.cpp`) a raw `git diff` has no way to
-know were usually touched and weren't this time. The map ranks and discloses — it never paraphrases
+know were usually touched and weren't this time — Fowler's *Shotgun Surgery* checked rather than
+merely named (the backtest is in [`docs/EVALS.md`](docs/EVALS.md)). The map ranks and discloses — it never paraphrases
 your code — and every truncation is disclosed in the header.
 
 **The honesty line, made concrete:** the same auto-selection behind the `--expand` row also runs the
@@ -204,10 +205,10 @@ The `cx` and `churn` ramps share one five-stop scale, ordered so lightness rises
 
 </details>
 
-One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks, and
+One deterministic answer: the relevant symbols, their callers, the change risks, and
 the tests that reach them. The task is yours to phrase — ask about *your* code, not ours. Run on this
-repository (2026-08-30), `ripwire . --for="incremental cache invalidation"` answers in about 4.3K
-tokens with:
+repository (2026-08-30), `ripwire . --for="incremental cache invalidation"` produced about 4.3K
+estimated tokens, not an enforced token budget. It includes:
 
 *This is what the output looks like, not the token-savings recipe.* A bare `--for` on every question
 is the most expensive way to use this tool — see [Where it pays most](#where-it-pays-most-and-where-it-does-not)
@@ -871,7 +872,7 @@ Wiring it into your agent takes one more minute — `wrap` **prints** the recipe
 never edits your config:
 
 ```bash
-ripwire wrap claude             # prints: claude mcp add ripwire -- ripwire --mcp
+ripwire wrap claude             # prints the wiring: the CLI call first, `claude mcp add` as the alternative
 ripwire wrap --all              # detect every installed agent, print each one's recipe
 skills/install.sh --codex       # Codex CLI: the task-shaped skills that say when to query — and when to stop
 ```
@@ -1127,8 +1128,8 @@ spot:
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="6" root="." hop_tested="0" hop_untested="6" counts_floor="1">
 <s t="fn" n="runEval" p="src/eval.h:169"/>
-<s t="fn" n="rankGraph" p="src/graph.h:2969"/>
-<s t="fn" n="anchoredLexicalRank" p="src/graph.h:3518"/>
+<s t="fn" n="rankGraph" p="src/graph.h:2970"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:3519"/>
 <s t="fn" n="churnRankedGraph" p="src/main.cpp:994"/>
 <s t="fn" n="runDefaultMap" p="src/main.cpp:1119"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:1104"/>
@@ -1641,10 +1642,10 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 <details>
-<summary>43 repositories, 67 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
+<summary>43 repositories, 69 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**43 repositories and 67 papers** into one deterministic executable, alongside a labelled
+**43 repositories and 69 papers** into one deterministic executable, alongside a labelled
 survey of 237 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
@@ -1797,9 +1798,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>559 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
+<summary><b>561 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
 
-`test/regression.sh` names **559 gate scripts** and is the authoritative list;
+`test/regression.sh` names **561 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1845,13 +1846,14 @@ it when you want those verbs, not as a default.
 config — you read the line, then run it.
 
 ```bash
-ripwire wrap claude      # MCP:      claude mcp add ripwire -- ripwire --mcp
-ripwire wrap cursor      # MCP:      the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
+ripwire wrap claude      # CLI-first: the CLI call, then `claude mcp add` as the warm-index alternative
 ripwire wrap codex       # CLI-first: optional MCP restricted to audit/health verbs in Codex TOML
-ripwire wrap windsurf    # MCP:      that client's stanza
-ripwire wrap gemini      # MCP:      that client's stanza
-ripwire wrap opencode    # CLI-1st:  the AGENTS.md wiring; its "mcp" stanza offered as the alternative
-ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation that reads it
+ripwire wrap opencode    # CLI-first: the AGENTS.md wiring; its "mcp" stanza offered as the alternative
+ripwire wrap openclaw    # CLI-first: same ~/.agents/skills root Codex uses; no shell hook slot
+ripwire wrap cursor      # MCP:       the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
+ripwire wrap windsurf    # MCP:       that client's stanza
+ripwire wrap gemini      # MCP:       that client's stanza
+ripwire wrap aider       # no MCP:    a ranked map file, and the aider invocation that reads it
 ripwire wrap --all       # detect every installed agent and emit each one's config
 ```
 

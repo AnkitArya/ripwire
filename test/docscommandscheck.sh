@@ -36,6 +36,9 @@
 #       once (both derive from parse_help), so the sets stay equal and (B) stays green while the flag
 #       is absent from the shipped document. This arm imports parse_help and judges it directly,
 #       against a pinned ledger of the losses that already exist plus synthetic seam fixtures
+#   (I) SMELL-NAME FINDABILITY — the help entries that measure Fowler's Shotgun Surgery must NAME it,
+#       because COMMANDS.md is generated from --help and a hand-edit of the document alone is undone
+#       by the next regen; a control strips the name from a copy of the same text and must go red
 #
 # Usage:  bash test/docscommandscheck.sh      [RIPWIRE_BIN=path/to/binary]
 # Exit:   0 = clean · 1 = at least one arm failed · 2 = usage / missing prerequisite
@@ -411,6 +414,49 @@ else:
 sys.exit( bad )
 PY
 if python3 "$TMP/entryarm.py" "$ROOT" "$BIN" 2>&1; then :; else fail=1; fi
+
+# ── (I) SMELL-NAME FINDABILITY — the help text must name the smell it measures ─────────────────────
+# WHY. For a year this tool shipped the measurable form of Fowler's SHOTGUN SURGERY — the co-change
+# miner behind --cochange and the "usual partners missing from this diff" section of --situ — while the
+# word appeared nowhere in the tree: on 2026-09-08 `grep -ril shotgun docs src README.md` was empty, so
+# a reader who knew the smell's name could not find the verb that answers it. docs/COMMANDS.md is
+# generated from --help, so the help entry is the ONE place the name has to live for every downstream
+# surface to inherit it; a hand-edit of the document alone is undone by the next regen (arm G). The
+# arm reads the binary's own --help, attributes each line to the entry it belongs to (continuation
+# lines carry no flag token), and requires BOTH entries that answer the smell to name it. Its control
+# strips the name from a copy of that same help text and requires the identical extraction to go red.
+smellEntries() {   # $1 = help text → the entries whose own lines name the smell, one per line, sorted
+    printf '%s\n' "$1" | awk '
+        /^    --[a-z]/ { cur = $1 }
+        cur != "" && tolower($0) ~ /shotgun surgery/ { hit[cur] = 1 }
+        END { for( k in hit ) { print k } }' | LC_ALL=C sort
+}
+helpText="$( "$BIN" --help 2>/dev/null )"
+smellWant=$'--cochange[=FILE]\n--situ[=F1,F2]'
+# presence guard first: the two entries must exist at all, or the extraction below searches an empty target
+while IFS= read -r spec; do
+    if printf '%s\n' "$helpText" | grep -qF "    $spec"; then :
+    else no "(I) --help has no entry '$spec' — the smell-name arm has no target (entry renamed? update smellWant)"; fi
+done < <( printf '%s\n' "$smellWant" )
+smellGot="$( smellEntries "$helpText" )"
+smellMissing="$( LC_ALL=C comm -23 <( printf '%s\n' "$smellWant" ) <( printf '%s\n' "$smellGot" ) )"
+if [ -z "$smellMissing" ]; then
+    ok "(I) --help names Shotgun Surgery on both entries that measure it: $( printf '%s' "$smellGot" | tr '\n' ' ' )"
+else
+    no "(I) --help does not name Shotgun Surgery on: $( printf '%s' "$smellMissing" | tr '\n' ' ' )— the smell is unfindable by name again (src/cli.h help text)"
+fi
+# mutation control: strip the name from a copy of the SAME text; the identical extraction must lose both entries
+# case-insensitive by character class, not by a GNU-only `I` flag: the help spells it SHOTGUN SURGERY and
+# the extraction above lowercases, so a title-case-only strip left the copy unchanged (caught by the
+# did-not-take guard on first run — the guard is why that shape cannot ship green)
+smellMut="$( printf '%s\n' "$helpText" | sed -E 's/[Ss][Hh][Oo][Tt][Gg][Uu][Nn] [Ss][Uu][Rr][Gg][Ee][Rr][Yy]/xxxxxxx xxxxxxx/g' )"
+if [ "$smellMut" = "$helpText" ]; then
+    no "(I) mutation control did not take — --help holds nothing to strip, so the arm above cannot have seen the name"
+elif [ -n "$( smellEntries "$smellMut" )" ]; then
+    no "(I) mutation control is inert — the name was stripped and the extraction still reports: $( smellEntries "$smellMut" | tr '\n' ' ' )"
+else
+    ok "(I) mutation control — stripping the name from a copy of --help loses both entries (the arm can fail)"
+fi
 
 if [ "$fail" = 0 ]; then printf 'ALL PASS\n'; else printf 'FAILURES ABOVE\n'; fi
 exit "$fail"

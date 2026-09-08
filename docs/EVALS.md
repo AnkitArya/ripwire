@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 559 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 561 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5553,7 +5553,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **559 gate scripts**, all of which exist on disk.
+naming **561 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -6465,7 +6465,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 559. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 561. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -6477,6 +6477,10 @@ Listed because the reason is more useful than the silence.
 - **The earlier private C++ localization numbers** (file@10 38.5%, any@10 88.9%, MRR 0.621). The
   corpus was removed for public release and those numbers are no longer reproducible from this tree.
   Superseded by the SFML figures in §7.
+- **A Shotgun Surgery detector, or a CM/CC threshold for one.** Lanza & Marinescu's static strategy was
+  prototyped on two corpora and rejected — see "Shotgun Surgery — two formulations measured" at the end of
+  this document. What ships for the smell is the co-change check `--situ` / `--pr-context` already
+  carried; its backtest numbers there are the only ones this project publishes about it.
 
 ---
 
@@ -12676,3 +12680,116 @@ gold, multi-file S4/S1 proxies, and two S3 graph-recall misses.
    (plan directories, `ccdb/`, `compile_commands.json`), not code; the gate's ROOT is the tree it lives in.
 5. `test/sublistcountcheck.sh` arm (6b) is red on the round's BASE (`5726d4d9`, clean worktree, its own
    binary): the MCP `grep` limit=3 payload is 1,563 B against a 1,500 B budget. Pre-existing, not touched here.
+
+---
+
+## Shotgun Surgery — two formulations measured on two histories (2026-09-08): the static strategy is NEGATIVE, the historical check was already shipped and backtests well above chance
+
+**Verdict.** Fowler's Shotgun Surgery — *one change, many modules* — has two quantitative formulations in the
+literature. The **historical** one, change coupling (Gall, Hajek & Jazayeri 1998; Zimmermann et al. 2005),
+is what `--cochange` mines and what the co-change section of `--situ` / `--pr-context` turns into a check:
+"usually edited with these, but not in your diff". It had shipped without the smell's name anywhere in the
+tree (`grep -ril shotgun docs src README.md` was empty on 2026-09-08); the name is now on both help entries,
+`test/docscommandscheck.sh` arm (I) keeps it there, and this section is the check's measurement. The
+**static** one — Lanza & Marinescu's CM×CC detection strategy — was prototyped on the call graph ripwire
+already builds and is **not built**: on two corpora it flags only stable hub APIs, and its per-file value
+correlates with how widely edits to that file actually scatter at Spearman **+0.16**. A third candidate, a
+per-file "degree of scatter" scan over history, is not built either: its ranking is the directory layout read
+back, not a defect list.
+
+Prototype first, document second — the order the refuted literal-cohort rule of the same week got wrong. Every
+number below comes from `bench/shotgun/` (the run recipe is its README) over `git log --name-only --no-merges`
+and the uncapped map (`--top-k=100000`), on **two corpora**, so no threshold here is one repository's: this
+repository (1,731 files, 15,220 symbols, 1,587 non-merge commits) and a private ObjC++/C++ game tree
+(2,366 files, 48,771 symbols, 1,637 commits). Commits touching more than 30 files are dropped, the Code Maat
+bulk-commit rule every `--cochange` walk already applies.
+
+### (a) The static strategy — CM > 7 and CC > 5, over unambiguous call edges
+
+CM = distinct caller symbols, CC = distinct caller FILES (files stand in for the book's classes; both trees are
+C-family). Only a call edge whose callee name has exactly one in-corpus definition, or a same-file one, is
+credited. The alternative — crediting every `.size()` to every class that defines `size` — flags 263 / 2,655
+symbols with `empty` / `find` / `size` on top; that is a resolver artifact and is kept in the script only to
+show why the floor is the rule.
+
+| corpus | callables | flagged (CM>7 ∧ CC>5) | CC p50 / p90 / p99 / max | top-45 rows, hand-classified |
+| --- | --- | --- | --- | --- |
+| this repository | 8,697 | **57** (0.66%) | 1 / 2 / 7 / 90 | 45 stable APIs — `svector::push_back` (90 files), `fastmath::min`, `DEGRADED_PATH_ALERT`, `VERIFY`, `escapeXml`, the paging helpers; **0** a maintainer would call a scatter defect |
+| game tree | 24,575 | **117** (0.48%) | 1 / 2 / 8 / 219 | 45 stable APIs — a test framework's `TEST_CASE` / `REQUIRE` / `CHECK`, vendored physics getters, SIMD `sqrt` / `abs`, `VERIFY`; **0** |
+
+The list is short enough to read, and every row is a hub that is *supposed* to have many callers. High fan-in
+says a contract change WOULD be wide; it says nothing about whether the contract changes. The number that tests
+the strategy is the correlation of per-file static fan-in (distinct caller files) with per-file historical
+scatter (mean files per commit, over the commits that touched the file):
+
+| corpus | files (map ∩ history, ≥ 3 commits) | ρ( CC_file , mean files/commit ) | mean files/commit by CC_file quintile, Q1 → Q5 |
+| --- | --- | --- | --- |
+| this repository | 330 | **+0.158** | 8.63 · 8.65 · 9.40 · 8.76 · 9.67 |
+| game tree | 431 | **+0.163** | 6.89 · 7.07 · 7.64 · 7.79 · 8.19 |
+
+Flat on both. The static form does not predict the phenomenon, so it is not a flag; the half of it a reader can
+already see is `in=` / `amp=` on `--metrics`.
+
+### (b) Per-file historical scatter as a repo-wide scan
+
+| corpus | files/commit, median · mean | commits touching ≥ 3 directories | per-file mean dirs/commit, p50 / p95 / max | what tops the ranking |
+| --- | --- | --- | --- | --- |
+| this repository | 2 · 3.95 | 30% | 3.22 / 7.79 / 14.4 | the 16 `skills/*/SKILL.md` files — one directory per skill, edited as a set |
+| game tree | 2 · 3.68 | 16% | 2.14 / 5.13 / 6.78 | a generated voice-line manifest family, one JSON per character |
+
+Both tops are families a layout produces, and `--cochange=FILE` already lists each family's partners. A scan
+whose ranking is the directory tree is not a finding. Not built.
+
+### (c) The shipped check, backtested — `--situ` section [3] and `--pr-context`'s co-change partners
+
+The rule as shipped (`cochangePartners`, `src/gitmine.h`): a partner needs `together ≥ 3` joint commits,
+`deg = together / commits(A)`, an 18-month window, the 30-file cap, top 8 by `deg`. The backtest walks each
+history oldest-first with the window sliding on the commit being scored, and for every file A of every
+multi-file commit predicts A's partners from PRIOR commits only, scoring against the files the commit actually
+contained (the evaluation shape of Zimmermann et al.; 150-commit warm-up).
+
+| corpus | probes | ≥ 1 partner predicted | precision@8 | recall | a named partner is in the commit |
+| --- | --- | --- | --- | --- | --- |
+| this repository | 3,334 | 92% | **0.352** | 0.347 | 82% |
+| game tree | 2,516 | 89% | **0.427** | 0.429 | 81% |
+| this repository, partners with `deg ≥ 0.5` only | 3,334 | 65% | **0.541** | 0.218 | 71% |
+| game tree, `deg ≥ 0.5` only | 2,516 | 68% | **0.660** | 0.389 | 81% |
+
+Reference band: ROSE (Zimmermann, Weißgerber, Diehl & Zeller, TSE 2005) reports, at file granularity on
+Eclipse, roughly a quarter of the further files predicted and a correct location in its top three about two
+thirds of the time. The shipped rule sits in that band on both corpora.
+
+**Is an alarm a real forget?** History cannot label intent, but it can say whether the named partner was edited
+shortly after. For every commit where the check would have named a partner with `deg ≥ 0.5` that the commit did
+not touch:
+
+| corpus | commits alarmed | a named partner is edited within the next 3 commits | per named file | chance: a random active file within 3 |
+| --- | --- | --- | --- | --- |
+| this repository | 54% | **56%** of alarmed commits | 31% (n = 2,210) | 1% |
+| game tree | 32% | **32%** | 20% (n = 1,218) | 2% |
+
+Thirty and sixteen times chance. The rate also climbs with the scatter of the change itself — on this repository
+46% for one-file commits, 60% at 4–7 files, 73% at 8–15 — which is the smell's definition read back from data:
+the wider a change already is, the more likely a site was missed.
+
+**What this does not measure.** A follow-up edit is evidence the partner was in play, not proof the first commit
+was incomplete; a feature landed over several commits leaves the same trace. Single-file commits get an alarm at
+any `deg` 90% / 72% of the time, and at `deg ≥ 0.5` 37% / 23% — the row's own printed percentage ("co-edited in
+N% of commits") is what lets a reader discount a 2% partner. The default was not changed here: a floor would
+trade recall 0.35 → 0.22 for precision 0.35 → 0.54 on this repository, and no terminality number was taken for
+either side (METHODOLOGY §9, principle 1).
+
+### (d) The validation set neither formulation can see
+
+Measured at `5e96a6a5`, before `75ed8d3a` folded two of the four copies below into `findByField` — the numbers
+describe that tree. While one 6-line table lookup was being deduplicated on 2026-09-08, `--quality-delta` walked a
+human to a FOURTH copy of the same linear-search shape across four modules (`wrap.h`, `ingest_crawl.h`, `lanes.h`,
+`namingconsistency.h`), one per fold. Git shows those four files together only in commits of more than 30 files
+(the initial import, the namespace rename, the brace sweep), never inside the miner's cap; and each function has
+a single caller, so CC = 1. Both formulations are blind to it by construction, and correctly so: it is a **clone
+family**, not scatter. The duplication kind does see it — a fifth copy dropped into `src/` for this measurement
+was reported against `lanes::findClaimByKey` at 33 normalized tokens — one sibling at a time, which is that
+verb's contract. `--clones` lists none of the four: it runs at a 40-token floor (`src/verbs_report.h`) where the
+delta verb runs at `kMinCloneTokens = 18` (`src/quality.h`, whose comment still says the two match). A whole-repo
+view of a family the delta verb sees one member at a time is a clone-lens question; it is recorded here, not
+built.

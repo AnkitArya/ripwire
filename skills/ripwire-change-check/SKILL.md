@@ -71,7 +71,7 @@ emits a flat `<cand r= s= n= id= k= p= l=>` top-K — identity + score + signatu
      `--affected=SYM` (or `--affected=file:NAME` when a path shares the name) instead of widening it to the
      whole file, and invert it with `--exercises=test/<harness>` to see what a given test actually covers.
    - **co-change partners NOT in the diff** — files that historically move together (should they be in this
-     change too?)
+     change too? — the Shotgun Surgery check: one change that has to land in many places, and did not)
 
 2. **Hotspot risk** — `ripwire <dir> --hotspots`
    `<hotspots>` ranked by `score = churn × ccx`. Does any changed file appear in the top-10? A change that
