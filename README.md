@@ -16,11 +16,26 @@ deterministic call graph — what to touch, what it breaks, which tests to run �
 around and reading whole files.
 
 <details>
-<summary>Almost none of this is new: <b>42 repositories and 67 papers</b> folded, each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in — all of it put into a single blazing-fast compiled executable</summary>
+<summary><b>Fifty years of software-engineering results, and research from last month.</b> 42 repositories and 67 papers folded — McCabe (1976) through to <b>seven papers published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in, all of it put into a single blazing-fast compiled executable</summary>
 
 Beside those sits a labelled survey of **237 tools** that contributed nothing and says so. The two
 sets are disjoint by construction, so they add rather than nest — a tool that gave a lesson is never
-counted twice. All three counts are re-derived from that document's own tables by
+counted twice.
+
+**Both halves are load-bearing, and they are doing different jobs.** The settled results are what
+make the quality lens trustworthy: McCabe on complexity (1976), Halstead on volume (1977), Spärck
+Jones on term specificity (1972), Nagappan & Ball on churn. Fifty years of replication means those
+are not opinions, and a tool that measures your code should be built on the ones that survived.
+
+The recent work is what makes it *current*: **seventeen of the folded papers are from 2026, seven
+published in the last two months and three in the last thirty days** (dates as of 2026-09-08; every
+row carries its arXiv id, so the claim is checkable rather than atmospheric). Retrieval for coding
+agents, context-compression cost, placebo-controlled localization — that literature is months old,
+not decades, and several rows were folded within weeks of the paper appearing.
+
+Neither half alone would be enough. A tool built only on the classics would not know what an agent
+needs; one built only on last month's preprints would have nothing underneath it. And the newest row
+is a result that **failed** when it was tested here — which is the point of writing them down. All three counts are re-derived from that document's own tables by
 `test/readmedriftcheck.sh` on every run, which fails if this page and those tables disagree, so the
 claim cannot quietly drift. The row-by-row ledger is
 [`docs/LINEAGE.md`](docs/LINEAGE.md).
