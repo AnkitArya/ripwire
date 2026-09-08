@@ -57,26 +57,46 @@ cost the reference pass already pays once per Ruby file. The depth bound (256) s
 `--deps --limit=100000 --no-cache` wall time on a 4683-file Rails app: 1.04 s → 0.92 s (noise); on
 activerecord `lib/` 0.21 s → 0.18 s.
 
-**The denominator moved — read every Ruby `ccd`/`acd`/`nccd`/`shape=` recorded before this build as a
-different measurement.** Under runtime constant references a Ruby codebase is one tangle at the file level:
-models name each other, base classes name their subclasses through registries, and the transitive cone of a
-controller is most of the application. That is the graph Ruby has; the declarative round was measuring the
-part of it written as statements. `--deps --limit=100000`, before → after (`files=` is the listing's own
-denominator: files with at least one edge; `<godfiles total=>` is the uncapped importee count):
+**Structure versus use — the decision this round adds, and it reaches TS/JS too.** With receivers counted
+like every other edge, a Ruby codebase is one strongly-connected core at the file level: models name each
+other, base classes name their subclasses through registries, and the cone of a controller is most of the
+application. Measured before the cut, `--deps --limit=100000` on a 4683-file Rails app went ccd
+12 740 → 1 407 232, nccd 0.31 → 33.74, and every Ruby corpus read `shape="tangled"`. That is a true fact
+about runtime references and a useless one for a lens: a reading that is the same everywhere is not a
+reading. So a **lazy edge** — a (from, to) pair every one of whose directives is written inside a closure
+(a Ruby method/lambda/block, a TS/JS function body) or is a Ruby `autoload` — is a **use**, not a load-time
+dependency, and the two views now say different things on purpose:
 
-| corpus | files= | ccd | acd | nccd | shape | importees | `--deps` bytes |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| activesupport 7.2.3.2 `lib/` (282) | 206 → 241 | 10 450 → 43 098 | 37.2 → 153.4 | 5.19 → 21.40 | tangled → tangled | 241 → 244 | 55 483 → 73 757 |
-| activerecord 7.2.3.2 `lib/` (395) | 300 → 368 | 2 714 → 73 298 | 6.9 → 186.0 | 0.90 → 24.33 | horizontal → tangled | 385 → 386 | 71 474 → 112 916 |
-| a Rails app, 4683 files / 3532 `.rb` | 2 296 → 3 245 | 12 740 → 1 407 232 | 3.3 → 367.9 | 0.31 → 33.74 | horizontal → tangled | 385 → 1 447 | 378 473 → 729 100 |
-| a second Rails app, 1957 files / 1895 `.rb` | 1 066 → 1 446 | 6 258 → 128 889 | 3.3 → 68.1 | 0.33 → 6.88 | horizontal → tangled | 189 → 598 | 172 701 → 352 701 |
+- **Use** — `--impact`'s importer tier (`lazy="1"`), the file's own `<inc t=>` rows, call-resolution
+  narrowing, `--expand`'s siblings and `--cochange`'s static-coupling test all keep every edge. "Who uses
+  `User`?" is answered by all 197 files that call it.
+- **Structure** — `--deps`, `--arch` and `--report` measure the load-time graph: `afferent=`, `instab=`,
+  `transitive=`, godfiles, stabledeps, cycles, ccd/acd/nccd and `shape=` leave lazy pairs out
+  (`graph.h::resolveStructuralIncludeAdj`; one load-time directive makes the whole pair load-time, the
+  parser-72 `recordLazyPair` rule). The cut is disclosed where it is made: `<health lazy_edges=N>` counts the
+  distinct pairs left out and a file row carries `lazy_edges=N` for its own, both absent when 0 — so a corpus
+  with no lazy directive is byte-identical to before. A lazy edge is not an unresolved one: the unresolved
+  row has neither `lazy_edges=` nor an importer; the lazy row has both.
 
-activerecord's `associations/builder/has_many.rb` is the shape in one row: one receiver directive
-(`CollectionAssociation`), `transitive="379"` of 394 files — the cone is the strongly-connected core, which is
-what a reader of `--deps` on a Rails gem needs to know before trusting any cone number. The top importees
-did not move (activerecord: `errors.rb` 137, `base.rb` 89 — superclass rows from round one); the uncapped
-listing on the gem carries 2 228 `<inc t=>` rows over 1 188 distinct targets, the most frequent being
-`ActiveSupport::Concern` (57, out of tree, shown, no edge).
+This changes one TS/JS number: a `require()` inside a function body (parser version 72) was already
+`lazy="1"` in the importer tier and is now also out of `--deps`' structure. On this repo's own fixtures no
+gate pinned it inside the cone. `--deps --limit=100000`, parser version 82 → 83 (`files=` is the listing's
+own denominator: files with a row; `<godfiles total=>` the uncapped load-time importee count):
+
+| corpus | files= | ccd | acd | nccd | shape | importees | lazy_edges | `--deps` bytes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| activesupport 7.2.3.2 `lib/` (282) | 206 → 241 | 10 450 → 15 299 | 37.2 → 54.4 | 5.19 → 7.59 | tangled → tangled | 241 → 201 | 945 | 55 483 → 75 970 |
+| activerecord 7.2.3.2 `lib/` (395) | 300 → 368 | 2 714 → 4 088 | 6.9 → 10.4 | 0.90 → 1.36 | horizontal → vertical | 385 → 310 | 1 026 | 71 474 → 114 745 |
+| a Rails app, 4683 files / 3532 `.rb` | 2 296 → 3 245 | 12 740 → 13 170 | 3.3 → 3.4 | 0.31 → 0.32 | horizontal → horizontal | 385 → 414 | 5 632 | 378 473 → 750 913 |
+| a second Rails app, 1957 files / 1895 `.rb` | 1 072 → 1 455 | 6 289 → 6 382 | 3.3 → 3.4 | 0.33 → 0.34 | horizontal → horizontal | 189 → 197 | 1 830 | 173 606 → 363 733 |
+
+Read the two halves together: on the Rails apps the structure barely moves (class-body receivers are few)
+while `lazy_edges` says how large the runtime layer the structure leaves out is — 5 632 pairs on the first
+app, where the importer tier now names them all. On the gems the structure grows because a gem does depend at
+load time through class-body receivers (`ActiveSupport.on_load`, `Concern`), and importees FALL (241 → 201,
+385 → 310): a file whose only importers call it from inside methods is no longer a god file, it is a file
+`--impact` lists. The uncapped `<inc t=>` listing on activerecord carries 2 228 rows over 1 188 distinct
+targets, the most frequent being `ActiveSupport::Concern` (57, out of tree, shown, no edge).
 
 **Default map.** Byte-identical on a Ruby-free corpus (this repo's `src/`, modulo version stamps). On Ruby
 corpora the ranking moves a little (activesupport `est_tokens` 15 745 → 15 688, `pr_iters` 56 → 54) because
@@ -95,8 +115,10 @@ not indexed, the floor note stands.
 Gate: `test/rubyrecvcheck.sh` + `test/rubyrecvfix/` (17 files — dedupe across seven receiver sites, two
 nestings of one name in one file, four laziness levels, lexical versus absolute, the Object-level fallback
 for a module-less script, a self-include, five non-constant receiver shapes, the Struct alias floor, the
-argument/rescue floor, a same-basename decoy, root-spelling parity, determinism, warm == cold,
-well-formedness). Written red first: 14 arms fail against the parser-version-82 binary, every mutation
+argument/rescue floor, a same-basename decoy, the structure-versus-use cut — ccd 20 over 17 files with
+`lazy_edges="9"`, App::User with four lazy importers and no `--deps` row, a lazy row told from an unresolved
+one — root-spelling parity, determinism, warm == cold, well-formedness). Written red first: 14 arms fail
+against the parser-version-82 binary and 7 more against the receiver build before the cut; every mutation
 control and floor arm passes there. 558 → 559 gate scripts.
 
 ### Added — Ruby constant references are dependencies (parser version 82, cache format 17)

@@ -351,7 +351,8 @@ std::optional<int> runArchViews( const MainDispatch& d )
     // first — the "why pull in 100 headers for something simple" detector.
     if( cfg.deps )
     {
-        const auto      adj    = resolveIncludeAdj( ing );   // the file→file dependency graph (forward = includes)
+        const StructuralIncludeAdj sa = resolveStructuralIncludeAdj( ing );   // the LOAD-TIME file→file graph (forward = includes);
+        const auto&     adj    = sa.adj;                     //   lazy pairs are out of it and counted (lazy_edges=), see graph.h
         const auto      cycles = sccCycles( adj );           // Lakos cardinal sin: cyclic physical deps
         const DepHealth h      = dependencyHealth( adj );    // per-file transitive cone (unrestricted BFS)
         // §P9.4: <health>'s ccd/acd/nccd are the RESTRICTED (dependency-capable-only) numbers — recomputed
@@ -368,7 +369,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
                 }
             }
         }
-        packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, cycles, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, cfg.pageLimit, cfg.pageOffset, avRootArg );
+        packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, cycles, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, sa.lazyEdgesByFile, sa.lazyEdges, cfg.pageLimit, cfg.pageOffset, avRootArg );
         return 0;
     }
 

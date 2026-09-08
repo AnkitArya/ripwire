@@ -5959,6 +5959,10 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       const std::vector<std::uint32_t>& transitive, const std::vector<std::uint32_t>& afferent,
                       const std::vector<std::vector<std::uint32_t>>& adj,
                       std::uint64_t ccd, double acd, double nccd,
+                      // parser version 83: the lazy pairs the load-time structure leaves out — per file (a row's
+                      // lazy_edges=, written only when > 0) and in total (<health lazy_edges=>, same rule). See
+                      // graph.h::resolveStructuralIncludeAdj for the cut and test/rubyrecvcheck.sh §5 for the rule.
+                      const std::vector<std::uint32_t>& lazyEdgesByFile, std::uint64_t lazyEdges,
                       // T2: pagination of the per-file dependency LIST (the high-cardinality tail). limit<=0 =
                       // unbounded (the historic topN cap still applies); >0 overrides topN. offset skips the first
                       // M files of the sorted order. The health/godfiles/stabledeps/cycles PREAMBLE is unpaginated
@@ -6017,7 +6021,11 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
              "older build is comparable only when dep_langs= matches, and sh, rb, lua and ex joined the set at parser "
              "version 81. a per-file target row (inc t=) with no edge behind it is a directive that did not resolve to an indexed file "
              "(external package, or a specifier this tool declines to guess at, e.g. a shell path built from a variable) "
-             "— it is shown, never silently dropped. "
+             "— it is shown, never silently dropped. a LAZY edge — a pair every one of whose directives is written inside a "
+             "closure (a Ruby method/lambda/block, a TS/JS function body) or is a Ruby autoload — is a USE, not a load-time "
+             "dependency: it is in the impact verb's importer tier (lazy=1) and in this row's inc t= list, and it is NOT in "
+             "afferent=/instab=/transitive=/godfiles/stabledeps/cycles/ccd/acd/nccd/shape=; health lazy_edges= counts the "
+             "pairs left out and a row's lazy_edges= its own — both absent when 0. "
              "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
@@ -6050,6 +6058,11 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                    ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd,
                    nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
     w.write( hb );
+    if( lazyEdges > 0 )   // absent exactly when nothing was left out — never a hidden 0, and byte-identical for every corpus without a lazy directive
+    {
+        char lb[ 40 ];  std::snprintf( lb, sizeof( lb ), " lazy_edges=\"%llu\"", static_cast<unsigned long long>( lazyEdges ) );
+        w.write( lb );
+    }
     w.write( " dep_langs=\"" );  w.write( escapeXml( depLangs, esc ) );  w.write( "\"/>" );
 
     // most depended-ON (afferent coupling Ca) = highest blast radius: changing these recompiles the most.
@@ -6202,8 +6215,18 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         // below stays the raw statement count on purpose — that is a corpus fact, not an instability input.
         const double ce_ = f < adj.size() ? double( adj[f].size() ) : 0.0, ca_ = f < afferent.size() ? double( afferent[f] ) : 0.0;
         const double inst = ( ce_ + ca_ ) > 0.0 ? ce_ / ( ce_ + ca_ ) : 0.0;   // instability I = Ce/(Ca+Ce), project-only
-        char hdr[ 112 ];  std::snprintf( hdr, sizeof( hdr ), "\" includes=\"%zu\" afferent=\"%u\" instab=\"%.2f\" transitive=\"%u\">",
-                                        byFile[f].size(), f < afferent.size() ? afferent[f] : 0u, inst, trans( f ) );
+        const std::uint32_t lazyHere = f < lazyEdgesByFile.size() ? lazyEdgesByFile[f] : 0u;
+        char hdr[ 144 ];
+        if( lazyHere > 0 )   // the resolved pairs this row's directives make that the structure leaves out (parser version 83)
+        {
+            std::snprintf( hdr, sizeof( hdr ), "\" includes=\"%zu\" lazy_edges=\"%u\" afferent=\"%u\" instab=\"%.2f\" transitive=\"%u\">",
+                           byFile[f].size(), lazyHere, f < afferent.size() ? afferent[f] : 0u, inst, trans( f ) );
+        }
+        else
+        {
+            std::snprintf( hdr, sizeof( hdr ), "\" includes=\"%zu\" afferent=\"%u\" instab=\"%.2f\" transitive=\"%u\">",
+                           byFile[f].size(), f < afferent.size() ? afferent[f] : 0u, inst, trans( f ) );
+        }
         w.write( "<f p=\"" );  w.write( escapeXml( pathRel( f ), esc ) );  w.write( hdr );
         const std::size_t cap = byFile[f].size() < 40 ? byFile[f].size() : 40;
         for( std::size_t j = 0; j < cap; ++j )

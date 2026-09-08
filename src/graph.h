@@ -4498,9 +4498,63 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 // UN-deduped (dedup=false): one entry per include OCCURRENCE, preserving the occurrence-count semantics the
 // weakest-link cutrefs metric and afferent counts depend on — the ONLY change vs the old basename resolver
 // is the string→fileId step (basename → precise), so those metrics stay byte-identical absent a collision.
+// STRUCTURE vs USE (parser version 83, test/rubyrecvcheck.sh §5). The adjacency --deps/--arch/--report measure is
+// the LOAD-TIME structure: a (from,to) pair every one of whose directives is LAZY — written inside a closure
+// (Ruby method/lambda/block, TS/JS function body), or a Ruby `autoload` — is a USE of `to`, not a dependency
+// the loading of `from` incurs, and it is left out here. It stays everywhere use is the question: --impact's
+// importer tier (lazy="1"), the file's own <inc t=> rows, call-resolution narrowing (buildGraph's
+// fileIncludes), --expand's siblings, --cochange's static-coupling test. Why the cut: under runtime constant
+// references a Rails application is one strongly-connected core — measured on a 3532-file app, ccd went
+// 12 740 → 1 407 232 and every Ruby corpus read "tangled" — and a lens that reads the same everywhere is not
+// a lens. The cut is disclosed where it is made: `lazyEdges` (→ <health lazy_edges=>) counts the DISTINCT
+// pairs left out, `lazyEdgesByFile[f]` (→ <f lazy_edges=>) the pairs left out of f's own row. recordLazyPair's
+// rule decides laziness: one load-time directive for the pair makes the whole pair load-time.
+struct StructuralIncludeAdj
+{
+    std::vector<std::vector<std::uint32_t>> adj;               // UN-deduped occurrences, minus the all-lazy pairs
+    std::vector<std::uint32_t>              lazyEdgesByFile;   // distinct (f, to) pairs left out, per f
+    std::uint64_t                           lazyEdges = 0;     // Σ lazyEdgesByFile
+};
+
+inline StructuralIncludeAdj resolveStructuralIncludeAdj( const IngestResult& ing )
+{
+    HashMap<std::uint64_t, char> lazyPairs;
+    StructuralIncludeAdj         out;
+    out.adj = buildPreciseIncludeAdj( ing, /*dedup=*/false, &lazyPairs );
+    out.lazyEdgesByFile.assign( out.adj.size(), 0 );
+    if( lazyPairs.empty() )
+    {
+        return out;   // no lazy directive anywhere: the structure IS the full graph, byte-identical to before
+    }
+    for( std::uint32_t f = 0; f < out.adj.size(); ++f )
+    {
+        std::vector<std::uint32_t>& outs = out.adj[f];
+        std::uint32_t               kept = 0;
+        std::uint32_t               lastDropped = std::numeric_limits<std::uint32_t>::max();
+        for( std::uint32_t j = 0; j < outs.size(); ++j )
+        {
+            const std::uint32_t to  = outs[j];
+            const auto          it  = lazyPairs.find( ( std::uint64_t( f ) << 32 ) | std::uint64_t( to ) );
+            if( it != lazyPairs.end() && it->second != 0 )
+            {
+                if( to != lastDropped )   // outs is sorted (buildPreciseIncludeAdj), so equal ids are adjacent: count the PAIR once
+                {
+                    ++out.lazyEdgesByFile[f];
+                    lastDropped = to;
+                }
+                continue;
+            }
+            outs[kept++] = to;
+        }
+        outs.resize( kept );
+        out.lazyEdges += out.lazyEdgesByFile[f];
+    }
+    return out;
+}
+
 inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestResult& ing )
 {
-    return buildPreciseIncludeAdj( ing, /*dedup=*/false );
+    return resolveStructuralIncludeAdj( ing ).adj;
 }
 
 // ── LB-H (r10 GitNexus round) — IMPORT REACH, the second and much weaker kind of blast radius ────────────

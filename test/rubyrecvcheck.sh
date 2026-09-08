@@ -30,6 +30,15 @@
 #      namespace wrapper defines nothing, a genuine reopening fans out, a same-file reference is shown and
 #      dropped as a self-include, an out-of-tree receiver (`Time`, `Struct`, `Object`) is SHOWN and edges nowhere
 #      — the same posture every Python `import os` row already has.
+#   5. STRUCTURE vs USE. A LAZY edge — every occurrence of the pair written inside a closure (or an autoload,
+#      or a TS/JS require() inside a function) — is a USE, not a load-time dependency: it is in --impact's
+#      importer tier (lazy="1") and in the file's own <inc t=> rows, and it is NOT in the load-time STRUCTURE
+#      --deps/--arch measure — afferent, instab, transitive, godfiles, stabledeps, cycles, ccd/acd/nccd/shape.
+#      Under runtime references a Rails app is one strongly-connected core (measured: a 3532-file app went
+#      ccd 12 740 → 1 407 232, every corpus "tangled"), and a lens that reads the same everywhere is not a
+#      lens. The cut is disclosed where it is made: <health lazy_edges=N> counts the resolved pairs the
+#      structure leaves out, and a file row carries lazy_edges=N for its own. A lazy edge is not an
+#      unresolved one: the unresolved row has no lazy_edges= and no importer; the lazy row has both.
 #
 # Fixture test/rubyrecvfix (crawl root = the fixture; 17 .rb files under lib/):
 #   lib/app/report.rb         Helper (class body, lazy=0), User ×2 (deduped), App::Mailer, Time ×2 (deduped),
@@ -134,7 +143,39 @@ printf '%s' "$DEPS" | grep -q '<health files="17" dep_files="17"' \
     && ok 'capability: all 17 .rb files are dependency-capable' \
     || no "capability: health wrong: $( printf '%s' "$DEPS" | grep -oE '<health [^/]*/>' )"
 
-# ── 4. root spelling, determinism, warm == cold, well-formed XML ─────────────────────────────────────
+# ── 4. STRUCTURE vs USE: a lazy edge is in --impact and the rows, not in the load-time structure ────
+# Load-time edges in this fixture: report.rb → helper.rb (class-body `Helper.fmt`), lazy_levels.rb → helper.rb
+# (class-body), script.rb → lib/user.rb (file level). Everything else resolved is inside a closure: 9 pairs.
+# ccd = Σ transitive cones (self included): 14 files × 1 + 3 files × 2 = 20; acd = 20/17 = 1.2.
+printf '%s' "$DEPS" | grep -q '<health files="17" dep_files="17" ccd="20" acd="1.2" ' \
+    && ok 'structure: ccd counts the 3 load-time edges only — 20 over 17 files, acd 1.2 (with the 9 lazy edges in it would be one tangle)' \
+    || no "structure: health: $( printf '%s' "$DEPS" | grep -oE '<health [^/]*/>' )"
+printf '%s' "$DEPS" | grep -qE '<health [^>]*shape="horizontal" lazy_edges="9" dep_langs=' \
+    && ok 'structure: <health lazy_edges="9"> discloses the resolved pairs the structure leaves out; the shape stays horizontal' \
+    || no "structure: lazy_edges=/shape= wrong: $( printf '%s' "$DEPS" | grep -oE '<health [^/]*/>' )"
+[ "$( printf '%s' "$DEPS" | grep -oE '<godfiles [^>]*>.*</godfiles>' | sed 's|</godfiles>.*||' )" = '<godfiles total="2" shown="2" capped="0"><f p="lib/app/helper.rb" afferent="2"/><f p="lib/user.rb" afferent="1"/>' ] \
+    && ok 'structure: godfiles = the two load-time importees (helper.rb ×2, lib/user.rb ×1); App::User with its 4 lazy importers is not a god file' \
+    || no "structure: godfiles: $( printf '%s' "$DEPS" | grep -oE '<godfiles [^>]*>.*</godfiles>' | sed 's|</godfiles>.*||' )"
+printf '%s' "$DEPS" | grep -q '<f p="lib/app/user.rb"' \
+    && no "structure: lib/app/user.rb has a --deps row — its importers are all lazy, so it has no load-time afferent and no directive of its own: $( frow lib/app/user.rb )" \
+    || ok 'structure: lib/app/user.rb has NO --deps row (no directive, no load-time importer) — and --impact still names its 4 lazy importers (arm above)'
+[ "$( frow lib/app/two_scopes.rb )" = '<f p="lib/app/two_scopes.rb" includes="2" lazy_edges="2" afferent="0" instab="0.00" transitive="1">' ] \
+    && ok 'structure: two_scopes.rb — 2 directives, both resolved, both lazy: lazy_edges="2", no structural edge (transitive 1, instab 0.00)' \
+    || no "structure: two_scopes.rb row: $( frow lib/app/two_scopes.rb )"
+[ "$( frow lib/app/report.rb )" = '<f p="lib/app/report.rb" includes="5" lazy_edges="2" afferent="0" instab="1.00" transitive="2">' ] \
+    && ok 'structure: report.rb — Helper is load-time (transitive 2), User + App::Mailer are lazy (lazy_edges 2), Time/::Time unresolved (neither)' \
+    || no "structure: report.rb row: $( frow lib/app/report.rb )"
+[ "$( frow lib/app/lazy_levels.rb )" = '<f p="lib/app/lazy_levels.rb" includes="4" lazy_edges="3" afferent="0" instab="1.00" transitive="2">' ] \
+    && ok 'structure: lazy_levels.rb — the class-body Helper is the one load-time edge; lambda, singleton method and do-block are 3 lazy edges' \
+    || no "structure: lazy_levels.rb row: $( frow lib/app/lazy_levels.rb )"
+[ "$( frow lib/script.rb )" = '<f p="lib/script.rb" includes="1" afferent="0" instab="1.00" transitive="2">' ] \
+    && ok 'structure: script.rb — a file-level receiver is a load-time edge: transitive 2, no lazy_edges= attribute' \
+    || no "structure: script.rb row: $( frow lib/script.rb )"
+[ "$( frow lib/app/dynamic.rb )" = '<f p="lib/app/dynamic.rb" includes="1" afferent="0" instab="0.00" transitive="1">' ] \
+    && ok 'structure: LAZY ≠ UNRESOLVED — dynamic.rb'"'"'s `Object` row resolves to nothing: no lazy_edges= attribute (two_scopes.rb, same instab, carries lazy_edges="2")' \
+    || no "structure: dynamic.rb row: $( frow lib/app/dynamic.rb )"
+
+# ── 5. root spelling, determinism, warm == cold, well-formed XML ─────────────────────────────────────
 ( cd "$FIX" && "$BIN" . --deps --limit=100000 --no-cache 2>/dev/null ) | sed 's/ root="[^"]*"//' >"$TMP/dots"
 "$BIN" "$FIX" --deps --limit=100000 --no-cache 2>/dev/null | sed 's/ root="[^"]*"//' >"$TMP/abs"
 cmp -s "$TMP/dots" "$TMP/abs" \
