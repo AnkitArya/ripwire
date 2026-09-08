@@ -1001,7 +1001,9 @@ $ ./build/ripwire . --exercises=test/regression.sh
 
 ### `--situ[=F1,F2]`
 
-**Answers:** situational awareness for a change: blast radius + tests + co-change (default = git diff)
+**Answers:** situational awareness for a change: blast radius + tests + co-change (default = git diff) Its co-change section is the check for Fowler's SHOTGUN SURGERY: the files this change usually lands in but did not.
+
+Backtested on two histories (EVALS.md): a named partner is edited within the next 3 commits in 56% / 32% of alarms, against a 1-2% chance baseline
 
 **Try it**
 
@@ -2048,7 +2050,7 @@ $ ./build/ripwire . --comment-coherence --limit=8
 
 **Answers:** files that change together in git (hidden coupling;
 
-the rows' own legend defines surprising=)
+the rows' own legend defines surprising=) = Fowler's SHOTGUN SURGERY in its measurable, historical form: change coupling (Gall 1998, Zimmermann 2005). The static form — callers spread over many files (Lanza & Marinescu 2006) — was measured on two corpora and does NOT predict it, so it is not a flag (EVALS.md)
 
 **Try it**
 
@@ -2074,6 +2076,10 @@ $ ./build/ripwire . --cochange
 ```
 
 **Shaped by:** `--cochange-recur`, `--cochange-groups`, `--since`, `--limit`
+
+**Caveats (stated by the binary):**
+
+- The static form — callers spread over many files (Lanza & Marinescu 2006) — was measured on two corpora and does NOT predict it, so it is not a flag (EVALS.md)
 
 ### `--cochange-recur=K`
 

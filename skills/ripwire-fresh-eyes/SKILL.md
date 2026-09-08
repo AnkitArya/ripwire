@@ -383,7 +383,7 @@ sections your question needs.
    quality. Different question from `--doc-drift` above: doc-drift asks whether a *markdown* claim is still
    *true*; this asks whether a *source doc-comment* carries *information* — neither checks the other's axis.
 
-## Hidden-coupling pass — "a change here keeps breaking unrelated files"
+## Hidden-coupling pass — "a change here keeps breaking unrelated files" (Fowler's Shotgun Surgery, in its measurable form: change coupling)
 
 6. **Behavioural coupling** — `ripwire <dir> --cochange`
    Bare `--cochange` emits ONLY the *surprising* pairs — files that change together in git but share **no

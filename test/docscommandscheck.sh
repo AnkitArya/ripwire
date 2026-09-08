@@ -414,7 +414,10 @@ else
     no "(I) --help does not name Shotgun Surgery on: $( printf '%s' "$smellMissing" | tr '\n' ' ' )— the smell is unfindable by name again (src/cli.h help text)"
 fi
 # mutation control: strip the name from a copy of the SAME text; the identical extraction must lose both entries
-smellMut="$( printf '%s\n' "$helpText" | sed -E 's/[Ss]hotgun [Ss]urgery/xxxxxxx xxxxxxx/g' )"
+# case-insensitive by character class, not by a GNU-only `I` flag: the help spells it SHOTGUN SURGERY and
+# the extraction above lowercases, so a title-case-only strip left the copy unchanged (caught by the
+# did-not-take guard on first run — the guard is why that shape cannot ship green)
+smellMut="$( printf '%s\n' "$helpText" | sed -E 's/[Ss][Hh][Oo][Tt][Gg][Uu][Nn] [Ss][Uu][Rr][Gg][Ee][Rr][Yy]/xxxxxxx xxxxxxx/g' )"
 if [ "$smellMut" = "$helpText" ]; then
     no "(I) mutation control did not take — --help holds nothing to strip, so the arm above cannot have seen the name"
 elif [ -n "$( smellEntries "$smellMut" )" ]; then

@@ -96,7 +96,7 @@ enclosing-chain report) and `@FILE:LINE` in any SYM selector; contract gate: `te
 | `grep` (`pattern`) | `--grep=STR` | parallel literal scan + enclosing symbol + matched line |
 | `cochange` (`file`) | `--cochange=FILE` | the lockstep git partners of one file |
 | `memory_recall` (`task`, `top_k` + `budget_tokens` optional) | `--recall=TASK [--top-k=N] [--max-tokens=N]` | full bodies of the few relevant docs/memory notes, bounded by the SAME default 8000-token body ceiling as the CLI (the header discloses `max_tokens=` and every cut). `budget_tokens` raises the ceiling explicitly when you want everything; `top_k` (default 8) shapes how many docs |
-| `situational_awareness` (`diff`/`files` optional) | `--situ` | blast radius, tests_to_run, forgotten co-change partners, hotspot alert — as JSON; defaults to `git diff HEAD` |
+| `situational_awareness` (`diff`/`files` optional) | `--situ` | blast radius, tests_to_run, forgotten co-change partners (the Shotgun Surgery check), hotspot alert — as JSON; defaults to `git diff HEAD` |
 | `mentions` (`symbol`) | `--mentions=SYM` | which markdown plans/designs discuss a symbol |
 | `owners` (`symbol` optional) | `--owners[=SYM]` | bus-factor: recency-weighted author ownership |
 | `lego` (`type`) | `--lego=TYPE` | an interface's method contract + every implementor (own-language) |

@@ -63,7 +63,8 @@ candidates remain plausible, or the change's blast radius is itself part of the 
    read from `git diff`). Emits, in one pass:
    - **blast radius** — everything that transitively reaches the changed symbols
    - **tests to run now** (`--affected` under the hood)
-   - **co-change partners NOT in your diff** — files that historically move together (hidden coupling)
+   - **co-change partners NOT in your diff** — files that historically move together (hidden coupling). This is
+     the Shotgun Surgery check: did the change land everywhere it usually has to?
 2. **Who calls the broken symbol** — `ripwire <dir> --callers=SYM` → each recorded caller (a floor — counts_floor=) is a candidate for an
    unexpected side-effect.
 3. **Co-change history** — `ripwire <dir> --cochange=fileA.cpp` → partners ranked by `deg` (fraction of
