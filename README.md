@@ -204,10 +204,10 @@ The `cx` and `churn` ramps share one five-stop scale, ordered so lightness rises
 
 </details>
 
-One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks, and
+One deterministic answer: the relevant symbols, their callers, the change risks, and
 the tests that reach them. The task is yours to phrase — ask about *your* code, not ours. Run on this
-repository (2026-08-30), `ripwire . --for="incremental cache invalidation"` answers in about 4.3K
-tokens with:
+repository (2026-08-30), `ripwire . --for="incremental cache invalidation"` produced about 4.3K
+estimated tokens, not an enforced token budget. It includes:
 
 *This is what the output looks like, not the token-savings recipe.* A bare `--for` on every question
 is the most expensive way to use this tool — see [Where it pays most](#where-it-pays-most-and-where-it-does-not)
