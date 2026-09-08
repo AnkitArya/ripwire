@@ -8,7 +8,7 @@ namespace rw
 namespace
 {
 
-// ES named imports carry three independent facts: local spelling, export spelling, and module.
+// ES imports carry three independent facts: local spelling, export spelling, and module.
 //
 // EXPORTS come in two shapes and BOTH are recorded, because the table is consulted as a REFUSAL: a name
 // the table cannot find is a call the resolver declines to hand to the global name ladder. Seeing only
@@ -24,9 +24,9 @@ namespace
 // lives in a third file this table does not chase, so recording the name would let a refusal fire on
 // evidence we do not have. Left out, the name is simply UNLISTED, and buildJsImportTables degrades an
 // unlisted import to the name ladder — the pre-import behaviour, which resolved barrels correctly.
-// `export default` is likewise absent, and so is its import side: a default import is an `identifier`
-// child of the import_clause, not an `import_specifier`, so no JsImport binding is recorded for it and
-// the whole default-export path stays on the unchanged name ladder rather than on a half-built table.
+// Default imports request the export spelling "default"; their local name is never a global fallback.
+// Named default declarations and local identifier exports use the same table. Anonymous expressions
+// have no symbol identity here and remain unresolved rather than borrowing a same-spelled function.
 // Type-only imports remain a known gap (recorded with an empty importedName, and refused, never sprayed).
 inline bool jsNodeIs( TSNode node, const char* kind )
 {
@@ -129,6 +129,64 @@ inline std::vector<std::pair<std::string, std::string>> jsExportClauseNames( TSN
     return names;
 }
 
+// Only a unique module value binding can supply an identifier default. Non-function declarations
+// matter too: they do not all become symbols, but still make a same-named function ambiguous.
+inline std::uint32_t jsModuleBindingCount( TSNode root, std::string_view name, std::string_view src )
+{
+    std::uint32_t count = 0;
+    ChildCursor cursor( root );
+    std::vector<TSNode> children;
+    collectChildren( root, cursor.cur, children );
+    for( TSNode stmt : children )
+    {
+        TSNode decl = jsNodeIs( stmt, "export_statement" ) ? ts_node_child_by_field_name( stmt, "declaration", 11 ) : stmt;
+        if( ts_node_is_null( decl ) || jsHasToken( stmt, "type" ) ) { continue; }
+        std::vector<TSNode> pending{ decl };
+        while( !pending.empty() )
+        {
+            TSNode node = pending.back();
+            pending.pop_back();
+            TSNode binding{};
+            if( jsNodeIs( node, "variable_declarator" ) || jsNodeIs( node, "function_declaration" )
+                || jsNodeIs( node, "generator_function_declaration" ) || jsNodeIs( node, "class_declaration" )
+                || jsNodeIs( node, "abstract_class_declaration" ) || jsNodeIs( node, "enum_declaration" ) )
+            {
+                binding = ts_node_child_by_field_name( node, "name", 4 );
+            }
+            else if( jsNodeIs( node, "import_specifier" ) && !jsHasToken( node, "type" ) )
+            {
+                binding = ts_node_child_by_field_name( node, "alias", 5 );
+                if( ts_node_is_null( binding ) ) { binding = ts_node_child_by_field_name( node, "name", 4 ); }
+            }
+            else if( jsNodeIs( node, "identifier" ) ) { binding = node; }
+            else if( jsNodeIs( node, "lexical_declaration" ) || jsNodeIs( node, "variable_declaration" )
+                     || jsNodeIs( node, "import_statement" ) || jsNodeIs( node, "import_clause" )
+                     || jsNodeIs( node, "named_imports" ) || jsNodeIs( node, "namespace_import" ) )
+            {
+                ChildCursor childCursor( node );
+                std::vector<TSNode> nested;
+                collectChildren( node, childCursor.cur, nested );
+                for( TSNode child : nested ) { pending.push_back( child ); }
+            }
+            if( !ts_node_is_null( binding ) )
+            {
+                if( jsNodeIs( binding, "type_identifier" ) )
+                {
+                    if( pattern::nodeText( binding, src ) == name ) { ++count; }
+                }
+                else
+                {
+                    for( const std::string& local : jsPatternNames( binding, src ) )
+                    {
+                        if( local == name ) { ++count; }
+                    }
+                }
+            }
+        }
+    }
+    return count;
+}
+
 inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
 {
     if( lang != Lang::TypeScript && lang != Lang::JavaScript ) { return; }
@@ -164,10 +222,11 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
             {
                 TSNode node = pending.back();
                 pending.pop_back();
-                if( jsNodeIs( node, "import_specifier" ) )
+                const bool isDefault = jsNodeIs( node, "identifier" ) && jsNodeIs( ts_node_parent( node ), "import_clause" );
+                if( isDefault || jsNodeIs( node, "import_specifier" ) )
                 {
-                    TSNode name = ts_node_child_by_field_name( node, "name", 4 );
-                    TSNode alias = ts_node_child_by_field_name( node, "alias", 5 );
+                    TSNode name = isDefault ? node : ts_node_child_by_field_name( node, "name", 4 );
+                    TSNode alias = isDefault ? node : ts_node_child_by_field_name( node, "alias", 5 );
                     if( ts_node_is_null( alias ) ) { alias = name; }
                     if( !jsNodeIs( alias, "identifier" ) ) { continue; }
                     std::string local( pattern::nodeText( alias, src ) );
@@ -176,7 +235,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                     binds.back().typeName = module;
                     if( !jsHasToken( stmt, "type" ) && !jsHasToken( node, "type" ) && jsNodeIs( name, "identifier" ) )
                     {
-                        binds.back().importedName = std::string( pattern::nodeText( name, src ) );
+                        binds.back().importedName = isDefault ? "default" : std::string( pattern::nodeText( name, src ) );
                     }
                 }
                 else if( jsNodeIs( node, "import_statement" ) || jsNodeIs( node, "import_clause" ) || jsNodeIs( node, "named_imports" ) )
@@ -188,9 +247,32 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                 }
             }
         }
-        else if( jsNodeIs( stmt, "export_statement" ) && !jsHasToken( stmt, "default" ) )
+        else if( jsNodeIs( stmt, "export_statement" ) )
         {
             TSNode decl = ts_node_child_by_field_name( stmt, "declaration", 11 );
+            if( jsHasToken( stmt, "default" ) )
+            {
+                TSNode value = ts_node_child_by_field_name( stmt, "value", 5 );
+                TSNode name{};
+                if( !ts_node_is_null( decl ) ) { name = ts_node_child_by_field_name( decl, "name", 4 ); }
+                record( stmt, LocalBindKind::JsExport, "default", root );
+                if( jsNodeIs( value, "identifier" ) && jsModuleBindingCount( root, pattern::nodeText( value, src ), src ) == 1 )
+                {
+                    binds.back().importedName = std::string( pattern::nodeText( value, src ) );
+                }
+                else if( jsNodeIs( decl, "function_declaration" ) || jsNodeIs( decl, "generator_function_declaration" )
+                         || jsNodeIs( decl, "class_declaration" ) || jsNodeIs( decl, "abstract_class_declaration" ) )
+                {
+                    if( ( jsNodeIs( name, "identifier" ) || jsNodeIs( name, "type_identifier" ) )
+                        && jsModuleBindingCount( root, pattern::nodeText( name, src ), src ) == 1 )
+                    {
+                        binds.back().spanStart = ts_node_start_byte( decl );
+                        binds.back().spanEnd = ts_node_end_byte( decl );
+                        binds.back().importedName = std::string( pattern::nodeText( name, src ) );
+                    }
+                }
+                continue;
+            }
             if( ts_node_is_null( decl ) )
             {
                 // Clause form. The scope is the whole PROGRAM: a clause exports a module-scope binding and
@@ -201,7 +283,10 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                 for( const auto& [ exportName, localName ] : jsExportClauseNames( stmt, src ) )
                 {
                     record( stmt, LocalBindKind::JsExport, exportName, root );
-                    binds.back().importedName = localName;
+                    if( exportName != "default" || jsModuleBindingCount( root, localName, src ) == 1 )
+                    {
+                        binds.back().importedName = localName;
+                    }
                 }
                 continue;
             }

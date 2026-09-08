@@ -196,7 +196,16 @@ constexpr std::uint32_t kCacheVersion = 17;           // 17: Include gains `bool
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 82;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 83;           // bump on any grammar/.scm/extraction change
+                                                      // 83 = 2026-09-08 (test/tsimportprecisecheck.sh): JS/TS
+                                                      //    DEFAULT imports and local default-export facts —
+                                                      //    `import save from './storage.js'` now resolves by the
+                                                      //    module's exported identity, not by the importer's
+                                                      //    chosen local name, so an unrelated same-spelled
+                                                      //    function is no longer evidence of that edge. New
+                                                      //    extraction facts on an unchanged record shape, so
+                                                      //    kCacheVersion is untouched. Renumbered from 82 on
+                                                      //    merge: main had already spent 82 on Ruby constants.
                                                       // 82 = 2026-09-07 (test/rubyconstcheck.sh): Ruby constant
                                                       //    references are dependencies — superclass, include/
                                                       //    extend/prepend, `autoload :Name` (constant) and

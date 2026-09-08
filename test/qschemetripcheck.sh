@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-07, ES DEFAULT IMPORTS (test/lib/jsdefaultimport.sh): kParserVer and its quality mirror
+#   move 81 -> 82 for default import/export facts. Record layouts and Snapshot-side functions are
+#   unchanged: kCacheVersion stays 16 and kQSnapCacheScheme stays 8.
 # 2026-09-07, FOUR-LANGUAGE IMPORTS (test/bashsourcecheck.sh, test/luarequirecheck.sh,
 #   test/rubyrequirecheck.sh, test/eliximportcheck.sh, test/deplangscheck.sh): kParserVer 80 -> 81 and
 #   kIngestParserVerMirror -> 81. Bash `source`/`.`, Lua `require`, Ruby `require`/`require_relative`/
