@@ -315,6 +315,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     emitBindings( result, raw.binds, spanIndex );
 
     result.includes = std::move( raw.incs );   // physical dependencies (#include / import), for --deps
+    result.constOpens = std::move( raw.constOpens );   // parser version 82: Ruby class/module opens → resolve.h's constant index
 
     emitBindingAliases( result, raw.ffis );
     emitRouteDefs( result, raw.routeDefs );

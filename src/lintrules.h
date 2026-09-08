@@ -171,7 +171,10 @@ inline Lang langOfPath( std::string_view path ) noexcept
 // branch in directiveTargetOf and its own Step-A in resolve.h, so each is a real node in this graph:
 //   Bash    `source FILE` / `. FILE`   — a LITERAL path (no name→path convention to model at all)
 //   Lua     `require "a.b"`            — package.path's dotted convention (`a.b` → `a/b.lua`)
-//   Ruby    `require_relative` / `require` — path-relative, and a bounded load-path probe
+//   Ruby    `require_relative` / `require` — path-relative, and a bounded load-path probe; parser version 82
+//           adds the CONSTANT spellings a Rails codebase actually depends through — `class X < Base`,
+//           include/extend/prepend, `autoload :Name` — resolved through the corpus's own class/module
+//           index (resolve.h::RubyConstantIndex), never by a name→path convention
 //   Elixir  `alias`/`import`/`require`/`use` — resolved through the corpus's OWN defmodule index
 // The paragraph this replaced said the opposite ("`require "mod"` LOOKS like an import and is not one")
 // and was TRUE of the extractor, never of the language: a Lua `require` is dispatched through

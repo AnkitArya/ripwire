@@ -123,6 +123,7 @@ struct RawFacts
     std::vector<BindingAlias> ffis;        // A4-R5: cross-language FFI binding declarations
     std::vector<RouteDef>     routeDefs;   // B6.3: HTTP server-side route registrations
     std::vector<RawRouteUse>  routeUses;   // B6.3: HTTP client-side calls (pre fromSymbol attribution)
+    std::vector<ConstOpen>    constOpens;  // parser version 82: Ruby class/module opens (model.h ConstOpen)
 };
 
 // A parsed-but-unqueried file waiting for the tags-query gate: owns its bytes and its TSTree until
@@ -209,6 +210,11 @@ inline void appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, IngestFil
     {
         ru.fileId = fileId;
         out.routeUses.push_back( std::move( ru ) );
+    }
+    for( ConstOpen& co : hit.constOpens )      // parser version 82
+    {
+        co.fileId = fileId;
+        out.constOpens.push_back( std::move( co ) );
     }
 }
 
@@ -478,7 +484,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 
                 const TSNode root = ts_tree_root_node( tree.get() );
                 scan.health[ fileId ] = measureFileHealth( root, bytes );   // §L1 — before `bytes` can be moved below
-                captureSideFacts( *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.refs, out.incs, out.binds, out.ffis, out.routeDefs, out.routeUses, sh.captureValueUses );
+                captureSideFacts( *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.refs, out.incs, out.binds, out.ffis, out.routeDefs, out.routeUses, out.constOpens, sh.captureValueUses );
 
                 const bool canQueueParsed = !sh.prewarm.ready.load( std::memory_order_acquire )
                                          && pendingParsed.size() < kMaxPendingParsedFiles
@@ -513,7 +519,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
 {
     RawFacts raw;
-    std::size_t totDefs = 0, totRefs = 0, totIncs = 0, totBinds = 0, totFfis = 0, totRouteDefs = 0, totRouteUses = 0;
+    std::size_t totDefs = 0, totRefs = 0, totIncs = 0, totBinds = 0, totFfis = 0, totRouteDefs = 0, totRouteUses = 0, totConstOpens = 0;
     for( const RawFacts& tf : tFacts )
     {
         totDefs  += tf.defs.size();
@@ -523,6 +529,7 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
         totFfis  += tf.ffis.size();
         totRouteDefs += tf.routeDefs.size();
         totRouteUses += tf.routeUses.size();
+        totConstOpens += tf.constOpens.size();
     }
     raw.defs.reserve( totDefs );
     raw.refs.reserve( totRefs );
@@ -531,6 +538,7 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
     raw.ffis.reserve( totFfis );
     raw.routeDefs.reserve( totRouteDefs );
     raw.routeUses.reserve( totRouteUses );
+    raw.constOpens.reserve( totConstOpens );
     for( RawFacts& tf : tFacts )
     {
         for( RawDef& d : tf.defs )
@@ -560,6 +568,10 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
         for( RawRouteUse& ru : tf.routeUses )
         {
             raw.routeUses.push_back( std::move( ru ) );
+        }
+        for( ConstOpen& co : tf.constOpens )
+        {
+            raw.constOpens.push_back( std::move( co ) );
         }
     }
     return raw;
@@ -775,7 +787,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         // Skips the ~11ms / 7 MB serialization+write on a no-change warm run.
         if( !cacheFile.empty() && dirty.load() )
         {
-            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, captureValueUses );
+            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, captureValueUses );
         }
     }
     return raw;

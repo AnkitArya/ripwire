@@ -16,7 +16,9 @@
 #   load 'tool.rb'                  -> tool.rb          Kernel#load, same load-path rule
 #   require 'shared'                -> no edge          AMBIGUOUS: ./shared.rb and lib/shared.rb answer
 #   require some_variable           -> not captured     no string literal to read
-#   autoload :Late, 'lib/helper'    -> not captured     DISCLOSED FLOOR: the path is argument TWO
+#   autoload :Late, 'lib/helper'    -> lib/helper.rb    parser version 82: Kernel#autoload's PATH (argument two) is
+#                                                       the dependency — lazy (Include::isLazy); was a stated
+#                                                       floor through kParserVer 81 (test/rubyconstcheck.sh)
 #   + require_relative inside a module body, a method body, a begin/rescue LoadError pair, and an if
 #   decoy/helper.rb                 -> a same-BASENAME file no rule can reach
 #
@@ -52,13 +54,13 @@ for t in './sib' 'json' 'tool.rb' 'shared' 'optional_gem'; do
         && ok "capture: <inc t=\"$t\"/>" \
         || no "capture: no <inc t=\"$t\"/> row"
 done
-printf '%s' "$DEPS" | grep -q '<f p="main.rb" includes="11"' \
-    && ok 'capture: exactly 11 directives — `require some_variable` and `autoload` are NOT invented' \
+printf '%s' "$DEPS" | grep -q '<f p="main.rb" includes="12"' \
+    && ok 'capture: exactly 12 directives — `require some_variable` is NOT invented; `autoload :Late, "lib/helper"` IS a directive (parser version 82)' \
     || no "capture: directive count wrong: $( printf '%s' "$DEPS" | grep -oE '<f p="main.rb" includes="[0-9]*"' )"
 
 # ── 2. RESOLUTION ─────────────────────────────────────────────────────────────────────────────────────
-printf '%s' "$DEPS" | grep -q '<f p="lib/helper.rb" afferent="2"/>' \
-    && ok 'resolve: BOTH rules land on lib/helper.rb (afferent="2") — file-relative and load-path agree' \
+printf '%s' "$DEPS" | grep -q '<f p="lib/helper.rb" afferent="3"/>' \
+    && ok 'resolve: BOTH rules land on lib/helper.rb, and so does `autoload :Late, "lib/helper"` (afferent="3")' \
     || no "resolve: lib/helper.rb afferent wrong: $( printf '%s' "$DEPS" | grep -oE '<f p="lib/helper.rb" afferent="[0-9]*"/>' )"
 for f in sib tool; do
     printf '%s' "$DEPS" | grep -q "<f p=\"$f.rb\" afferent=\"1\"/>" \
@@ -73,8 +75,9 @@ done
 
 # ── 3. MUTATION CONTROLS ──────────────────────────────────────────────────────────────────────────────
 # (a) unique-or-degrade: `require "shared"` is answered by ./shared.rb AND lib/shared.rb. main.rb's cone
-#     is therefore exactly {itself + 7 resolved files} = 8; a resolver that picked one would make it 9.
-printf '%s' "$DEPS" | grep -q '<f p="main.rb" includes="11" afferent="0" instab="1.00" transitive="8">' \
+#     is therefore exactly {itself + 7 resolved files} = 8; a resolver that picked one would make it 9. (The
+#     autoload's lib/helper.rb is already in the cone through `require_relative`, so parser version 82 adds no file.)
+printf '%s' "$DEPS" | grep -q '<f p="main.rb" includes="12" afferent="0" instab="1.00" transitive="8">' \
     && ok 'mutation control: the ambiguous `require "shared"` degrades — cone is 8, not 9' \
     || no "mutation control: the ambiguous require resolved: $( printf '%s' "$DEPS" | grep -oE '<f p="main.rb"[^>]*>' )"
 printf '%s' "$DEPS" | grep -qE '<f p="(lib/)?shared.rb" afferent=' \
@@ -84,12 +87,13 @@ printf '%s' "$DEPS" | grep -qE '<f p="(lib/)?shared.rb" afferent=' \
 printf '%s' "$DEPS" | grep -q '<f p="decoy/helper.rb" afferent=' \
     && no "mutation control: decoy/helper.rb gained an importer — a basename fallback crept in" \
     || ok 'mutation control: decoy/helper.rb has no importer (path-precise, never basename)'
-# (c) the DISCLOSED FLOOR: `autoload :Late, "lib/helper"` names a real in-tree file in argument TWO and is
-#     deliberately not captured. If a later round adds it, this arm fails and the doc comment must move
-#     with it — a floor nobody ever sees expire is a floor that quietly becomes a lie.
-printf '%s' "$DEPS" | grep -q '<f p="main.rb" includes="11"' \
-    && ok 'floor: autoload is NOT captured (11 directives, not 12) — the stated floor still holds' \
-    || no "floor: the directive count moved — autoload may now be captured; update the floor note"
+# (c) the floor that EXPIRED at parser version 82: `autoload :Late, "lib/helper"` names a real in-tree file in
+#     argument TWO and was deliberately not captured through kParserVer 81. It now is — the path, as ONE
+#     directive, never the constant beside it (that would be the same edge twice). The arm stays so the
+#     expiry is on the record, and so a regression to the floor is caught rather than quietly accepted.
+printf '%s' "$DEPS" | grep -q '<inc t="lib/helper"/>.*<inc t="lib/helper"/>' \
+    && ok 'expired floor: `autoload :Late, "lib/helper"` is captured as its PATH (the second lib/helper row) — one directive, not two' \
+    || no "expired floor: the autoload path row is missing: $( printf '%s' "$DEPS" | grep -oE '<inc t="[^"]*"/>' | tr '\n' ' ' )"
 
 # ── 4. CAPABILITY ─────────────────────────────────────────────────────────────────────────────────────
 printf '%s' "$DEPS" | grep -q '<health files="11" dep_files="11"' \

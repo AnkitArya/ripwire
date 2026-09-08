@@ -864,26 +864,29 @@ inline std::string bashSourceTarget( TSNode n, std::string_view src )
 // `argument_list` → first named child must be a `string`, and its text comes from the `string_content`
 // child so an interpolated or concatenated specifier yields nothing rather than a fragment. Shared by
 // Lua and Ruby, whose argument nodes differ only in name.
-inline std::string firstStringArgText( TSNode args, std::string_view src )
+inline std::string stringLiteralText( TSNode str, std::string_view src )
 {
-    if( ts_node_is_null( args ) || ts_node_named_child_count( args ) == 0 )
-    {
-        return {};
-    }
-    const TSNode first = ts_node_named_child( args, 0 );
-    if( ts_node_is_null( first ) || std::strcmp( ts_node_type( first ), "string" ) != 0 )
+    if( ts_node_is_null( str ) || std::strcmp( ts_node_type( str ), "string" ) != 0 )
     {
         return {};   // `require(mod)`, `require("a" .. b)`, `require "#{x}"` — no single literal to read
     }
-    for( std::uint32_t i = 0; i < ts_node_named_child_count( first ); ++i )
+    for( std::uint32_t i = 0; i < ts_node_named_child_count( str ); ++i )
     {
-        const TSNode kid = ts_node_named_child( first, i );
+        const TSNode kid = ts_node_named_child( str, i );
         if( std::strcmp( ts_node_type( kid ), "string_content" ) == 0 )
         {
             return std::string( nodeTextOf( kid, src ) );
         }
     }
     return {};   // an empty string literal, or one whose only children are interpolations
+}
+inline std::string firstStringArgText( TSNode args, std::string_view src )
+{
+    if( ts_node_is_null( args ) || ts_node_named_child_count( args ) == 0 )
+    {
+        return {};
+    }
+    return stringLiteralText( ts_node_named_child( args, 0 ), src );
 }
 
 // Lua `require "a.b"` / `require("a.b")` — a `function_call` whose `name:` is the bare identifier
@@ -902,9 +905,10 @@ inline std::string luaRequireTarget( TSNode n, std::string_view src )
 
 // Ruby `require_relative "x"` / `require "lib/x"` / `load "x.rb"` — a `call` whose `method:` is one of
 // the three Kernel loaders and which has NO receiver (`foo.require` is somebody's own method; the bare
-// spelling is the only one that is provably Kernel's). `autoload :Foo, "lib/x"` is deliberately NOT here
-// and is a DISCLOSED floor: its path is argument TWO, and adding an arg-index special case for one form
-// buys one shape at the cost of the "first string argument" rule every other language here shares.
+// spelling is the only one that is provably Kernel's). `autoload :Foo, "lib/x"` was a disclosed floor here
+// through kParserVer 81 (its path is argument TWO); rubyAutoloadTarget below lifts it, and the constant
+// spellings — superclass, include/extend/prepend, path-less `autoload :Foo` — live in rubyConstantDirective
+// and rubyMixinTargets, resolved by index rather than by path (Include::isSymbolic).
 //
 // The two resolution rules are encoded in the target the way Python's already are — by a LEADING DOT,
 // not by a new prefix vocabulary. `require_relative`'s path is relative to the requiring FILE, so a
@@ -939,6 +943,158 @@ inline std::string rubyRequireTarget( TSNode n, std::string_view src )
         spec.insert( 0, "./" );
     }
     return spec;
+}
+
+// Ruby constant spellings (parser version 82). A Rails application spells almost none of its dependencies with
+// `require`: a controller depends on a model by NAMING THE CONSTANT, and a gem declares its structure with
+// `autoload :Name`. Measured on a Rails app of 3532 .rb files before this round (`--deps`, the uncapped
+// <godfiles total=>): 103 files in the whole tree had an incoming dependency edge; after it, 385. The three
+// readers below emit the constant AS WRITTEN (`Base`, `::App::User`,
+// `ActiveRecord::Base`) with Include::isSymbolic set, so resolve.h resolves it by Ruby's own lexical rule
+// against the corpus's class/module index and never probes it as a path (test/rubyconstcheck.sh).
+
+// Ruby (parser version 82): does this `class`/`module` open DEFINE anything of its own constant, or is it a
+// NAMESPACE WRAPPER — `module App … end` whose body holds nothing but nested class/module definitions?
+// A wrapper adds nothing to `App`; the file that gives App a body (`VERSION = …`, `extend Autoload`,
+// `def self.x`, `class << self`) is its definer. Structural, never a count: measured on a 3532-file Rails
+// app, 124 constants were "defined in many files" by opens and 5 by bodies, and treating the wrappers as
+// definers is exactly what made 246 superclass references ambiguous there. Comments are grammar extras and
+// appear as named children, so they are skipped. An EMPTY open (`class Base; end`, `class NotFound <
+// StandardError; end`, a marker module) is NOT a wrapper: it holds no nested open to be a namespace FOR,
+// and it is how Ruby spells a constant whose whole definition is its existence — so it defines. Recorded on the ConstOpen captureIncludes emits; read by resolve.h::buildRubyConstantIndex (test/rubyconstcheck.sh, namespace arms).
+inline bool rubyNamespaceOnly( TSNode defNode ) noexcept
+{
+    const TSNode body = ts_node_child_by_field_name( defNode, "body", 4 );
+    if( ts_node_is_null( body ) )
+    {
+        return false;   // an empty open defines its constant
+    }
+    bool nestedOpen = false;
+    const std::uint32_t n = ts_node_named_child_count( body );
+    for( std::uint32_t i = 0; i < n; ++i )
+    {
+        const char* ct = ts_node_type( ts_node_named_child( body, i ) );
+        if( std::strcmp( ct, "class" ) == 0 || std::strcmp( ct, "module" ) == 0 )
+        {
+            nestedOpen = true;
+        }
+        else if( std::strcmp( ct, "comment" ) != 0 )
+        {
+            return false;   // a method, a call, a constant, `class << self` — a body of its own
+        }
+    }
+    return nestedOpen;
+}
+
+// The text of a constant-shaped node — `constant` (`Base`) or `scope_resolution` (`A::B`, `::Top`) — or
+// empty for anything else (`include Object.const_get(:X)`, `class Foo < some_call` are not readable).
+inline std::string rubyConstantText( TSNode n, std::string_view src )
+{
+    if( ts_node_is_null( n ) )
+    {
+        return {};
+    }
+    const char* t = ts_node_type( n );
+    if( std::strcmp( t, "constant" ) != 0 && std::strcmp( t, "scope_resolution" ) != 0 )
+    {
+        return {};
+    }
+    return std::string( nodeTextOf( n, src ) );
+}
+
+// `class X < Base` — the `superclass` node's one named child is the base constant.
+inline std::string rubySuperclassTarget( TSNode superclassNode, std::string_view src )
+{
+    const std::uint32_t n = ts_node_named_child_count( superclassNode );
+    return n == 0 ? std::string{} : rubyConstantText( ts_node_named_child( superclassNode, 0 ), src );
+}
+
+// `autoload :Name` / `autoload :Name, "path"` — a receiver-less `call` whose method is `autoload` and whose
+// first argument is a `simple_symbol`. TWO forms, ONE directive each, never both:
+//   * with a string second argument (Kernel#autoload) the PATH is what Ruby loads — returned bare, so the
+//     load-path rule resolves it exactly like a `require`; `symbolic` is false.
+//   * with no second argument (ActiveSupport::Autoload, whose path is derived from the enclosing module) the
+//     CONSTANT is the target; `symbolic` is true. The index resolves it whatever `autoload_under`/
+//     `autoload_at` did to the path — a path rule would have had to model both.
+//   * a second argument that is not a string literal (`autoload :X, some_path`) is nothing: the path is
+//     unknowable and the constant alone would guess at what the path was meant to say.
+// Both forms are LAZY by definition (Include::isLazy): the file loads on the constant's first use.
+inline std::string rubyAutoloadTarget( TSNode n, std::string_view src, bool& symbolic )
+{
+    symbolic = false;
+    const TSNode args = ts_node_child_by_field_name( n, "arguments", 9 );
+    if( ts_node_is_null( args ) || ts_node_named_child_count( args ) == 0 )
+    {
+        return {};
+    }
+    const TSNode sym = ts_node_named_child( args, 0 );
+    if( std::strcmp( ts_node_type( sym ), "simple_symbol" ) != 0 )
+    {
+        return {};
+    }
+    if( ts_node_named_child_count( args ) >= 2 )
+    {
+        return stringLiteralText( ts_node_named_child( args, 1 ), src );   // empty when not a literal → nothing
+    }
+    std::string_view txt = nodeTextOf( sym, src );
+    if( !txt.empty() && txt.front() == ':' )
+    {
+        txt.remove_prefix( 1 );
+    }
+    if( txt.empty() || !( txt.front() >= 'A' && txt.front() <= 'Z' ) )
+    {
+        return {};   // `autoload :"weird"` / a lowercase symbol is not a constant
+    }
+    symbolic = true;
+    return std::string( txt );
+}
+
+// The receiver-less `call` node's method name when it is one of the constant-shaped directives, else empty.
+// `autoload` and the three mixin verbs; `obj.include X` is somebody's own method and reads as nothing.
+inline std::string_view rubyConstantDirective( TSNode n, std::string_view src )
+{
+    if( !ts_node_is_null( ts_node_child_by_field_name( n, "receiver", 8 ) ) )
+    {
+        return {};
+    }
+    const TSNode method = ts_node_child_by_field_name( n, "method", 6 );
+    if( ts_node_is_null( method ) || std::strcmp( ts_node_type( method ), "identifier" ) != 0 )
+    {
+        return {};
+    }
+    const std::string_view m = nodeTextOf( method, src );
+    if( m == "include" || m == "extend" || m == "prepend" || m == "autoload" )
+    {
+        return m;
+    }
+    return {};
+}
+
+// `include A, B` / `extend M` / `prepend P` — ONE directive naming N constants and therefore N Include
+// records, in SOURCE order (the same shape as elixirAliasGroup). A non-constant argument (`include
+// Object.const_get(:X)`, `include mod`) contributes nothing; the constant ones beside it still do.
+inline std::vector<std::string> rubyMixinTargets( TSNode n, std::string_view src )
+{
+    std::vector<std::string> out;
+    const std::string_view   m = rubyConstantDirective( n, src );
+    if( m.empty() || m == "autoload" )
+    {
+        return out;
+    }
+    const TSNode args = ts_node_child_by_field_name( n, "arguments", 9 );
+    if( ts_node_is_null( args ) )
+    {
+        return out;
+    }
+    const std::uint32_t count = ts_node_named_child_count( args );
+    for( std::uint32_t i = 0; i < count; ++i )
+    {
+        if( std::string c = rubyConstantText( ts_node_named_child( args, i ), src ); !c.empty() )
+        {
+            out.push_back( std::move( c ) );
+        }
+    }
+    return out;
 }
 
 // Elixir `alias`/`import`/`require`/`use` — a `call` whose `target:` is one of the four directive
@@ -1159,10 +1315,15 @@ inline constexpr std::array<std::string_view, 16> kLuaImportContainers = {
 // `module -> body_statement -> call`; `then`/`else`/`elsif` are the if-arm nodes; `begin`/`rescue` cover
 // the `begin; require "x"; rescue LoadError; end` shape that is Ruby's own optional-dependency idiom
 // (the direct analogue of Python's `try: import ujson`, and captured for the same union-over-arms reason).
-inline constexpr std::array<std::string_view, 17> kRubyImportContainers = {
+// `call` and `block` (parser version 82): a `do_block`/`block` hangs off its CALL — `eager_autoload do …
+// end`, `autoload_under "impl" do … end`, `included do … end` — so without `call` no directive inside any
+// block body is ever visited. The same posture as Elixir's `call` container: a `call` node is READ (the
+// directive test) and then DESCENDED, so the walk reaches the block; a call that is not a directive and
+// holds no block simply yields nothing.
+inline constexpr std::array<std::string_view, 19> kRubyImportContainers = {
     "body_statement", "module", "class", "singleton_class", "method", "singleton_method",
     "if", "elsif", "else", "then", "unless", "case", "when",
-    "begin", "rescue", "ensure", "do_block"
+    "begin", "rescue", "ensure", "do_block", "block", "call"
 };
 
 // ELIXIR. `defmodule M do … end` is itself a `call` with a `do_block`, so `call` MUST be a container or
@@ -1305,15 +1466,18 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // path-precise resolution can leave angle includes unresolved. `isLazy` is TS/JS only (kParserVer 72):
 // true when `insideFn` says this call sits inside a function-body container — see kJsFunctionContainers
 // and captureIncludes' `insideFn` propagation below. Allocates a std::string → not noexcept.
-struct DirectiveTarget { std::string target; bool isAngle; bool isLazy; };
+// `isSymbolic` (parser version 82, Ruby only): the target is a CONSTANT resolved through the corpus's own
+// class/module index, never a path — see model.h Include::isSymbolic.
+struct DirectiveTarget { std::string target; bool isAngle; bool isLazy; bool isSymbolic; };
 
 // `insideFn` exists for exactly the same one branch `lang` does: whether the call_expression being read
 // sits inside a TS/JS function body, per captureIncludes' walk — meaningless (and ignored) everywhere else.
 DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src, Lang lang, bool insideFn )
 {
     std::string target;
-    bool        isAngle = false;
-    bool        isLazy  = false;
+    bool        isAngle    = false;
+    bool        isLazy     = false;
+    bool        isSymbolic = false;
 
     if( std::strcmp( t, "preproc_include" ) == 0 )                       // C++/C/ObjC: exact file path
     {
@@ -1366,6 +1530,17 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
     else if( std::strcmp( t, "call" ) == 0 && lang == Lang::Ruby )                 // Ruby `require_relative "x"` / `require "x"` / `load "x"`
     {
         target = rubyRequireTarget( n, src );
+        if( target.empty() && rubyConstantDirective( n, src ) == "autoload" )    // parser version 82: `autoload :Name[, "path"]`
+        {
+            target = rubyAutoloadTarget( n, src, isSymbolic );
+            isLazy = !target.empty();   // an autoload is lazy by definition — the file loads on first use
+        }
+        // include/extend/prepend name N constants and are emitted by captureIncludes through rubyMixinTargets.
+    }
+    else if( std::strcmp( t, "superclass" ) == 0 && lang == Lang::Ruby )           // Ruby `class X < Base` (parser version 82)
+    {
+        target     = rubySuperclassTarget( n, src );
+        isSymbolic = !target.empty();
     }
     else if( std::strcmp( t, "call" ) == 0 && lang == Lang::Elixir )               // Elixir `alias`/`import`/`require`/`use`
     {
@@ -1433,7 +1608,7 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
         // read), so there is no sound string→fileId rule to write, and a wrong narrow is worse than none.
         target = phpUseTarget( n, src );                                 // see phpUseTarget for the shape rationale
     }
-    return { std::move( target ), isAngle, isLazy };
+    return { std::move( target ), isAngle, isLazy, isSymbolic };
 }
 
 // Capture #include / import directives (physical dependencies) by walking the file's top-level nodes —
@@ -1539,7 +1714,7 @@ inline void capturePythonImportBinds( TSNode stmt, const char* t, std::uint32_t 
 }
 
 void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_view src, std::vector<Include>& incs, std::vector<RawRef>& refs,
-                      std::vector<RawBind>& binds )
+                      std::vector<RawBind>& binds, std::vector<ConstOpen>& constOpens )
 {
     ChildCursor         cursor( root );
     std::vector<TSNode> kids;
@@ -1578,7 +1753,28 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
         // `mod x { … }` is a container whose body holds `use`s. A walk that treated container-ness as a
         // reason to skip the read would silently drop every Rust module-file declaration in the corpus.
         // For every other container the read simply returns empty, so one uniform order covers all of them.
-        auto [ target, isAngle, isLazy ] = directiveTargetOf( n, t, src, lang, frame.insideFn );
+        auto [ target, isAngle, isLazy, isSymbolic ] = directiveTargetOf( n, t, src, lang, frame.insideFn );
+
+        // parser version 82: every Ruby class/module OPEN is recorded for resolve.h's constant index — the span
+        // (nesting by containment), the own-body bit, the name as written (model.h ConstOpen). `class`/`module`
+        // are containers, so the walk already stands on every open it needs to record; a `class << self` is a
+        // singleton_class, not an open of a constant, and is not here.
+        if( lang == Lang::Ruby && ( std::strcmp( t, "class" ) == 0 || std::strcmp( t, "module" ) == 0 ) )
+        {
+            if( const TSNode nm = ts_node_child_by_field_name( n, "name", 4 ); !ts_node_is_null( nm ) )
+            {
+                if( std::string written = rubyConstantText( nm, src ); !written.empty() )
+                {
+                    ConstOpen co;
+                    co.fileId        = fileId;
+                    co.startByte     = ts_node_start_byte( n );
+                    co.endByte       = ts_node_end_byte( n );
+                    co.namespaceOnly = rubyNamespaceOnly( n );
+                    co.written       = std::move( written );
+                    constOpens.push_back( std::move( co ) );
+                }
+            }
+        }
 
         if( isImportContainer( lang, t ) )
         {
@@ -1610,11 +1806,13 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
         // rather than the straight-line block it used to be for exactly one reason: an Elixir
         // `alias MyApp.{Bar, Baz}` is ONE directive node naming N modules, so N records come off it and
         // the second one cannot be written by falling through this code once.
-        const auto emitDirective = [ & ]( std::string tgt )
+        const auto emitDirective = [ & ]( std::string tgt, bool symbolic )
         {
             // import-role use-site ref: name = the importable final segment (skip when the target has no
             // identifier head, e.g. a relative `../x` whose head strips to empty → nothing to resolve).
-            if( std::string nm = importName( tgt ); !nm.empty() )
+            // A SYMBOLIC (Ruby constant) target emits none: this round is FILE edges only (the same round
+            // floor the kParserVer 81 languages state), and importName would read `A::B` as `A`.
+            if( std::string nm = symbolic ? std::string{} : importName( tgt ); !nm.empty() )
             {
                 RawRef r;
                 r.fileId    = fileId;
@@ -1624,12 +1822,26 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
                 r.name      = std::move( nm );
                 refs.push_back( std::move( r ) );
             }
-            incs.push_back( { fileId, isAngle, isLazy, std::move( tgt ) } );
+            // The site byte. A Ruby `superclass` carries its CLASS's own start byte: the superclass expression is
+            // evaluated in the ENCLOSING scope (Ruby has not opened the class yet), and resolve.h's containment
+            // is strict at the start, so that byte reads as outside the class — the nesting Ruby actually uses.
+            const bool          superclassSite = ( lang == Lang::Ruby && std::strcmp( t, "superclass" ) == 0 );
+            const std::uint32_t siteByte       = superclassSite ? ts_node_start_byte( ts_node_parent( n ) ) : ts_node_start_byte( n );
+            incs.push_back( { fileId, isAngle, isLazy, symbolic, siteByte, std::move( tgt ) } );
         };
 
         if( !target.empty() )
         {
-            emitDirective( std::move( target ) );
+            emitDirective( std::move( target ), isSymbolic );
+        }
+        else if( lang == Lang::Ruby && std::strcmp( t, "call" ) == 0 )
+        {
+            // `include A, B` / `extend M` / `prepend P` (parser version 82): N constants off one directive node, in
+            // SOURCE order, each a symbolic Include — the Ruby twin of the Elixir alias group below.
+            for( std::string& member : rubyMixinTargets( n, src ) )
+            {
+                emitDirective( std::move( member ), true );
+            }
         }
         else if( lang == Lang::Elixir && std::strcmp( t, "call" ) == 0 )
         {
@@ -1638,7 +1850,7 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
             // holds exactly as it does for the single-target path.
             for( std::string& member : elixirAliasGroup( n, src ) )
             {
-                emitDirective( std::move( member ) );
+                emitDirective( std::move( member ), false );
             }
         }
     }
