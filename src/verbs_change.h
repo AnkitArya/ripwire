@@ -132,7 +132,7 @@ std::optional<int> runAffected( const MainDispatch& d )
                      "%.*s"   // H2H-Graft F1: the evidence-order clause, testmap.h's ONE wording (changed= is spelled seed_kind=\"test\" here: the argument matched it)
                      "order=evidence says so on the root; partners= counts the partner rows. "
                      "%s-->%s", int( rw::kTestRowEvidenceLegend.size() ), rw::kTestRowEvidenceLegend.data(),
-                     rw::kGraphCountFloorBriefLegend, rw::rootRelPathsLegend( afSingleRoot ) );
+                     rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::rootRelPathsLegend( afSingleRoot ) );
         std::printf( "<affected changed=\"%s\" seeded_by=\"%s\" seeds=\"%zu\" seed_test_files=\"%zu\" tests=\"%zu\" reached=\"%zu\" script_gates_unmodelled=\"%zu\""
                      " order=\"evidence\" partners=\"%zu\"%s%s>",
                      ex( cfg.affectedFiles ).c_str(), rw::affectedSeededBy( sel ), seeds.size(), sel.seedTestFiles.size(), testFiles.size(), reach.size(), scriptGatesUnmodelledCount( ing ),
@@ -228,7 +228,7 @@ std::optional<int> runExercises( const MainDispatch& d )
     std::printf( "<!-- ripwire exercises: the NON-TEST symbols this test transitively calls into — what it covers (the inverse of the affected verb). "
                  "<t> = the seed test files the pattern matched; <s> = the covered symbols, PageRank desc. "
                  "harness=script|mixed says the seed set contains shell gates, whose subprocess coverage this walk cannot see. "
-                 "%s%s-->%s", rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( exSingleRoot ) );
+                 "%s%s-->%s", rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( exSingleRoot ) );
     const std::string exRootAttr = exSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
     std::printf( "<exercises of=\"%s\" seed_files=\"%zu\" shown_seed_files=\"%zu\" seed_files_capped=\"%u\" test_symbols=\"%zu\" reaches=\"%zu\"%s%s%s%s>",
                  ex( cfg.exercisesFile ).c_str(), sel.testFiles.size(), shownSeed,

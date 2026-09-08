@@ -1363,6 +1363,27 @@ inline void foldFieldDefs( std::vector<RawDef>& defs, std::size_t first, Lang la
 
 /// Append definitions and references captured by the language query, with language-specific filtering.
 /// Captured spans refer to src and root; a null cursor appends nothing. Existing output rows are retained.
+// #62 (2026-09-08, @mariadb-KyleHutchinson): the byte ranges this file's preprocessor DECIDES are dead
+// (src/preprocdead.h — the same literal `#if 0` rule --slice has always used). Computed ONCE per file,
+// C-family only, and the helper's own `#if` text gate makes it a single find() on the overwhelming
+// majority of files. A call site inside one of these ranges cannot compile, so admitting it as an edge
+// makes count= larger than the truth — which breaks counts_floor="1"'s promise (true >= reported)
+// rather than merely adding noise. That is why the site is DROPPED here at capture rather than flagged
+// downstream: a flagged row still counts. Cached per file like every other captured fact, so a warm
+// run replays the filtered set (kCacheVersion bumped with this change).
+//
+// #62: the C-family gate for preprocdead.h's ranges. A free function rather than four more lines inside
+// captureTagsFacts, which --quality-delta already scores at cx 258 - this change adds one line to it.
+// Non-C-family languages have no preproc_if nodes at all, so the empty return is the whole rule.
+inline std::vector<PreprocDeadRange> preprocDeadRangesFor( const LangEntry& le, TSNode root, std::string_view src )
+{
+    if( le.lang != Lang::Cpp && le.lang != Lang::C && le.lang != Lang::ObjC )
+    {
+        return {};
+    }
+    return collectPreprocDeadRanges( root, src );
+}
+
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs )
 {
@@ -1378,6 +1399,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     }
 
     const std::size_t firstDefOfFile = defs.size();   // member-variable round: foldFieldDefs' window (below)
+
+    // #62: byte ranges this file's preprocessor decides are dead; see preprocDeadRangesFor above.
+    const std::vector<PreprocDeadRange> ppDead = preprocDeadRangesFor( le, root, src );
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tags query exec+captures" );
@@ -1822,6 +1846,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     r.fieldName = std::move( rs.field );                                 //   depth-2 intermediate field; "" otherwise
                     auto [ ac, ak ] = callArity( nameNode, le.lang, src );               // B2.2: call-site positional arg count
                     r.argCount = ac;  r.argCountKnown = ak;                              //   → arity filter in graph.h
+                }
+                if( !ppDead.empty() && inPreprocDead( ppDead, r.startByte ) )
+                {
+                    continue;   // #62: inside `#if 0` — never compiled, so never a call edge
                 }
                 refs.push_back( std::move( r ) );
             }

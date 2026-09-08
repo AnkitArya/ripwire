@@ -266,7 +266,14 @@ if not bad:
 # net new CALL is one. editcheck.h itself goes 4 -> 5 mentions, which is that same one call. sites/rows are
 # unmoved because the new call interpolates only %zu — it is not a string-interpolating site, so it neither
 # joins the 30 nor needs a TABLE row, and (S1)/(S2) both stayed green across the change.
-EXPECTED = { "mentions": 225, "calls": 203, "sites": 42, "rows": 29, "widthforms": 3 }
+#            2026-09-08 (issue #66): +3 calls/+4 mentions over whatever main's base is (203/225 at the
+#            2026-09-08 rebase onto 26abcc79 -> 206/229), sites and rows UNCHANGED — all three are in
+#            src/graphlegend.h and were read before this pin moved: graphGaugeAttrXml and graphGaugeAttrJson
+#            each gained a SECOND snprintf (the with-graph_unindexed= arm beside the without- arm; buf grew
+#            96 -> 160 B, worst case ~119 B at three 20-digit size_t), and graphUnindexedTextClause is one new
+#            snprintf into buf[256] (~198 B worst case). No %s in any of them, so none is a width form.
+#            mentions is +3 for those and +1 more for the buf[256] site's own explanatory comment.
+EXPECTED = { "mentions": 229, "calls": 206, "sites": 42, "rows": 29, "widthforms": 3 }
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the
 #            H9 ` max_tokens="%d"` ceiling disclosure: a single %d of a caller-supplied INTEGER, no %s,
