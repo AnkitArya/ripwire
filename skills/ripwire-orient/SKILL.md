@@ -32,8 +32,12 @@ planning/design docs, skills, READMEs, plus `.ipynb`/`.html`/`.csv`/Office/PDF v
 markitdown bridge). Point it at the **memory dir** for what past sessions learned, or the **repo root** for
 plans/designs — ~47× fewer tokens than loading everything. A design doc may already answer the question; if
 so, stop here. It also works unmodified as a zero-setup knowledge base over a scratch dir of dumped tool
-output (a git log, an API dump, fetched docs, `--help` text) — not just a source repo; see `docs/COMMANDS.md`'s
-`--recall` pattern subsection for the real numbers and its current serving limit.
+output (a git log, fetched docs, `--help` text) — not just a source repo. Two conditions are yours to meet
+when you WRITE the dump: dump it as `.md` (`.txt`/`.log`/`.json` are not documents to `--recall`, and a dir
+of them answers `0 relevant of 0 document files`), and keep `##` headings in it, so a deep answer is served
+as a ranked section instead of waiting behind a front-first cut. Full form in
+[`map-before-you-read.md`](map-before-you-read.md); the recorded run is `docs/COMMANDS.md`'s `--recall`
+pattern subsection.
 
 **1. Architecture summary** — `ripwire <dir> --report`
 Plain markdown: file + symbol count, call-graph modules (Louvain clusters with lead symbol), god-files

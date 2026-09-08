@@ -61,6 +61,14 @@ the table below is what you reach for *instead*.
   budgeted call.
 - **Do NOT hand-translate a stack trace into a search query.** `--from-trace=FILE` takes it verbatim.
 - **Do NOT infer structure by reading build files and imports.** `--deps`/`--report` derive it.
+- **Do NOT read your way through a directory of DUMPED output.** A `git log`, fetched docs, a big
+  reference file or `<tool> --help` text in a scratch dir is already a knowledge base:
+  `ripwire <dumpdir> --recall="<the question>"` ranks those documents and serves the matching
+  sections. Two rules, both yours when you write the dump: **dump to `.md`** (`.txt`/`.log`/`.json`
+  are not documents to `--recall`, and a dir of them answers `0 relevant of 0 document files`), and
+  keep `##` headings — a headed document is served as whole ranked sections, so a mid-file answer
+  arrives at a small `--max-tokens` and a bigger ceiling returns a strict superset of it, while a
+  headless one is cut front-first.
 
 The tell that you need this is linguistic, not architectural: if you just thought *"let me search the
 codebase"*, *"let me read that file"*, or *"let me look at a few files first"*, that sentence is the
@@ -76,6 +84,7 @@ only the files it surfaces.
 | the code for a specific task | `ripwire <dir> --for="<task in words>"`  ·  `--report` — header says `weak="1"` when the top match's lexical evidence is thin; reformulate rather than trust that ranking |
 | a symbol you can NAME | `ripwire <dir> --for="theExactName"` — auto-routes to name-exact BM25 (recall@1 ~99%) |
 | recall what's already known | `ripwire <dir> --recall="<task>"` (docs/plans/memory, full bodies) |
+| an answer out of DUMPED output — a `git log`, fetched docs, a CLI usage dump, one oversized reference file | `ripwire <dumpdir> --recall="<question>"` — the scratch dir IS the knowledge base, no index and no daemon. Dump as `.md` with `##` headings (prohibition above); the served `[sections: … lines="…"; dropped_by_budget=D]` note names the ranges you got and what the ceiling cost |
 | who calls / what it calls | `--callers=SYM` · `--callees=SYM` |
 | the recorded uses of a name (read/write/import; a floor — see counts_floor=) | `--uses=SYM` |
 | a literal / regex / code-shape | `--grep=STR` · `--regex=PAT` · `--pattern='foo($X, ...)'` (shape as CODE) · `--match='(<tree-sitter>)'`. Add `--handles` to grep/regex when the next action is a safe CLI edit: each unambiguous enclosing symbol gets a content-addressed target accepted directly by the edit verbs; ambiguous/uneditable rows say why and mint no unsafe handle. |
