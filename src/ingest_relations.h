@@ -1097,6 +1097,51 @@ inline std::vector<std::string> rubyMixinTargets( TSNode n, std::string_view src
     return out;
 }
 
+// A CONSTANT CHAIN: `Name`, `A::B::C`, `::A::B` — every segment a constant, the head a constant or absent (`::A`).
+// rubyConstantText above accepts any scope_resolution and is right for the positions Ruby's grammar already
+// restricts to constants (a class name, a superclass, a mixin argument); a RECEIVER is not such a position —
+// `repo::Finder.call` and `self.class::Foo.bar` are scope_resolutions whose head is an identifier or a call,
+// and naming them as constants would invent a dependency on nothing. Empty when any segment is not a constant.
+inline bool rubyIsConstantChain( TSNode n ) noexcept
+{
+    if( ts_node_is_null( n ) )
+    {
+        return false;
+    }
+    const char* t = ts_node_type( n );
+    if( std::strcmp( t, "constant" ) == 0 )
+    {
+        return true;
+    }
+    if( std::strcmp( t, "scope_resolution" ) != 0 )
+    {
+        return false;
+    }
+    const TSNode name  = ts_node_child_by_field_name( n, "name", 4 );
+    const TSNode scope = ts_node_child_by_field_name( n, "scope", 5 );
+    if( ts_node_is_null( name ) || std::strcmp( ts_node_type( name ), "constant" ) != 0 )
+    {
+        return false;
+    }
+    return ts_node_is_null( scope ) || rubyIsConstantChain( scope );   // null scope = the absolute `::A` form
+}
+
+// Parser version 83 (test/rubyrecvcheck.sh): a CONSTANT RECEIVER — `User.find`, `App::Mailer.deliver`,
+// `Struct.new` — is the Zeitwerk dependency proper: the autoloader loads the constant's file on that first
+// reference. The target is the receiver chain AS WRITTEN (`::Time` and `Time` are two spellings, two
+// directives); a receiver that is not a constant chain — an identifier, `self.class`, an ivar, `repo::Finder`
+// — yields nothing. A constant used as an ARGUMENT (`raise Errors::Boom`, `validates_with Foo`) or as a
+// rescue class is NOT a receiver: a disclosed floor of this round, stated in the gate's header.
+inline std::string rubyReceiverTarget( TSNode n, std::string_view src )
+{
+    const TSNode recv = ts_node_child_by_field_name( n, "receiver", 8 );
+    if( !rubyIsConstantChain( recv ) )
+    {
+        return {};
+    }
+    return std::string( nodeTextOf( recv, src ) );
+}
+
 // Elixir `alias`/`import`/`require`/`use` — a `call` whose `target:` is one of the four directive
 // identifiers. All four are compile-time dependencies on the named module's FILE (`use` most of all: it
 // runs that module's `__using__` macro at compile time), so all four earn an edge.
@@ -1311,20 +1356,16 @@ inline constexpr std::array<std::string_view, 16> kLuaImportContainers = {
     "table_constructor", "field"
 };
 
-// RUBY. A `require` inside `module M … end` / `class C … end` / a method is
-// `module -> body_statement -> call`; `then`/`else`/`elsif` are the if-arm nodes; `begin`/`rescue` cover
-// the `begin; require "x"; rescue LoadError; end` shape that is Ruby's own optional-dependency idiom
-// (the direct analogue of Python's `try: import ujson`, and captured for the same union-over-arms reason).
-// `call` and `block` (parser version 82): a `do_block`/`block` hangs off its CALL — `eager_autoload do …
-// end`, `autoload_under "impl" do … end`, `included do … end` — so without `call` no directive inside any
-// block body is ever visited. The same posture as Elixir's `call` container: a `call` node is READ (the
-// directive test) and then DESCENDED, so the walk reaches the block; a call that is not a directive and
-// holds no block simply yields nothing.
-inline constexpr std::array<std::string_view, 19> kRubyImportContainers = {
-    "body_statement", "module", "class", "singleton_class", "method", "singleton_method",
-    "if", "elsif", "else", "then", "unless", "case", "when",
-    "begin", "rescue", "ensure", "do_block", "block", "call"
-};
+// RUBY has NO container allowlist: the walk descends EVERY node (isImportContainer below). Through parser
+// version 82 it had one — the statement-level shapes a `require`/`autoload`/`include`/`class X < Base` can sit
+// under. Parser version 83 made a constant RECEIVER a directive, and a receiver is an EXPRESSION: it sits
+// under an assignment (`DEFAULT = Helper.fmt(1)`), an argument list (`puts User.name`), a lambda, a binary,
+// a conditional, a string interpolation — the whole expression grammar. An allowlist there would be ~40
+// kinds long and every kind it missed would be a receiver silently dropped, a floor this tool could not
+// disclose because it could not see it. The full descent is the same cost the reference pass already pays
+// once per Ruby file (one visit per node, one directive test each) and reaches every receiver by
+// construction. The depth bound still holds (kMaxImportContainerDepth); a Ruby tree past it degrades loudly.
+// The CLOSURE kinds — where a receiver runs only when and if the closure runs — are kRubyClosureContainers.
 
 // ELIXIR. `defmodule M do … end` is itself a `call` with a `do_block`, so `call` MUST be a container or
 // no directive in any module body is ever visited — this is the one language here whose top-level form
@@ -1350,9 +1391,27 @@ inline constexpr std::array<std::string_view, 6> kJsFunctionContainers = {
     "arrow_function", "method_definition"
 };
 
-inline bool isJsFunctionLike( Lang lang, const char* type ) noexcept
+// RUBY's closure kinds (parser version 83, test/rubyrecvcheck.sh): a constant receiver written inside any of these
+// runs when and if the closure runs — a method body, a singleton method, a `-> { }` lambda, a `{ }` block, a
+// `do … end` block — so the directive is LAZY (Include::isLazy), exactly the parser-72 TS/JS rule on Ruby's
+// own closure grammar. A receiver at class-body or file level runs at load and is not lazy. A `do`-block passed
+// to a class-level macro (`included do`, `after_commit do`) is lazy under this rule even when the callee runs it
+// at load: the tool cannot see the callee, and a block is a closure the callee may or may not run.
+inline constexpr std::array<std::string_view, 5> kRubyClosureContainers = {
+    "method", "singleton_method", "lambda", "block", "do_block"
+};
+
+inline bool isFunctionLike( Lang lang, const char* type ) noexcept
 {
-    return ( lang == Lang::TypeScript || lang == Lang::JavaScript ) && namesNode( kJsFunctionContainers, type );
+    if( lang == Lang::TypeScript || lang == Lang::JavaScript )
+    {
+        return namesNode( kJsFunctionContainers, type );
+    }
+    if( lang == Lang::Ruby )
+    {
+        return namesNode( kRubyClosureContainers, type );
+    }
+    return false;
 }
 
 // TS/JS: every container a `require("./x")` / `import("./x")` call can legitimately sit under.
@@ -1411,7 +1470,7 @@ inline constexpr std::array<std::string_view, 34> kJsImportContainers = {
 // language has is DATA, and a language absent from the table simply has none.
 struct LangImportContainers { Lang lang; std::span<const std::string_view> nodes; };
 
-inline constexpr std::array<LangImportContainers, 9> kImportContainersByLang = { {
+inline constexpr std::array<LangImportContainers, 8> kImportContainersByLang = { {
     { Lang::Python,     kPythonImportContainers },
     { Lang::Rust,       kRustImportContainers   },
     { Lang::CSharp,     kCsharpImportContainers },
@@ -1419,13 +1478,16 @@ inline constexpr std::array<LangImportContainers, 9> kImportContainersByLang = {
     { Lang::JavaScript, kJsImportContainers     },
     { Lang::Bash,       kBashImportContainers   },
     { Lang::Lua,        kLuaImportContainers    },
-    { Lang::Ruby,       kRubyImportContainers   },
     { Lang::Elixir,     kElixirImportContainers }
 } };
 
 inline bool isImportContainer( Lang lang, const char* type ) noexcept
 {
     if( isPreprocConditional( type ) )   // every grammar with a preprocessor: C/C++/ObjC/CUDA/Metal + C#
+    {
+        return true;
+    }
+    if( lang == Lang::Ruby )             // parser version 83: every node — a receiver is an expression (see the RUBY note above)
     {
         return true;
     }
@@ -1468,7 +1530,7 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // and captureIncludes' `insideFn` propagation below. Allocates a std::string → not noexcept.
 // `isSymbolic` (parser version 82, Ruby only): the target is a CONSTANT resolved through the corpus's own
 // class/module index, never a path — see model.h Include::isSymbolic.
-struct DirectiveTarget { std::string target; bool isAngle; bool isLazy; bool isSymbolic; };
+struct DirectiveTarget { std::string target; bool isAngle; bool isLazy; bool isSymbolic; bool isReceiver; };
 
 // `insideFn` exists for exactly the same one branch `lang` does: whether the call_expression being read
 // sits inside a TS/JS function body, per captureIncludes' walk — meaningless (and ignored) everywhere else.
@@ -1478,6 +1540,7 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
     bool        isAngle    = false;
     bool        isLazy     = false;
     bool        isSymbolic = false;
+    bool        isReceiver = false;
 
     if( std::strcmp( t, "preproc_include" ) == 0 )                       // C++/C/ObjC: exact file path
     {
@@ -1534,6 +1597,13 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
         {
             target = rubyAutoloadTarget( n, src, isSymbolic );
             isLazy = !target.empty();   // an autoload is lazy by definition — the file loads on first use
+        }
+        if( target.empty() )                                                       // parser version 83: `User.find`, `App::Mailer.deliver`
+        {
+            target     = rubyReceiverTarget( n, src );                             // empty for every receiver-less call, so the
+            isSymbolic = !target.empty();                                          // include/extend/prepend group below still runs
+            isReceiver = isSymbolic;
+            isLazy     = isSymbolic && insideFn;                                   // inside a closure (kRubyClosureContainers) ⇒ lazy
         }
         // include/extend/prepend name N constants and are emitted by captureIncludes through rubyMixinTargets.
     }
@@ -1608,7 +1678,7 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
         // read), so there is no sound string→fileId rule to write, and a wrong narrow is worse than none.
         target = phpUseTarget( n, src );                                 // see phpUseTarget for the shape rationale
     }
-    return { std::move( target ), isAngle, isLazy, isSymbolic };
+    return { std::move( target ), isAngle, isLazy, isSymbolic, isReceiver };
 }
 
 // Capture #include / import directives (physical dependencies) by walking the file's top-level nodes —
@@ -1731,13 +1801,22 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
     // container (kJsFunctionContainers) — sticky for every descendant, never cleared, exactly like `depth`
     // is monotonic. It rides the frame rather than being recomputed from ancestry because the walk never
     // keeps the ancestor chain around: this is the one bit of it a lazy-require call needs.
-    struct IncFrame { TSNode node; std::uint16_t depth; bool insideFn; };
+    // `openIdx` (parser version 83, Ruby only): the index in `constOpens` of the innermost class/module open the
+    // frame sits inside — kNoOpenIdx at file level. It rides the frame for the same reason `insideFn` does (the
+    // walk keeps no ancestor chain) and exists for the RECEIVER DEDUPE: a constant receiver is recorded once per
+    // (file, innermost open, written name). Zeitwerk loads a constant once per process, on its first reference;
+    // the second `User.find` in the same body is not a new dependency. The nesting is IN the key because `User`
+    // under `module Admin` and `User` under the enclosing module may be two different constants — resolve.h
+    // decides which by the same containment, so the two records it receives are exactly the two it can tell apart.
+    constexpr std::uint32_t kNoOpenIdx = std::numeric_limits<std::uint32_t>::max();
+    struct IncFrame { TSNode node; std::uint16_t depth; bool insideFn; std::uint32_t openIdx; };
     std::vector<IncFrame> stack;
     stack.reserve( 64 );
     for( std::size_t i = kids.size(); i > 0; --i )
     {
-        stack.push_back( { kids[i - 1], 0, false } );   // nothing is inside a function at the file root
+        stack.push_back( { kids[i - 1], 0, false, kNoOpenIdx } );   // nothing is inside a function or an open at the file root
     }
+    HashMap<std::string, char> seenReceivers;   // (openIdx '\x1f' written) → seen; per file, receivers only
 
     while( !stack.empty() )
     {
@@ -1753,12 +1832,13 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
         // `mod x { … }` is a container whose body holds `use`s. A walk that treated container-ness as a
         // reason to skip the read would silently drop every Rust module-file declaration in the corpus.
         // For every other container the read simply returns empty, so one uniform order covers all of them.
-        auto [ target, isAngle, isLazy, isSymbolic ] = directiveTargetOf( n, t, src, lang, frame.insideFn );
+        auto [ target, isAngle, isLazy, isSymbolic, isReceiver ] = directiveTargetOf( n, t, src, lang, frame.insideFn );
 
         // parser version 82: every Ruby class/module OPEN is recorded for resolve.h's constant index — the span
         // (nesting by containment), the own-body bit, the name as written (model.h ConstOpen). `class`/`module`
         // are containers, so the walk already stands on every open it needs to record; a `class << self` is a
         // singleton_class, not an open of a constant, and is not here.
+        std::uint32_t childOpenIdx = frame.openIdx;
         if( lang == Lang::Ruby && ( std::strcmp( t, "class" ) == 0 || std::strcmp( t, "module" ) == 0 ) )
         {
             if( const TSNode nm = ts_node_child_by_field_name( n, "name", 4 ); !ts_node_is_null( nm ) )
@@ -1772,6 +1852,7 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
                     co.namespaceOnly = rubyNamespaceOnly( n );
                     co.written       = std::move( written );
                     constOpens.push_back( std::move( co ) );
+                    childOpenIdx = static_cast<std::uint32_t>( constOpens.size() - 1 );   // everything under n is inside this open
                 }
             }
         }
@@ -1789,11 +1870,11 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
             {
                 // kParserVer 72: crossing a function-body KIND flips `insideFn` for every descendant of n —
                 // sticky, so a nested closure inside an already-lazy function stays lazy, never resets.
-                const bool childInsideFn = frame.insideFn || isJsFunctionLike( lang, t );
+                const bool childInsideFn = frame.insideFn || isFunctionLike( lang, t );
                 collectChildren( n, cursor.cur, kids );   // safe: the seed iteration above is finished
                 for( std::size_t i = kids.size(); i > 0; --i )
                 {
-                    stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ), childInsideFn } );
+                    stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ), childInsideFn, childOpenIdx } );
                 }
             }
         }
@@ -1830,7 +1911,20 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
             incs.push_back( { fileId, isAngle, isLazy, symbolic, siteByte, std::move( tgt ) } );
         };
 
-        if( !target.empty() )
+        if( !target.empty() && isReceiver )
+        {
+            // The receiver dedupe (parser version 83). Key = innermost open + the name as written; the FIRST
+            // occurrence in source order wins and carries the byte, and with it the lazy bit. Declarative
+            // directives never come through here: each `include`/`< Base`/`autoload` IS a statement of its own.
+            std::string key = std::to_string( frame.openIdx );
+            key += '\x1f';
+            key += target;
+            if( seenReceivers.try_emplace( std::move( key ), 1 ).second )
+            {
+                emitDirective( std::move( target ), isSymbolic );
+            }
+        }
+        else if( !target.empty() )
         {
             emitDirective( std::move( target ), isSymbolic );
         }

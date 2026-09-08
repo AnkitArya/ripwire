@@ -43,7 +43,9 @@
 #   lib/decoy/user.rb         Decoy::User — same basename as app/user.rb; nothing names it
 #   lib/app/selfref.rb        `class UsesInner < Inner` in one file → directive shown, self-include dropped
 #   lib/app/uses_point.rb     < Point where `Point = Struct.new` — DISCLOSED FLOOR: aliases are not indexed
-#   lib/app/dynamic.rb        include <call>, autoload :X, some_path, require some_variable → NOTHING captured
+#                             (point.rb's own row is the `Struct` receiver, parser version 83)
+#   lib/app/dynamic.rb        include <call>, autoload :X, some_path, require some_variable → no directive invented;
+#                             its one row is the `Object` receiver of `Object.const_get` (parser version 83)
 #   lib/app/user_ext.rb       MONKEY PATCH: reopens App::User with a method → admin/user.rb's `::App::User` edges to
 #                             user.rb AND user_ext.rb
 #   lib/core_ext/string.rb    MONKEY PATCH of a core class: the tree's only definer of String → shouty.rb's `< String`
@@ -97,9 +99,9 @@ printf '%s' "$DEPS" | grep -q '<f p="lib/app/services.rb" includes="5"' \
 [ "$( incs lib/app/external.rb )" = '<inc t="ActiveRecord::Base"/> <inc t="Comparable"/> ' ] \
     && ok 'capture: out-of-tree constants are still SHOWN as directives (ActiveRecord::Base, Comparable)' \
     || no "capture: external.rb rows: $( incs lib/app/external.rb )"
-printf '%s' "$DEPS" | grep -q '<f p="lib/app/dynamic.rb"' \
-    && no "capture: dynamic.rb has a row — a non-literal include/autoload/require was invented: $( frow lib/app/dynamic.rb ) $( incs lib/app/dynamic.rb )" \
-    || ok 'capture: dynamic.rb (include <call>, autoload with a variable path, require variable) captures NOTHING'
+[ "$( incs lib/app/dynamic.rb )" = '<inc t="Object"/> ' ] \
+    && ok 'capture: dynamic.rb (include <call>, autoload with a variable path, require variable) invents NO directive — its one row is the `Object` RECEIVER of `Object.const_get` (parser version 83, test/rubyrecvcheck.sh), not the include' \
+    || no "capture: dynamic.rb rows — a non-literal include/autoload/require was invented, or the Object receiver went missing: $( frow lib/app/dynamic.rb ) $( incs lib/app/dynamic.rb )"
 
 # ── 2. RESOLUTION: the index + lexical lookup ────────────────────────────────────────────────────────
 # Evidence is --impact's importer tier (`<f via="import" p= lazy=>`): UNCAPPED, per defining file (file:name
@@ -140,9 +142,9 @@ printf '%s' "$DEPS" | grep -q '<f p="lib/app/uses_dup.rb" includes="1"' \
 printf '%s' "$DEPS" | grep -q '<f p="lib/app/selfref.rb" includes="1" afferent="0"' \
     && ok 'mutation control: a same-file reference is shown as a directive and dropped as a self-include' \
     || no "mutation control: selfref.rb row wrong: $( frow lib/app/selfref.rb )"
-printf '%s' "$DEPS" | grep -q '<f p="lib/app/point.rb"' \
-    && no 'floor: point.rb gained an importer — `Point = Struct.new` aliases are now indexed; move the floor note (tags.scm, this gate)' \
-    || ok 'floor: `Point = Struct.new` is not an open — uses_point.rb'"'"'s `< Geometry::Point` is shown and resolves to nothing'
+printf '%s' "$DEPS" | grep -q '<f p="lib/app/point.rb" includes="1" afferent="0"' \
+    && ok 'floor: `Point = Struct.new` is not an open — uses_point.rb'"'"'s `< Geometry::Point` is shown and resolves to nothing; point.rb'"'"'s own row is its `Struct` receiver (parser version 83), afferent 0' \
+    || no "floor: point.rb gained an importer (aliases indexed? move the floor note: tags.scm, this gate) or lost its Struct row: $( frow lib/app/point.rb )"
 printf '%s' "$DEPS" | grep -q '<f p="lib/app/uses_point.rb" includes="1"' \
     && ok 'floor: the unresolved `< Geometry::Point` directive is still disclosed on uses_point.rb' \
     || no "floor: uses_point.rb row missing: $( frow lib/app/uses_point.rb )"
