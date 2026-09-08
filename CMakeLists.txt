@@ -803,10 +803,25 @@ file(WRITE "${_ripwire_bash_ignorelist}"
 # both are absent on libc++, which is why the Apple leg never saw them and why these entries are inert
 # (but must still parse) on macOS. With the three entries in place the Linux ASan self-run exits 0 with
 # empty stderr and cachefuzzcheck's 13 UBSan arms go green.
+# <format> / <print> (libstdc++ 14): the formatting scanner spells "npos" as an int -1 converted to size_t
+# (c++/14/format:3903 under GCC 14.2, reached from std::print via vprint_nonunicode) — a DEFINED conversion the
+# Clang-only integer group flags as suspicious, in library code this tree does not own; exempted the way
+# basic_string's wrap idiom is below, for the group's four conversion/overflow checks. Found by the first
+# std::print CI run (34284272539, asan ubuntu-24.04: `ripwire --version` aborted, exit 134) — the emitter
+# (src/infra/emit.h) routes every formatted write through these headers, so the exemption is what lets the
+# complete G1 stack keep running on the clang leg now that --version itself exercises std::format.
 file(WRITE "${_ripwire_libstdcxx_ignorelist}"
   "[unsigned-integer-overflow]\nsrc:*/bits/string_view.tcc\n"
   "src:*/bits/basic_string.h\n"
-  "src:*/bits/basic_string.tcc\n")
+  "src:*/bits/basic_string.tcc\n"
+  "src:*/include/c++/*/format\n"
+  "src:*/include/c++/*/print\n"
+  "[implicit-integer-sign-change]\nsrc:*/include/c++/*/format\n"
+  "src:*/include/c++/*/print\n"
+  "[implicit-signed-integer-truncation]\nsrc:*/include/c++/*/format\n"
+  "src:*/include/c++/*/print\n"
+  "[implicit-unsigned-integer-truncation]\nsrc:*/include/c++/*/format\n"
+  "src:*/include/c++/*/print\n")
 
 if(RIPWIRE_ASAN)
   foreach(_t IN LISTS RIPWIRE_RUNTIME_COMPILE_TARGETS)
