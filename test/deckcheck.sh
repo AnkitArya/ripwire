@@ -185,6 +185,7 @@ for f in "$ROOT"/docs/*.md; do
 done
 for f in "$ROOT"/skills/*/SKILL.md;         do addSource "$f" skills; done
 for f in "$ROOT"/skills/*/*.md;             do addSource "$f" skills; done
+for f in "$ROOT"/skills/*/*/SKILL.md;       do addSource "$f" skills; done
 for f in "$ROOT"/prompts/*.md;              do addSource "$f" prompts; done
 for f in "$ROOT"/paper/*.md;                do addSource "$f" paper;   done
 for f in "$ROOT"/present/*.js;              do addSource "$f" present; done
