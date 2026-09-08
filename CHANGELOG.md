@@ -15,6 +15,90 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — a Ruby constant receiver is a dependency (parser version 83)
+
+Round two of the Ruby constant work. Parser version 82 gave the declarative spellings — `class X < Base`,
+include/extend/prepend, `autoload :Name`. This round adds the one a Zeitwerk application actually depends
+through: a **constant receiver** — `User.find`, `App::Mailer.deliver`, `Struct.new`. The autoloader loads
+lib/app/user.rb on that first reference, and nothing else in the file says so.
+
+Four decisions, each stated in `test/rubyrecvcheck.sh`'s header rather than asked:
+
+1. **What counts.** A `call` whose receiver is a constant or a constant chain (`A::B::C`, `::A::B`), spelled
+   as written. A chain whose head is not a constant — `repo::Finder`, `self.class`, an identifier, an ivar —
+   is nothing (`rubyIsConstantChain`; the round-one reader accepts any scope-resolution text and is right
+   for the positions the grammar already restricts to constants, a receiver is not one). A constant used as an
+   **argument** (`raise Errors::Boom`, `validates_with Foo`) or as a rescue class is **not** a receiver: a
+   disclosed floor of this round.
+2. **Dedupe at extraction**, per (file, innermost class/module open, written name). Zeitwerk loads a
+   constant once per process, on its first reference; the second `User.find` in the same body is not a new
+   dependency. The first occurrence in source order carries the byte and therefore the lazy bit. The nesting
+   is in the key: `User` under `module Admin` and `User` under the enclosing module may be two constants, and
+   the fixture has that file. `Time` and `::Time` are two spellings, two directives. The declarative shapes
+   stay one directive per occurrence — each is a statement. Measured with the Prism prototype: distinct
+   (file, nesting, name) is 61 % of raw receiver sites on activesupport, 67 % on activerecord, 56 % and 53 %
+   on the two Rails apps.
+3. **Lazy inside a closure.** A receiver inside a `method`, `singleton_method`, `lambda`, `block` or `do_block`
+   is `lazy="1"` — it runs when and if that closure runs, the parser-72 TS/JS function-body rule on Ruby's
+   own closure kinds (`kRubyClosureContainers`). A receiver at class-body or file level runs at load. A
+   `do`-block passed to a class-level macro (`included do`, `after_commit do`) is lazy under this rule even
+   when the callee runs it at load: the tool cannot see the callee, and a block is a closure it may or may
+   not run. `--impact`'s importer tier says `lazy="1"` only when every edge from that importer is lazy.
+4. **Resolution is round one's, unchanged.** Module.nesting innermost-first then Object, `::` absolute,
+   wrapper opens define nothing, genuine reopenings fan out, a same-file reference is shown and dropped as a
+   self-include. An out-of-tree receiver (`Time`, `Struct`, `Object`) is a shown `<inc t=>` row with no edge —
+   the posture every Python `import os` row already has.
+
+**The Ruby walk now descends every node.** A receiver is an expression — under an assignment, an argument
+list, a lambda, a binary, a string interpolation — so the statement-level container allowlist Ruby had through
+parser version 82 (19 kinds) would have needed ~40 and every kind it missed would have been a receiver
+silently dropped, a floor the tool could not disclose because it could not see it. The full descent is the
+cost the reference pass already pays once per Ruby file. The depth bound (256) still degrades loudly.
+`--deps --limit=100000 --no-cache` wall time on a 4683-file Rails app: 1.04 s → 0.92 s (noise); on
+activerecord `lib/` 0.21 s → 0.18 s.
+
+**The denominator moved — read every Ruby `ccd`/`acd`/`nccd`/`shape=` recorded before this build as a
+different measurement.** Under runtime constant references a Ruby codebase is one tangle at the file level:
+models name each other, base classes name their subclasses through registries, and the transitive cone of a
+controller is most of the application. That is the graph Ruby has; the declarative round was measuring the
+part of it written as statements. `--deps --limit=100000`, before → after (`files=` is the listing's own
+denominator: files with at least one edge; `<godfiles total=>` is the uncapped importee count):
+
+| corpus | files= | ccd | acd | nccd | shape | importees | `--deps` bytes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| activesupport 7.2.3.2 `lib/` (282) | 206 → 241 | 10 450 → 43 098 | 37.2 → 153.4 | 5.19 → 21.40 | tangled → tangled | 241 → 244 | 55 483 → 73 757 |
+| activerecord 7.2.3.2 `lib/` (395) | 300 → 368 | 2 714 → 73 298 | 6.9 → 186.0 | 0.90 → 24.33 | horizontal → tangled | 385 → 386 | 71 474 → 112 916 |
+| a Rails app, 4683 files / 3532 `.rb` | 2 296 → 3 245 | 12 740 → 1 407 232 | 3.3 → 367.9 | 0.31 → 33.74 | horizontal → tangled | 385 → 1 447 | 378 473 → 729 100 |
+| a second Rails app, 1957 files / 1895 `.rb` | 1 066 → 1 446 | 6 258 → 128 889 | 3.3 → 68.1 | 0.33 → 6.88 | horizontal → tangled | 189 → 598 | 172 701 → 352 701 |
+
+activerecord's `associations/builder/has_many.rb` is the shape in one row: one receiver directive
+(`CollectionAssociation`), `transitive="379"` of 394 files — the cone is the strongly-connected core, which is
+what a reader of `--deps` on a Rails gem needs to know before trusting any cone number. The top importees
+did not move (activerecord: `errors.rb` 137, `base.rb` 89 — superclass rows from round one); the uncapped
+listing on the gem carries 2 228 `<inc t=>` rows over 1 188 distinct targets, the most frequent being
+`ActiveSupport::Concern` (57, out of tree, shown, no edge).
+
+**Default map.** Byte-identical on a Ruby-free corpus (this repo's `src/`, modulo version stamps). On Ruby
+corpora the ranking moves a little (activesupport `est_tokens` 15 745 → 15 688, `pr_iters` 56 → 54) because
+include edges narrow ambiguous call resolution and there are more of them; no `id=` row moves — `scope` is
+still the immediate enclosing name.
+
+**Record shape unchanged.** A receiver is an `Include` with `isSymbolic` and `byte` (both parser version 82),
+so cache format 17 holds and only the extraction identity moved: cached Ruby files re-parse once. Cold and
+warm caches agree on activerecord and the 4683-file app (gated on the fixture).
+
+**Round one's gate moved two arms, honestly.** `test/rubyconstfix`'s `dynamic.rb` (`include
+Object.const_get(:Trackable)`) now has a row — the `Object` receiver, not the include, and the arm asserts
+exactly that; `point.rb` (`Point = Struct.new`) has a `Struct` row with `afferent="0"` — the alias is still
+not indexed, the floor note stands.
+
+Gate: `test/rubyrecvcheck.sh` + `test/rubyrecvfix/` (17 files — dedupe across seven receiver sites, two
+nestings of one name in one file, four laziness levels, lexical versus absolute, the Object-level fallback
+for a module-less script, a self-include, five non-constant receiver shapes, the Struct alias floor, the
+argument/rescue floor, a same-basename decoy, root-spelling parity, determinism, warm == cold,
+well-formedness). Written red first: 14 arms fail against the parser-version-82 binary, every mutation
+control and floor arm passes there. 558 → 559 gate scripts.
+
 ### Added — Ruby constant references are dependencies (parser version 82, cache format 17)
 
 A Zeitwerk application spells almost none of its dependencies with `require`: a controller depends on a
