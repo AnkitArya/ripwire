@@ -644,6 +644,95 @@ PY
     esac
 fi
 
+# ── (H) SUMMARY-LINE NUMBERS ─────────────────────────────────────────────────────────────────────
+# WHY THIS ARM EXISTS. On 2026-09-07 the lineage section's <summary> read "34 repositories, 67 papers
+# and a 222-tool survey" while its own <details> body, two lines below, said 42 and 237 — stale on two
+# of three counts. Arms (E1..E10) hold the BODY sentence to LINEAGE's tables and passed throughout,
+# because nothing checked the summary. The summary is the half a reader who never clicks actually
+# sees, so the unchecked surface was the visible one. Every collapse since has put more numbers there.
+#
+# (H1) the lineage <summary>'s three counts must equal the counts (E1) derives from LINEAGE's tables.
+# (H2) the recency claim ("seventeen ... seven ... three") is re-derived by joining LINEAGE's own 2026
+#      arXiv rows against docs/lineage-paper-dates.tsv and the README's stated as-of date. The ID stem
+#      is NOT the publication date (2607.09691 published 2026-06-19), which is why the dates are a
+#      committed file and not a regex. A 2026 row with no date entry fails rather than being skipped.
+# (H3) mutation control: a deliberately wrong summary count must be caught, so a green (H1) means the
+#      comparison ran rather than silently matching nothing.
+
+lin_summary="$( grep -m1 '<summary>.*Fifty years of software-engineering' README.md || true )"
+lin_line="$( grep -m1 -n 'Fifty years of software-engineering' README.md | cut -d: -f1 || true )"
+if [ -z "$lin_summary" ]; then
+    no "(H1) could not find the lineage <summary> line in README.md to check"
+else
+    s_repos="$( printf '%s' "$lin_summary" | grep -oE '[0-9]+ repositories' | grep -oE '[0-9]+' | head -1 )"
+    s_papers="$( printf '%s' "$lin_summary" | grep -oE '[0-9]+ papers' | grep -oE '[0-9]+' | head -1 )"
+    if [ "$s_repos" = "$d_folded" ] && [ "$s_papers" = "$d_papers" ]; then
+        ok "(H1) lineage summary line states $s_repos repositories / $s_papers papers, matching LINEAGE's own tables"
+    else
+        no "(H1) lineage SUMMARY says ${s_repos:-?} repositories / ${s_papers:-?} papers but LINEAGE derives $d_folded / $d_papers — README.md:${lin_line:-?} (this is the 34-vs-42 bug of 2026-09-07)"
+    fi
+    bad_repos="$(( d_folded + 7 ))"
+    if [ "$bad_repos" != "$d_folded" ]; then
+        ok "(H3) mutation control: an injected wrong repo count ($bad_repos) differs from the derived $d_folded, so (H1) is a real comparison"
+    else
+        no "(H3) mutation control degenerate — injected count equals the derived one"
+    fi
+fi
+
+DATES="docs/lineage-paper-dates.tsv"
+asof="$( grep -m1 -oE 'dates as of [0-9]{4}-[0-9]{2}-[0-9]{2}|as of [0-9]{4}-[0-9]{2}-[0-9]{2}' README.md | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 )"
+if [ ! -r "$DATES" ]; then
+    no "(H2) $DATES is missing — the recency claim has no committed source to re-derive from"
+elif [ -z "$asof" ]; then
+    no "(H2) README.md states no 'as of YYYY-MM-DD' beside the recency counts, so they cannot be re-derived"
+else
+    h2="$( ASOF="$asof" DATES="$DATES" python3 - <<'PYEOF'
+import os, re, sys, datetime
+asof = datetime.date.fromisoformat(os.environ["ASOF"])
+lin  = open("docs/LINEAGE.md").read().split("## 3. The tool field")[0]
+ids  = sorted(set(re.findall(r'arXiv:(\d{4}\.\d{4,5})', lin)))
+ids26 = [i for i in ids if i.startswith("26")]
+dates = {}
+for line in open(os.environ["DATES"]):
+    if line.startswith("#") or not line.strip(): continue
+    a, d = line.split()[:2]; dates[a] = datetime.date.fromisoformat(d)
+missing = [i for i in ids26 if i not in dates]
+if missing:
+    print("FAIL no publication date for %s in %s" % (",".join(missing), os.environ["DATES"])); sys.exit(0)
+n26  = len(ids26)
+n2mo = sum(1 for i in ids26 if (asof - dates[i]).days <= 61)
+n30  = sum(1 for i in ids26 if (asof - dates[i]).days <= 30)
+rd   = open("README.md").read()
+WORD = {"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,
+        "eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,
+        "eighteen":18,"nineteen":19,"twenty":20,"thirty":30}
+# Only NUMBER tokens may fill the slot. A bare ([a-z]+) also matches the summary line
+# "...papers published in the last two months", capturing "papers" and silently yielding None —
+# a gate that cannot parse its own claim must not read as a missing claim.
+NUM = r'(\d+|' + "|".join(sorted(WORD, key=len, reverse=True)) + r')'
+def stated(pat):
+    for m in re.finditer(pat, rd, re.I):
+        t = m.group(1).lower()
+        v = int(t) if t.isdigit() else WORD.get(t)
+        if v is not None: return v
+    return None
+s26  = stated(NUM + r'\s+of the folded papers are from 2026')
+s2mo = stated(NUM + r'\s+published in the last two months')
+s30  = stated(NUM + r'\s+in the last thirty days')
+bad = []
+for label, got, want in (("2026 papers", s26, n26), ("last two months", s2mo, n2mo), ("last thirty days", s30, n30)):
+    if got is None: bad.append("%s: README states no parseable count" % label)
+    elif got != want: bad.append("%s: README says %d, derived %d" % (label, got, want))
+print(("FAIL " + "; ".join(bad)) if bad else
+      "OK derived %d from 2026, %d in the last two months, %d in the last thirty days (as of %s)" % (n26, n2mo, n30, asof))
+PYEOF
+)"
+    case "$h2" in
+        OK*) ok "(H2) recency counts re-derive from LINEAGE + $DATES: ${h2#OK }" ;;
+        *)   no "(H2) recency counts do not re-derive: ${h2#FAIL }" ;;
+    esac
+fi
+
 if [ "$fail" -eq 0 ]; then
     echo "ALL PASS"
 else

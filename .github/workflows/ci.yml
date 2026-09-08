@@ -38,7 +38,11 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel a superseded run on a PULL REQUEST only. On main every push is a distinct commit that deserves its
+  # own verdict: on 2026-09-07 three consecutive main runs were cancelled by unrelated pushes inside the
+  # ~26-min window, with zero failures among the 45 jobs that had completed — the signal was thrown away, not
+  # superseded. A queued main run costs runner minutes; a cancelled one costs the answer.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Never RIPWIRE_NATIVE in CI: -march=native would bake in whatever ISA the CI runner's host happens to
 # expose that week, defeating the entire point of testing the portable default.
@@ -146,8 +150,8 @@ jobs:
         include:
           - { os: macos-14,     flavor: Release, cc: appleclang, shard: 1, shards: 2 }
           - { os: macos-14,     flavor: Release, cc: appleclang, shard: 2, shards: 2 }
-          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 1, shards: 2 }
-          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 2, shards: 2 }
+          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 1, shards: 2, skiplist: .github/pargates-macos-plain-skip.txt }
+          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 2, shards: 2, skiplist: .github/pargates-macos-plain-skip.txt }
           - { os: ubuntu-24.04, flavor: Release, cc: gcc,   shard: 1, shards: 4 }
           - { os: ubuntu-24.04, flavor: Release, cc: gcc,   shard: 2, shards: 4 }
           - { os: ubuntu-24.04, flavor: Release, cc: gcc,   shard: 3, shards: 4 }
@@ -217,7 +221,9 @@ jobs:
         # --budget-scale 4: the harness's flat 300 s default is a hang tripwire calibrated on an idle dev machine;
         # here -j 3 on a 4-vCPU runner is a 3-8x multiplier (two gates hit rc=124 at exactly 300 s in the first
         # sharded runs). The scale applies to the default only; GATE_BUDGET_SEC's explicit entries stay as declared.
-        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }} --budget-scale 4
+        # `skiplist` (macOS plain only): a committed list of platform-independent gates this leg does not run —
+        # see .github/pargates-macos-plain-skip.txt for the measurement and the per-gate reason.
+        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }} --budget-scale 4 ${{ matrix.skiplist && format('--exclude-list {0}', matrix.skiplist) || '' }}
 
       - name: det-gate — 2-run byte-identical diff
         run: |

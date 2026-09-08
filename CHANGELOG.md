@@ -15,6 +15,83 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-07
+
+**The first release carrying outside contributions.** Three people who do not work on this project
+wrote fixes that are in this binary — Michael Freeman, PollyBot13 and Andriy Tyurnikov — and three
+more found things it got wrong: Cort Fritz, stalep and Jan Mangs. All six are named below, beside
+what they found. That is what this number is for.
+
+### Added — Elixir, as a first-class indexed language
+
+A vendored tree-sitter grammar and call-graph extraction, with protocol implementations indexed as
+their own definitions. Contributed by **Michael Freeman**
+([#43](https://github.com/redhat-et/ripwire/pull/43)), rebased onto main's tip — the extraction
+identity is 78, not the 83 the fork carried — and extended with two gaps the fork could not see from
+where it sat. The import edges are described in their own section below.
+
+### Added — `<recent>` answers "what changed", not "what churns"
+
+`--rank-by=churn-decay` emits a file-level `<recent>` block ordered by newest commit first rather
+than by heaviest weight. A question about what changed recently was being answered with what changes
+most often, which is a different question. The MCP instructions carry the deferral hint.
+
+### Added — tests-to-run rows in evidence order
+
+A changed test file comes first, then its stem partner, then graph hops, and each row says *why* it
+is there. A test file that is itself in the diff is an obligation on its own evidence. The silent
+zero on that surface is fixed: an empty result now says so.
+
+### Fixed — named JavaScript and TypeScript import aliases
+
+`import { a as b }` resolved to the wrong symbol, and the refusal path deleted edges that were
+correct. Contributed by **PollyBot13**
+([#45](https://github.com/redhat-et/ripwire/pull/45)). The refusal now reports which of the three
+things it knew rather than collapsing them into one message.
+
+### Fixed — five languages were invisible to the unanalyzed-language disclosure
+
+`filesByLang` was sized with a hardcoded `16` while the `Lang` enum had grown to 21, so TOML, YAML,
+PHP, Lua and Elixir were dropped from the count silently — and two of them were named in
+`kUnanalyzedLangs`, meaning the lens promised to declare them and could not. Found by **Cort Fritz**
+on his own fork. The array is now sized by `kLangCount`, with a `static_assert` that fails the build
+if the enum outgrows it again. **A disclosure surface that under-reports is worse than one that is
+absent**, which is why this is the fix in this release that mattered most.
+
+### Fixed — the MCP tool schema a strict client refuses
+
+One tool declared a union type that stricter MCP clients reject outright, taking the whole server
+down with it ([#48](https://github.com/redhat-et/ripwire/issues/48), reported by **stalep** against
+opencode with `@ai-sdk/google-vertex`). Gated by `test/mcpstrictschemacheck.sh`, written red against
+the binary that had the bug.
+
+### Fixed — twenty first-run defects a stranger hits and a maintainer never does
+
+`PATH` not printed on install, a borrowed query in the quickstart, shallow clones mishandled, two
+inverted `--doctor` verdicts, lock-file litter, sidecars that did not say what they dropped, an empty
+map that read as an answer, and an upgrade path that left a binary which could not run and reported
+success. Found by auditing the install as somebody who had never run it.
+
+### Changed — the README leads with the proof
+
+The ten-moments token table and the graphs now sit under the install block: **300 words to the first
+piece of evidence instead of 1,009**. Twenty-six prose blocks moved behind `<details>`, each with a
+summary carrying its own number, so the page makes the same case whether or not anything is clicked.
+Nothing was removed — the full read is longer than before, because the summaries are additive.
+
+### Changed — Graft folded into the lineage ledger as the 42nd repository
+
+A registered head-to-head against Graft 0.17.0 ran, its losses were converted into code, and it was
+re-run: 14 of 30, with the placebo arm at 13-12-5. **The stop condition fired, so no ranking claim is
+published from that round.** What shipped is the two fixes it produced — tests-to-run in evidence
+order, and `<recent>`.
+
+### Changed — CI shards its gate suite across runners
+
+Each release leg's gates split across runner jobs, so the workflow's wall clock is one shard rather
+than one suite. Main runs are no longer cancelled by the next push.
+
+
 ### Changed — every skill description rewritten under the client budget, and one skill folded away
 
 Reported and **measured** by [@jmangs](https://github.com/jmangs) in #49: Codex silently shortens skill

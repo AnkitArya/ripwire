@@ -11,162 +11,85 @@
 
 ## Give your coding agent a map before it reads the repo.
 
-**ripwire is a local code-navigation CLI for coding agents.** It parses source files and ranks
-symbols and call relationships, helping an agent find relevant code, inspect callers, and choose
-tests before making a change. It returns structured output rather than a prose summary of your code.
+**ripwire is the ripgrep of AI context.** Point it at any repository and your agent gets a ranked,
+deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
+around and reading whole files.
 
-It runs offline as one self-contained binary: no API key, embeddings, or index server required.
-Use the CLI from any shell-capable agent, or connect through the optional [MCP server](#set-it-up-in-your-coding-agent).
+<details>
+<summary><b>Fifty years of software-engineering results, and research from last month.</b> 42 repositories and 67 papers folded — McCabe (1976) through to <b>seven papers published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in, all of it put into a single blazing-fast compiled executable</summary>
 
-**Start here:** [Install or build](#quickstart) · [Agent setup](#set-it-up-in-your-coding-agent) ·
-[Command reference](docs/COMMANDS.md) · [Measurements](#measured) · [Known limits](#the-honesty-contract)
+Beside those sits a labelled survey of **237 tools** that contributed nothing and says so. The two
+sets are disjoint by construction, so they add rather than nest — a tool that gave a lesson is never
+counted twice.
+
+**Both halves are load-bearing, and they are doing different jobs.** The settled results are what
+make the quality lens trustworthy: McCabe on complexity (1976), Halstead on volume (1977), Spärck
+Jones on term specificity (1972), Nagappan & Ball on churn. Fifty years of replication means those
+are not opinions, and a tool that measures your code should be built on the ones that survived.
+
+The recent work is what makes it *current*: **seventeen of the folded papers are from 2026, seven
+published in the last two months and three in the last thirty days** (dates as of 2026-09-08; every
+row carries its arXiv id, so the claim is checkable rather than atmospheric). Retrieval for coding
+agents, context-compression cost, placebo-controlled localization — that literature is months old,
+not decades, and several rows were folded within weeks of the paper appearing.
+
+Neither half alone would be enough. A tool built only on the classics would not know what an agent
+needs; one built only on last month's preprints would have nothing underneath it. And the newest row
+is a result that **failed** when it was tested here — which is the point of writing them down. All three counts are re-derived from that document's own tables by
+`test/readmedriftcheck.sh` on every run, which fails if this page and those tables disagree, so the
+claim cannot quietly drift. The row-by-row ledger is
+[`docs/LINEAGE.md`](docs/LINEAGE.md).
+</details>
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
 JavaScript · Java · Ruby · PHP · Lua · Elixir · Bash · C# · JSON · TOML · YAML · Markdown — see
 [language support and limits](#languages).
 
-### Try it on your repository
-
-[Install ripwire](#quickstart), then run these from your repository's root:
-
-```bash
-ripwire . --max-tokens=3000                       # ranked overview — start here
-ripwire . --for="incremental cache invalidation"  # find code relevant to a task
-ripwire . --callers=someFunction                  # inspect a function's callers
-```
-
-Replace the task text and `someFunction` with a change and a function from your own code.
-The output is minified XML for your agent, with file paths, line numbers, and a legend explaining
-the attributes. The overview uses an estimated token budget; a task query can return more context.
-For a known symbol, use a targeted command such as `--callers` rather than repeating a broad task query.
-
-Call resolution and language coverage have [limits](#languages). Treat the map as a navigation aid,
-not proof that every caller or test has been found.
-
-### Example: a task query on ripwire itself
-
-One deterministic answer: the relevant symbols, their callers, the change risks, and
-the tests that reach them. The task is yours to phrase — ask about *your* code, not ours. Run on this
-repository (2026-08-30) with `--for="incremental cache invalidation"`, the observed output was about
-4.3K estimated tokens, not an enforced token budget. It includes:
-
-*This is what the output looks like, not the token-savings recipe.* A bare `--for` on every question
-is the most expensive way to use this tool — see [Where it pays most](#where-it-pays-most-and-where-it-does-not)
-and the three controls below it.
-
-- **The ranked symbols, in rank order** — the cache-header constant `kCacheMagic` first (with its doc
-  comment quoted in place and the one `next=` call that opens it), then `spanTierMemoPath` (the
-  cache-path composer), `ingestCommitTree`, … `ingest` — each row with its file, line, and signature.
-- **Risk, annotated in place** — complexity, git churn (`ingest` shows 128 recent edits),
-  change amplification (touch `ingest` and 266 graph nodes feel it), purity and test coverage. The
-  fragile spots are visible *before* anything touches them.
-- **One-hop call context** — `spanTierMemoPath` calls `shaKeyedCachePath`, `headSnapRepoHex`,
-  `exclConfigHex`; no second query needed to see the neighbourhood.
-- **Its own confidence** — this answer says `confidence="high"` with the score margin attached; a
-  flat ranking says `low`, so it reads as a starting point instead of masquerading as an answer.
-  `confidence=` measures how clearly the ranking separates its head from the rest, not whether the
-  head is what you meant: ask a repository about a concept it does not contain and the best lexical
-  matches still rank, confidently. Phrase the task in your code's own words.
-
-### If it works on your codebase, tell us what it got wrong
-
-Every number on this page is a measurement on a corpus we happen to have. **Yours is one we don't.**
-
-After a session on your own repository — your first one counts, and counts most — hand your agent
-[`prompts/improve-for-my-language.md`](prompts/improve-for-my-language.md). It harvests that
-session's own transcript — where ripwire answered, where it missed, where you fell back to grep —
-and every finding it produces has to cite the moment it came from: what you asked, which command
-ran, what came back. Open an issue with the result.
-
-That is worth more to this project than a bug report, because it arrives in the form the project
-already runs on: evidence with its provenance attached, not an impression. Several languages here
-are one contributor's corpus away from being measurably better, and we cannot see your code.
+### No API key. No embeddings. No index server. No daemon.
 
 <details>
-<summary>The actual wire format — what your agent reads (minified XML; trimmed and line-wrapped here)</summary>
+<summary><b>One process, no server</b> — indexes this repository in <b>0.25 s</b> using <b>6.6 MB</b>, against <b>46.8 s</b> and <b>391 MB</b> for the graph-database MCP server it was measured against; warm queries answer in <b>197 ms</b> to its <b>1,082 ms</b></summary>
 
-```xml
-<ctx task="incremental cache invalidation" confidence="high" margin_pct="20"
-     bundle="compact" bodies="0" reason="compact-route" est_tokens="3995">
-  <sigs shown="23" total="40" capped="1">
-    <d l="106" n="kCacheMagic" p="src/ingest_cache.h" cx="0" in="0" churn="11" amp="71" pure="1" r="1"
-       next="--expand=src/ingest_cache.h:kCacheMagic">
-      <doc>incremental cache (--cache): per-file content hash + raw facts so a
-           re-run re-parses ONLY …</doc>constexpr std::uint32_t kCacheMagic = …</d>
-    <d l="1307" n="spanTierMemoPath" p="src/ingest_astquery.h" cx="1" in="2" churn="5" amp="44" r="2"> … </d>
-    <d l="247" n="ingestCommitTree" p="src/dmm.h" cx="6" in="1" churn="6" amp="27" r="3"> … </d>
-    …
-    <d l="191" n="ingest" p="src/ingest.cpp" cx="4" in="14" churn="128" amp="266" tested="1" r="13"> … </d>
-    … </sigs>
-  <hops shown="2" total="6" capped="1" noedge="2">
-    <h l="1307" p="src/ingest_astquery.h" n="spanTierMemoPath">
-      <calls total="3"><c n="shaKeyedCachePath" l="1621"/> … </calls></h> … </hops>
-</ctx>
-```
-
-`cx=` complexity, `churn=` git edit frequency, `amp=` change amplification, `r=` rank; `<hops>` rows
-carry the one-hop call context, caps disclosed. Every attribute is defined in the one legend at the
-top of the real output, which also self-reports the bundle's cost — `est_tokens="3995"` here.
-
+Measured on 48 matched questions across django, webpack and this repository. Across all three,
+ripwire indexes in **0.25–0.45 s** and **6.6–16.5 MB** against that server's **23–52 s** and
+**391–623 MB**. The full method, the wins named one by one and the losses included, is in
+[Against the leading graph-database code-context MCP server](#against-the-leading-graph-database-code-context-mcp-server)
+and [`docs/EVALS.md`](docs/EVALS.md).
 </details>
-
-| The agent without a map | The agent with ripwire |
-| --- | --- |
-| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="3995"` on this repository (re-derived 2026-09-05, the run above) |
-| reads whole files to find the symbols that matter | those symbols, with complexity, churn and test coverage inline |
-| finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
-| pays for every line it read, right or wrong | measured at **5.0%** of what that grep-and-read pass spends (re-derived 2026-08-23) |
-
-And against five retrieval competitors on a held-out LocBench slice, it finds **all** gold files in
-the top 10 on **58.3%** of instances — the best alternative lands 40.0% — while indexing in 0.31 s.
-[The full leaderboard, losses included ↓](#graph-ranked-retrieval-it-finds-the-right-files-more-often-than-the-alternatives)
-
-### See the map — not just the numbers
-
-<p align="center"><img src="docs/assets/graph-cx.png" alt="ripwire --html on Django's migration autodetector: 120 symbols, 183 call edges, arrows pointing caller to callee, nodes coloured by cyclomatic complexity on a five-stop scale running deep blue, mid blue, amber, orange, pale yellow, module outlines drawn as translucent regions, and low-confidence call edges drawn with dashed shafts" width="880"></p>
-
-<p align="center"><sub><b>Django's migration autodetector, coloured by complexity.</b> Thresholds are fixed, so the colour means the same thing on every repo you point it at.</sub></p>
-
-```bash
-ripwire path/to/django/db/migrations --rank-by=rrf --top-k=120 --color-by=cx --html=map.html
-```
-
-<table>
-<tr>
-<td width="50%"><img src="docs/assets/graph-lens-cx-churn.png" alt="The same graph twice: above coloured by cyclomatic complexity, below by git commit count. Most nodes sit in a different colour band between the two." width="430"></td>
-<td width="50%"><img src="docs/assets/graph-uncertainty.png" alt="A close crop showing solid and dashed call edges side by side; dashed shafts mark calls the resolver could not pin to a single target" width="430"></td>
-</tr>
-<tr>
-<td><sub><b>The same graph, re-coloured by git churn.</b> 76% of these nodes move to a different band — structure and history disagree, and one run shows you both.</sub></td>
-<td><sub><b>A dashed shaft is a guess.</b> 31 of 183 edges here are one arm of a split the resolver could not choose between. No other tool marks which of its arrows it is unsure about.</sub></td>
-</tr>
-</table>
 
 <details>
-<summary>How to read these pictures — the five lenses, the fixed thresholds, and what the renderer refuses to draw</summary>
+<summary>One binary, offline — and the same line <b>activates the skills</b> for every agent it finds: Claude Code · Codex · Cursor · Windsurf · Gemini · opencode · aider</summary>
 
-One self-contained HTML file (`--html[=FILE]`), no server, no CDN, no external asset. `--color-by=lang|community|cx|churn|tested` sets the initial colour; the page embeds all five and keeps a live selector, so switching lens costs no second run.
-
-Read from the figures above, which state their own rules in a sidecar saved beside each image:
-
-- **arrow points caller → callee** — the graph is directed, and the page draws it that way.
-- **`31 of 183 shafts dashed in this view = the resolver could not choose between same-name definitions and split the call over all of them`** — per *edge*, not per symbol. A symbol-level "this function makes some ambiguous calls" would mark every one of its edges, which would be a lie about most of them.
-- **labels: top 24 by in-view degree, one per name** — one label per distinct name, so a picture of a container class stops crowding out the functions you asked about.
-- **shapes: ● fn ■ cls ✚ var** — kind is nominal data on a nominal channel; complexity never uses shape.
-- **module outlines: `7 of 12 modules with 3+ nodes in view (cap 12; 3 dropped as too thin to read as a region; 2 dropped as enclosing mostly other modules)`** — three separate truncations, each with its own count and its own reason.
-
-The `cx` and `churn` ramps share one five-stop scale, ordered so lightness rises with the value — it survives greyscale printing, and every adjacent pair stays separable under protanopia, deuteranopia and tritanopia. Thresholds are fixed rather than per-corpus quantiles, so a hot node cannot be manufactured by a cold repository.
-
-`churn` needs real git history: a shallow clone reports every file as one commit, and a directory with no repository says `churn unavailable` rather than drawing zeros.
-
+One self-contained binary on your own machine, offline, installed in one line — and the same line
+installs *and activates* the task-shaped skills that teach your agent *when* to reach for it, not
+just how, for every agent it finds on the machine. If your
+agent can run shell commands — Claude Code, Codex, Cursor, Windsurf, Gemini, opencode, aider — it is
+set up the moment the install finishes; [the MCP server is the optional second
+interface](#set-it-up-in-your-coding-agent). Install it and ask it something before you finish
+reading this page:
 </details>
+
+```bash
+RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
+export PATH="$HOME/.local/bin:$PATH"      # where it installed; the installer prints this line if you need it
+cd your-repo
+ripwire . --for="<the change you are about to make, in words>"
+```
+
+**Reach for the CLI first — it is the cheaper interface.** The MCP server is the optional second
+way in, and its convenience has a cost the shell pipe does not carry: its verb schemas sit in your
+agent's context every session, whether or not it calls them.
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
+
+<details>
+<summary>How these ten rows were measured — <b>2026-08-08</b>, figures in ~tokens (≈ bytes/4), every ratio from a real run reproduced by the command in its row</summary>
 
 Ten everyday moments, re-measured on this repository, 2026-08-08. Figures are ~tokens (≈ bytes/4);
 every ratio comes from a real run, reproduced by the command in its row — raw byte counts and exact
 commands in
 [`docs/EVALS.md` §5](docs/EVALS.md#readme-grade-rows-re-measured-on-this-repository-2026-08-08).
+</details>
 
 Ordered understand → navigate → review-the-change:
 
@@ -216,6 +139,139 @@ this project publishes against itself.
 
 </details>
 
+<details>
+<summary><b>Where those savings compound: an orchestrator that matches tasks to models — every lane it spawns starts cold on the same tree.</b> The map is the one artifact that does not have to be rediscovered per agent, and the quality verbs hand a verdict back instead of a pile of files to re-read</summary>
+
+The shape: plan the work, then run a loop that matches each task to the model that fits it. Every
+thread it spawns opens with an empty context on a repository it has never seen. **Orienting an empty
+context to a large repository is the most repeated cost in the whole system, and the one this tool
+was built for** — it is also the cost that grows with the size of the tree, which is why the pattern
+matters more the bigger the repository gets.
+
+`--for` and `--pack-task` answer it in a single call, at the per-call rates in the table above,
+instead of a grep-and-read tour that every lane pays over again from scratch.
+
+The return path matters as much. `--quality-delta`, `--test-gate` and `--edit-check` answer *what did
+I make worse*, *which tests must run*, *did I change a contract* — quantitative answers a lane can
+hand back as a verdict, rather than a transcript the orchestrator has to read to find out what
+happened.
+
+**What is and is not claimed here.** Every figure on this page is a single-agent measurement. That
+the saving compounds with the number of cold orientations follows from the fixed-cost mechanism, but
+it is pre-registered and **unrun** — the reason the pattern is worth trying, not a result this
+project has published.
+</details>
+
+### See the map — not just the numbers
+
+<p align="center"><img src="docs/assets/graph-cx.png" alt="ripwire --html on Django's migration autodetector: 120 symbols, 183 call edges, arrows pointing caller to callee, nodes coloured by cyclomatic complexity on a five-stop scale running deep blue, mid blue, amber, orange, pale yellow, module outlines drawn as translucent regions, and low-confidence call edges drawn with dashed shafts" width="880"></p>
+
+<p align="center"><sub><b>Django's migration autodetector, coloured by complexity.</b> Thresholds are fixed, so the colour means the same thing on every repo you point it at.</sub></p>
+
+```bash
+ripwire path/to/django/db/migrations --rank-by=rrf --top-k=120 --color-by=cx --html=map.html
+```
+
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/graph-lens-cx-churn.png" alt="The same graph twice: above coloured by cyclomatic complexity, below by git commit count. Most nodes sit in a different colour band between the two." width="430"></td>
+<td width="50%"><img src="docs/assets/graph-uncertainty.png" alt="A close crop showing solid and dashed call edges side by side; dashed shafts mark calls the resolver could not pin to a single target" width="430"></td>
+</tr>
+<tr>
+<td><sub><b>The same graph, re-coloured by git churn.</b> 76% of these nodes move to a different band — structure and history disagree, and one run shows you both.</sub></td>
+<td><sub><b>A dashed shaft is a guess.</b> 31 of 183 edges here are one arm of a split the resolver could not choose between. No other tool marks which of its arrows it is unsure about.</sub></td>
+</tr>
+</table>
+
+<details>
+<summary>How to read these pictures — the five lenses, the fixed thresholds, and what the renderer refuses to draw</summary>
+
+One self-contained HTML file (`--html[=FILE]`), no server, no CDN, no external asset. `--color-by=lang|community|cx|churn|tested` sets the initial colour; the page embeds all five and keeps a live selector, so switching lens costs no second run.
+
+Read from the figures above, which state their own rules in a sidecar saved beside each image:
+
+- **arrow points caller → callee** — the graph is directed, and the page draws it that way.
+- **`31 of 183 shafts dashed in this view = the resolver could not choose between same-name definitions and split the call over all of them`** — per *edge*, not per symbol. A symbol-level "this function makes some ambiguous calls" would mark every one of its edges, which would be a lie about most of them.
+- **labels: top 24 by in-view degree, one per name** — one label per distinct name, so a picture of a container class stops crowding out the functions you asked about.
+- **shapes: ● fn ■ cls ✚ var** — kind is nominal data on a nominal channel; complexity never uses shape.
+- **module outlines: `7 of 12 modules with 3+ nodes in view (cap 12; 3 dropped as too thin to read as a region; 2 dropped as enclosing mostly other modules)`** — three separate truncations, each with its own count and its own reason.
+
+The `cx` and `churn` ramps share one five-stop scale, ordered so lightness rises with the value — it survives greyscale printing, and every adjacent pair stays separable under protanopia, deuteranopia and tritanopia. Thresholds are fixed rather than per-corpus quantiles, so a hot node cannot be manufactured by a cold repository.
+
+`churn` needs real git history: a shallow clone reports every file as one commit, and a directory with no repository says `churn unavailable` rather than drawing zeros.
+
+</details>
+
+One deterministic answer: the relevant symbols, their callers, the change risks, and
+the tests that reach them. The task is yours to phrase — ask about *your* code, not ours. Run on this
+repository (2026-08-30), `ripwire . --for="incremental cache invalidation"` produced about 4.3K
+estimated tokens, not an enforced token budget. It includes:
+
+*This is what the output looks like, not the token-savings recipe.* A bare `--for` on every question
+is the most expensive way to use this tool — see [Where it pays most](#where-it-pays-most-and-where-it-does-not)
+and the three controls below it.
+
+<details>
+<summary>What those <b>4.3K tokens</b> actually contain — ranked symbols with their doc comments quoted in place, risk annotated on every row, one-hop callers, and the answer's own <code>confidence=</code></summary>
+
+- **The ranked symbols, in rank order** — the cache-header constant `kCacheMagic` first (with its doc
+  comment quoted in place and the one `next=` call that opens it), then `spanTierMemoPath` (the
+  cache-path composer), `ingestCommitTree`, … `ingest` — each row with its file, line, and signature.
+- **Risk, annotated in place** — complexity, git churn (`ingest` shows 128 recent edits),
+  change amplification (touch `ingest` and 266 graph nodes feel it), purity and test coverage. The
+  fragile spots are visible *before* anything touches them.
+- **One-hop call context** — `spanTierMemoPath` calls `shaKeyedCachePath`, `headSnapRepoHex`,
+  `exclConfigHex`; no second query needed to see the neighbourhood.
+- **Its own confidence** — this answer says `confidence="high"` with the score margin attached; a
+  flat ranking says `low`, so it reads as a starting point instead of masquerading as an answer.
+  `confidence=` measures how clearly the ranking separates its head from the rest, not whether the
+  head is what you meant: ask a repository about a concept it does not contain and the best lexical
+  matches still rank, confidently. Phrase the task in your code's own words.
+</details>
+
+<details>
+<summary>The actual wire format — what your agent reads (minified XML; trimmed and line-wrapped here)</summary>
+
+```xml
+<ctx task="incremental cache invalidation" confidence="high" margin_pct="20"
+     bundle="compact" bodies="0" reason="compact-route" est_tokens="3995">
+  <sigs shown="23" total="40" capped="1">
+    <d l="106" n="kCacheMagic" p="src/ingest_cache.h" cx="0" in="0" churn="11" amp="71" pure="1" r="1"
+       next="--expand=src/ingest_cache.h:kCacheMagic">
+      <doc>incremental cache (--cache): per-file content hash + raw facts so a
+           re-run re-parses ONLY …</doc>constexpr std::uint32_t kCacheMagic = …</d>
+    <d l="1307" n="spanTierMemoPath" p="src/ingest_astquery.h" cx="1" in="2" churn="5" amp="44" r="2"> … </d>
+    <d l="247" n="ingestCommitTree" p="src/dmm.h" cx="6" in="1" churn="6" amp="27" r="3"> … </d>
+    …
+    <d l="191" n="ingest" p="src/ingest.cpp" cx="4" in="14" churn="128" amp="266" tested="1" r="13"> … </d>
+    … </sigs>
+  <hops shown="2" total="6" capped="1" noedge="2">
+    <h l="1307" p="src/ingest_astquery.h" n="spanTierMemoPath">
+      <calls total="3"><c n="shaKeyedCachePath" l="1621"/> … </calls></h> … </hops>
+</ctx>
+```
+
+`cx=` complexity, `churn=` git edit frequency, `amp=` change amplification, `r=` rank; `<hops>` rows
+carry the one-hop call context, caps disclosed. Every attribute is defined in the one legend at the
+top of the real output, which also self-reports the bundle's cost — `est_tokens="3995"` here.
+
+</details>
+
+| The agent without a map | The agent with ripwire |
+| --- | --- |
+| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="3995"` on this repository (re-derived 2026-09-05, the run above) |
+| reads whole files to find the symbols that matter | those symbols, with complexity, churn and test coverage inline |
+| finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
+| pays for every line it read, right or wrong | measured at **5.0%** of what that grep-and-read pass spends (re-derived 2026-08-23) |
+
+<details>
+<summary><b>58.3%</b> of instances with <b>all</b> gold files in the top 10 — the best alternative lands <b>40.0%</b>, while indexing in <b>0.31 s</b></summary>
+
+And against five retrieval competitors on a held-out LocBench slice, it finds **all** gold files in
+the top 10 on **58.3%** of instances — the best alternative lands 40.0% — while indexing in 0.31 s.
+[The full leaderboard, losses included ↓](#graph-ranked-retrieval-it-finds-the-right-files-more-often-than-the-alternatives)
+</details>
+
 ### Against the leading graph-database code-context MCP server
 
 **Won 27 · lost 7 · tied 14** on 48 matched questions across django, webpack and this repository,
@@ -247,6 +303,9 @@ what the competitor does better:
 [`docs/EVALS.md` §2](docs/EVALS.md#2-head-to-head-against-other-tools).
 </details>
 
+<details>
+<summary><b>Nothing it is unsure about reaches your agent unlabelled</b> — unindexed languages named in the map's first line, a parse-health row on any file it cannot vouch for, every skipped file itemized with its reason</summary>
+
 **Nothing it is unsure about reaches your agent unlabelled — and nothing it could not see goes
 unnamed.** Every guess is marked in the output, and every mark has a next step — up to handing it a
 compiler-grade index. Point it at a repository whose main language it has no grammar for and the
@@ -254,15 +313,20 @@ map's first line says so (`unindexed="ml:793,mli:607,…"` on a facebook/infer c
 indexed but cannot vouch for carries a parse-health row; every file the crawl passed over is
 itemized with its reason. A confident-looking map that lies by omission is the failure mode this
 tool refuses.
+</details>
 [What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
 
 ### Graph-Ranked Retrieval: It finds the right files more often than the alternatives
+
+<details>
+<summary><b>58.3% against 40.0%</b> for the best tool tested, and it answers before they finish indexing — N = 60 paired, zero exclusions, every arm re-run on one day</summary>
 
 **58.3% against 40.0% for the best tool tested — and it answers before they finish indexing.** Every
 arm below was re-run in full on 2026-08-08 — one ripwire binary (the profile-guided release build
 that now ships), one evaluator, one 60-instance held-out LocBench slice: paired, zero exclusions,
 same gold set, and the metric code imported unmodified into every arm. *Strict file@10 = **all** gold files inside the top 10*, which is whether
 your agent starts in the right place at all.
+</details>
 
 | Round 4 — LocBench, Python-dominant | strict file@10 | any@10 | index (median) | query (median) |
 | --- | --- | --- | --- | --- |
@@ -431,6 +495,9 @@ real work, and the joke is aimed at the trade-offs, never the authors.</sub>
 
 ---
 
+<details>
+<summary><b>Name a symbol and it is the first hit</b> — routing lifts recall@1 <b>61.1% → 91.3%</b>; route <i>everything</i> to the name lane and prose queries collapse <b>0.967 → 0.016 MRR</b>. Both numbers ship together</summary>
+
 **Name a symbol and it is the first hit — and it is never a mystery which ranker answered.** Every
 `--for` query is served by one of three lanes; a confidence-gated router picks by reading the
 query's *shape*, discloses its choice on the output (`route=`), and `--no-route` overrides it.
@@ -440,6 +507,7 @@ lane and prose queries collapse from **0.967 MRR to 0.016**. Both numbers ship t
 with `ripwire <dir> --eval-retrieval`, which grades EVERY doc-commented symbol in the corpus and
 prints its own `population=`/`scored=`/`rule=`; the full per-ranker tables are in
 [`bench/ANSWERQUALITY.md`](bench/ANSWERQUALITY.md#re-measured-2026-09-05--census-sampler-midrank-ties-the-current-numbers).
+</details>
 
 | Lane | Built for | Why it wins there | Where it loses |
 | --- | --- | --- | --- |
@@ -500,10 +568,14 @@ per-lane table and history in [docs/EVALS.md §4](docs/EVALS.md).
 
 ### Saves Tokens: It answers for a fraction of the context
 
+<details>
+<summary><b>5.0%</b> of what a grep-and-read pass spends — <b>5.2%</b> on the questions both arms fully answered, and a dedicated context compressor run over the output saved <b>exactly 0 tokens</b></summary>
+
 On mid-task questions it had never seen, ripwire answers at **5.0%** of what a grep-and-read pass
 spends — **5.2%** on the questions both arms fully answered. `--pack-signatures` returns **74.7%
 fewer bytes** than full bodies at top-50 (re-derived on this tree, 2026-09-06). The output is already
 dense enough that running a dedicated context compressor over it saved **exactly 0 tokens**.
+</details>
 
 <details>
 <summary>Why both figures are printed — <b>7.3% → 5.0%</b> overall, but <b>1.7% → 5.2%</b> on the questions both arms answered</summary>
@@ -523,6 +595,9 @@ warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessin
 
 ### Where it pays most, and where it does not
 
+<details>
+<summary><b>A map is a fixed cost paid once per context — strongest of all under an orchestrator that matches tasks to models: every lane it spawns starts cold on the same tree.</b> It pays again on the checking pass, and it <b>does not pay</b> on a question one <code>grep</code> already answers</summary>
+
 **A map is a fixed cost paid once per context, so it pays in proportion to what that context goes on
 to do with it.** Two shapes get the most out of it, and one gets nothing.
 
@@ -536,8 +611,12 @@ to do with it.** Two shapes get the most out of it, and one gets nothing.
 - **It does not pay on a question one `grep` already answers.** The map is charged whether or not it
   was needed, so a narrow lookup in a file you can already name is cheaper without it. `--help-task`
   exists to make that call, and a flat ranking says `confidence="low"` rather than pretending.
+</details>
 
 **Getting the saving takes three things, and a bare `--for` is none of them.**
+
+<details>
+<summary>The three controls that decide what it costs — <b>a budget</b> (<code>--token-budget</code> / <code>--top-k</code>), <b>routing</b> (<code>--help-task</code>), and <b>the skills</b> that teach an agent when <i>not</i> to reach for it</summary>
 
 1. **A budget.** `--token-budget=N` caps the bundle; `--top-k=N` caps the rows. Unbudgeted `--for` returns
    a rich terminal bundle by design — right when it ends the question, wasteful when it does not.
@@ -547,13 +626,21 @@ to do with it.** Two shapes get the most out of it, and one gets nothing.
 3. **The skills.** `skills/install.sh` teaches an agent *when* to reach for which verb. Without them
    an agent has 175 flags and no map of which moment each is for, and it will reach for the map every
    time — including the times it should not.
+</details>
+
+<details>
+<summary><b>What is measured and what is not</b> — these are single-agent figures; that the saving grows with the number of cold orientations is pre-registered and <b>unrun</b>, not a published result</summary>
 
 **What is measured and what is not.** The per-question figures above and in [Measured](#measured) are
 single-agent measurements. That the saving grows with the number of cold orientations follows from the
 fixed-cost mechanism but is **not a published result** — it is pre-registered and unrun. Treat the
 single-agent numbers as the measured ones.
+</details>
 
 ### Better Code: It automates the review judgments nobody has time to make — every lens from published research
+
+<details>
+<summary><b>Six independent evidence families</b>, each implementing published work — the largest correlation between any two is <b>+0.168</b>, which is what makes agreement corroboration rather than one metric counted twice</summary>
 
 `--quality-panel` runs the calls a good reviewer makes by hand — is this function too tangled, is it
 named badly, does it hide control flow inside an idiom, does its history say it keeps breaking, must
@@ -565,6 +652,7 @@ lesson taken from each paper, and the rules measured and *withdrawn*, in
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Pooled over five corpora (n = 27,889) the largest correlation
 between any two families is **+0.168**: they really are measuring different things, so two families
 firing on the same function is corroboration rather than one metric counted twice.
+</details>
 
 <details>
 <summary>Why this matters most for code an agent wrote — empty-catch masking <b>+47%</b>, rewritten-within-two-weeks <b>+15%</b>, and reuse declining</summary>
@@ -578,10 +666,14 @@ names the tests that must run before "done."
 
 </details>
 
+<details>
+<summary>Reproducing all of it — dated, sourced measurements in <code>docs/EVALS.md</code>, each with its instrument, its corpus and its counterexamples, because the losses ship beside the wins</summary>
+
 Tree-local numbers above are reproducible with the commands shown; the rest are dated, sourced
 measurements in [`docs/EVALS.md`](docs/EVALS.md) — each with its instrument, its corpus, and its
 counterexamples, because the losses ship beside the wins. Zero runtime dependencies, C++23, builds
 with the network off.
+</details>
 
 Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, opencode, aider**, and any agent that can
 call a CLI.
@@ -667,11 +759,15 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 ## What it answers
 
+<details>
+<summary><b>179 long flags</b> across seven families, plus the MCP server — and <code>--help-task</code> names the ONE command a task wants, or abstains honestly when the evidence is too thin</summary>
+
 Around the core sit 179 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 Not sure which of them fits the task in front of you? `ripwire . --help-task="<task in words>"`
 recommends ONE executable command with the evidence behind the pick — advice only, it never runs
 the recommendation — and abstains honestly when the evidence is too thin to name a winner.
+</details>
 
 <details>
 <summary>Which surface is the authority — <code>--help</code> vs <code>docs/COMMANDS.md</code> — and the four reflex verbs worth memorising</summary>
@@ -702,6 +798,9 @@ ranking, bodies, callers and tests in one budgeted bundle.
 
 ## Quickstart
 
+<details>
+<summary><b>Prebuilt binary</b> — macOS and Linux (arm64 / x86-64, built for <b>RHEL 8+</b>), SHA-256 verified, shipping <b>seventeen agent skills</b> the installer activates for every agent it detects</summary>
+
 **Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, built for **RHEL 8+**;
 every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
 [GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
@@ -719,6 +818,7 @@ activation one-liner is printed instead:
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
 export PATH="$HOME/.local/bin:$PATH"      # not on PATH by default on macOS or most Linux shells; add it to your rc file
 ```
+</details>
 
 **Building it yourself needs CMake 3.24+ and a C++23 compiler, and nothing else installed first** —
 every dependency is vendored in-tree, so the build completes with the network off.
@@ -808,10 +908,14 @@ contract, gated on every pull request and every push to main, not a tendency.
 
 ## The quality panel
 
+<details>
+<summary><b>4,956</b> eligible functions on this repository, and 2-of-6 agreement leaves <b>401</b> worth a second look — an <b>8.1%</b> shortlist</summary>
+
 **Six independent evidence families, ranked by how many of them agree — never one blended score.**
 Pointed at this repository's **4,956** eligible functions, 2-of-6 agreement leaves **401** worth a
 second look: an **8.1%** shortlist. Pooled over five corpora (n = 27,889) no two families correlate
 above **+0.168**, which is what makes agreement corroboration rather than one metric counted twice.
+</details>
 What each family actually looks at — on this repository's own source, not a synthetic example:
 
 | Family | Question | Backing verb | On this repo |
@@ -970,18 +1074,26 @@ rather than blurring it:
 
 </details>
 
+<details>
+<summary>The full citation table, the evidence tiers, and the naming rule that was <b>withdrawn</b> for flagging this repository's best-named functions</summary>
+
 Full citation table, evidence tiers, and what got measured and *withdrawn* (a naming rule that
 flagged this repository's best-named functions, kept as the standing argument for measuring before
 shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
+</details>
 
 ---
 
 ## Real runs
 
+<details>
+<summary><b>Four real invocations</b> against this repository, printed as the binary actually prints them — including why <code>--callers</code>' count is a floor and what <code>amb=</code> admits</summary>
+
 **Four real invocations against this repository**, each printed as the binary actually prints it:
 `--callers` (and why its count is a floor), the default ranked map (and what `amb=` admits),
 `--test-gate` (exit 4 while obligations remain), and `--from-trace` (feed it the error itself, not a
 paraphrase of one).
+</details>
 
 <details>
 <summary>How these excerpts were edited — minified output wrapped for reading, and exactly which numbers are elided</summary>
@@ -1203,17 +1315,25 @@ cmake --build build 2>&1 | ./build/ripwire . --from-trace=-
 
 ## Measured
 
+<details>
+<summary><b>Read this first if you are here to check whether the tool is oversold</b> — every number with its instrument and corpus, plus the claims this project deliberately does <i>not</i> publish</summary>
+
 Every published number lives in **[`docs/EVALS.md`](docs/EVALS.md)** with the instrument that produced
 it, the corpus it ran on, and the in-tree file that pins it — alongside a counterexample section and a
 list of the claims this project deliberately does *not* publish. Read those first if you are here to
 check whether the tool is oversold.
+</details>
 
 ### Against other tools
+
+<details>
+<summary><b>Round 4: 58.3% against 40.0%</b> — a <b>1.46×</b> margin at a <b>0.31 s</b> index; N = 60 paired, zero exclusions, all arms re-run 2026-08-08</summary>
 
 **Round 4 (re-run in full 2026-08-08): 58.3% strict file@10 against 40.0% for the best competitor —
 a 1.46× margin, at a 0.31 s index.** N = 60 paired instances, zero exclusions, one binary (the
 profile-guided release build that now ships), one evaluator, all arms re-run on the same day.
 *Strict file@10 = all gold files inside the top 10.*
+</details>
 
 | Arm | strict file@10 | any@10 | index (median) | query (median) |
 | --- | --- | --- | --- | --- |
@@ -1343,10 +1463,14 @@ has been re-adjudicated here — the satisfaction column is unchanged, so those 
 
 </details>
 
+<details>
+<summary><b>LocBench held-out, N = 243 across 78 repositories</b> — strict file@10 <b>60.9%</b> against <b>27.6%</b> pre-routing, a paired <b>+33.33pp</b>, bought for <b>−39.4%</b> on the token ceiling</summary>
+
 **LocBench held-out, N = 243 across 78 repositories.** Strict file@10 **60.9%**, against **27.6%** for
 the pre-routing baseline — a paired **+33.33pp** with a clustered-bootstrap 95% lower bound of
 **+25.00pp**, bought for +3.4% warm latency and **−39.4%** on the production token ceiling. More
 accurate *and* cheaper, which is why it shipped.
+</details>
 
 ### What it saves you, in tokens
 
@@ -1509,7 +1633,7 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 <details>
-<summary>34 repositories, 67 papers and a 222-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
+<summary>42 repositories, 67 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
 **42 repositories and 67 papers** into one deterministic executable, alongside a labelled
@@ -1546,9 +1670,13 @@ unsure about reaches your agent unlabelled.**
 
 </details>
 
+<details>
+<summary><b>Measured against a compiler-grade oracle, its silent-miss count is zero</b> — of 68 answers six were imperfect and four flagged themselves; no imperfect answer arrived unmarked</summary>
+
 **Measured against a compiler-grade oracle, its silent-miss count is zero.** Of 68 answers scored
 against a `scip-clang` index, six were imperfect and four flagged themselves; the other two were
 right, and the oracle was the one that could not see the files. No imperfect answer arrived unmarked.
+</details>
 
 <details>
 <summary>Three ways to escalate on purpose — <code>--expand</code> for the body, <code>--uses</code>/<code>--impact</code> for the blast radius, <code>--scip</code> for compiler-grade edges</summary>
@@ -1611,9 +1739,13 @@ number are listed with it. Receipt, per-query scores and reproduction:
 
 ### In the output
 
+<details>
+<summary><b>Three rules the output enforces on itself</b> — a zero reads as <i>none found</i> never <i>none exists</i>; every truncation says what it withheld; every count names its unit</summary>
+
 **Three rules the output enforces on itself:** a zero reads as *none found*, never *none exists*;
 every truncation says what it withheld and how to page it; and every count names its unit, because
 the units differ by verb.
+</details>
 
 <details>
 <summary>The three rules in full — <code>counts_floor="1"</code>, the <code>shown_*</code>/<code>*_capped=</code> paging vocabulary, and why two counts can disagree honestly</summary>
@@ -1715,8 +1847,12 @@ ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation
 ripwire wrap --all       # detect every installed agent and emit each one's config
 ```
 
+<details>
+<summary><b>One stdio server, 31 verbs</b> — 16 read, 12 flagship-reflex, 3 span-addressed edit</summary>
+
 **One stdio server, 31 verbs** — 16 read, 12 flagship-reflex, 3 span-addressed edit — and a client
 that isn't one of the six above can be pointed at the same process by hand.
+</details>
 
 <details>
 <summary>What the 31 verbs are — lazy body handles, the edit verbs' safety contract, the pre-print skill scan, and the hand-written stanza for any other MCP client</summary>
@@ -1817,6 +1953,25 @@ study, a sibling sweep, a live command tour, a showcase build — are listed wit
 [`prompts/README.md`](prompts/README.md). Each states its own scope and its honesty rules, and most name the gates they must leave green.
 
 </details>
+
+### If it works on your codebase, tell us what it got wrong
+
+Every number on this page is a measurement on a corpus we happen to have. **Yours is one we don't.**
+
+<details>
+<summary>Send evidence, not an impression — <code>prompts/improve-for-my-language.md</code> harvests your session's own transcript, and every finding it produces has to cite the moment it came from</summary>
+
+After a session on your own repository — your first one counts, and counts most — hand your agent
+[`prompts/improve-for-my-language.md`](prompts/improve-for-my-language.md). It harvests that
+session's own transcript — where ripwire answered, where it missed, where you fell back to grep —
+and every finding it produces has to cite the moment it came from: what you asked, which command
+ran, what came back. Open an issue with the result.
+
+That is worth more to this project than a bug report, because it arrives in the form the project
+already runs on: evidence with its provenance attached, not an impression. Several languages here
+are one contributor's corpus away from being measurably better, and we cannot see your code.
+</details>
+
 
 ---
 
