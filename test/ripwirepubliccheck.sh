@@ -96,6 +96,24 @@ fi
 # shape 1 from CONTRIBUTING §2: a check examining the wrong population. Note the honest limit — for
 # the PNG there is no cheap extraction, because a leak rendered as PIXELS is invisible to every text
 # tool. That file's control is the crop, not this gate, and saying so here is the disclosure.
+# The classes swept, kept in ONE table so the scan and its control cannot disagree about what is
+# checked — the same discipline docscommandscheck arm (E) uses. Fields are ~-separated because
+# '|' is the ERE alternation character inside every pattern here and cannot also be the separator. Widened 2026-09-08: this arm decoded
+# the binaries correctly but greped ONE class, while the sibling capture path had six. The deck is
+# built by running the tool on someone's machine, the same provenance as the capture that leaked 21
+# internal headings to public main, and it is the one published artifact where a leak is invisible to
+# every text tool in the suite. Measured clean on all five at the time of widening.
+DECK_CLASSES='home path~(/Users|/home)/[A-Za-z0-9_.-]+
+temp path~(/var/folders|/tmp)/[A-Za-z0-9_.-]+
+internal doc name~(PLAN_|DESIGN_|KICKOFF_|HANDOFF_|IDEAS_|RESEARCH_|NEXT_SESSION)[A-Za-z0-9_.-]*
+internal doc heading~p="NOTES\.md" id="[^"]
+address~[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+DECK_CLASS_PROBES='home path~(/Users|/home)/[A-Za-z0-9_.-]+~root "/Users/someone/x"
+temp path~(/var/folders|/tmp)/[A-Za-z0-9_.-]+~cache /var/folders/ab/cd
+internal doc name~(PLAN_|DESIGN_|KICKOFF_|HANDOFF_|IDEAS_|RESEARCH_|NEXT_SESSION)[A-Za-z0-9_.-]*~see PLAN_ROUND_X.md
+internal doc heading~p="NOTES\.md" id="[^"]~<sym p="NOTES.md" id="12. Open questions"/>
+address~[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}~contact someone@example.com'
+
 for _bin in present/ripwire-showcase.pdf present/ripwire-showcase.pptx; do
     [ -f "$ROOT/$_bin" ] || continue
     case "$_bin" in
@@ -104,22 +122,31 @@ for _bin in present/ripwire-showcase.pdf present/ripwire-showcase.pptx; do
       *.pptx) if command -v unzip >/dev/null 2>&1; then _txt="$( unzip -p "$ROOT/$_bin" 'ppt/slides/*.xml' 2>/dev/null )"
               else printf 'SKIP: arm 2b — unzip absent, %s not extractable here (NOT a pass)\n' "$_bin"; continue; fi ;;
     esac
-    if printf '%s' "$_txt" | grep -q '/Users/\|/home/'; then
-        printf 'FAIL: arm 2b — %s carries an absolute home path in its EXTRACTED text:\n' "$_bin"
-        printf '%s' "$_txt" | grep -oE '(/Users|/home)/[A-Za-z0-9_.-]+' | sort -u | sed 's/^/        /'
-        fail=1
-    else
-        printf 'PASS: arm 2b — %s extracts clean of absolute home paths\n' "$_bin"
-    fi
+    _dirty=0
+    while IFS='~' read -r _cls _pat; do
+        [ -n "$_cls" ] || continue
+        if printf '%s' "$_txt" | grep -Eq "$_pat"; then
+            printf 'FAIL: arm 2b — %s carries %s in its EXTRACTED text:\n' "$_bin" "$_cls"
+            printf '%s' "$_txt" | grep -oE "$_pat" | sort -u | head -8 | sed 's/^/        /'
+            fail=1; _dirty=1
+        fi
+    done <<CLASSES
+$DECK_CLASSES
+CLASSES
+    [ "$_dirty" -eq 0 ] && printf 'PASS: arm 2b — %s extracts clean on every scrub class (%s)\n' \
+        "$_bin" "home path, temp path, internal doc name, internal doc heading, address"
 done
-# CONTROL: the extraction must be able to SEE a path. Feed it one and require the same grep to fire,
-# so an extraction that silently returns nothing cannot read as agreement.
-if printf 'root "/Users/someone/x"' | grep -q '/Users/\|/home/'; then
-    printf 'PASS: arm 2b mutation control — the extraction grep fires on a planted path\n'
-else
-    printf 'FAIL: arm 2b mutation control is inert — the grep does not fire on a known-bad string\n'
-    fail=1
-fi
+# CONTROL: every class must be able to SEE its own leak. Feed each a planted string and require its
+# grep to fire, so an extraction that silently returns nothing cannot read as agreement — and so a
+# class that can never match cannot pad the PASS line above with a promise it does not keep.
+_ctlfail=0
+while IFS='~' read -r _cls _pat _probe; do
+    [ -n "$_cls" ] || continue
+    printf '%s' "$_probe" | grep -Eq "$_pat" || { printf 'FAIL: arm 2b control — the %s grep is inert\n' "$_cls"; _ctlfail=1; fail=1; }
+done <<PROBES
+$DECK_CLASS_PROBES
+PROBES
+[ "$_ctlfail" -eq 0 ] && printf 'PASS: arm 2b mutation control — every scrub class fires on its planted leak\n'
 
 # ── arm 3: audit-round coordinates in EMITTED strings and shipped markdown ────────────────────────
 # Source COMMENTS are exempt on purpose: they are internal engineering notes that a user never sees.

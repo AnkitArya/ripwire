@@ -99,6 +99,50 @@ def scrub_author_attrs( text ):
 # Internal-only document names from the private development tree, if a sample happens to rank one.
 INTERNAL_DOC = re.compile( r'\b(?:PLAN_|AUDIT|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|DESIGN_|RESEARCH_)[A-Za-z0-9_.-]*' )
 
+# A row whose PATH was anonymised is a row from an INTERNAL document, and its section HEADINGS are
+# internal too. INTERNAL_DOC above only ever matches the FILENAME token: on a `<sym p= id=>` row it
+# rewrites the path, while id= carries the section HEADING as bare text — no filename in it at all,
+# so nothing there matches and it survives untouched. That is how 21 internal planning headings reached
+# docs/captures/COMMANDS_showcase_2026-08-10.md and public main (4d40fa8a) — the scrub was hiding
+# the name and publishing the contents, which is the wrong half. Redact the identifying payload of
+# any row whose p= is already the anonymised name, keeping the row so counts and structure still
+# read true. No example is spelled out here on purpose: an internal filename written literally in
+# this comment is itself a finding, and test/ripwirepubliccheck.sh is right to say so.
+INTERNAL_ROW  = re.compile( r'<[A-Za-z][A-Za-z0-9_]*\b[^>]*\bp="NOTES\.md"[^>]*/?>' )
+INTERNAL_ATTR    = re.compile( r'\b(id|n)="[^"]*"' )
+INTERNAL_ATTR_KV = re.compile( r'\b(id|n)="([^"]*)"' )
+
+
+def redactable_internal_value( value ):
+    """A heading is text; a COUNT is not. `test/docdriftfix/NOTES.md` is a tracked PUBLIC fixture and
+    doc-drift emits `<weak-file-line p="NOTES.md" n="1">` for it, where n= is the number of weak
+    anchors. Redacting that would corrupt a number and ship it as the tool's answer — worse than the
+    leak this function exists to stop, by this file's own standard. A purely numeric value cannot be
+    a heading, so it is never redacted."""
+    return not value.isdigit()
+
+
+def unredacted_internal_row( line ):
+    """The leak PREDICATE for the shape scrub_internal_rows removes, shared with `assert_scrubbed`
+    so the two cannot disagree — the same discipline `find_address` uses. Returns the offending row,
+    or None."""
+    for row in INTERNAL_ROW.finditer( line ):
+        if any( v != '<internal>' and redactable_internal_value( v )
+                for _, v in INTERNAL_ATTR_KV.findall( row.group( 0 ) ) ):
+            return row.group( 0 )
+    return None
+
+
+def scrub_internal_rows( text ):
+    """Redact id=/n= on rows already anonymised to NOTES.md — the heading text is internal too."""
+    def redact( row ):
+        return INTERNAL_ATTR_KV.sub(
+            lambda a: a.group( 0 ) if not redactable_internal_value( a.group( 2 ) )
+                                   else '%s="<internal>"' % a.group( 1 ),
+            row.group( 0 ) )
+    return INTERNAL_ROW.sub( redact, text )
+
+
 MAX_SAMPLE_LINES = 14
 MAX_SAMPLE_BYTES = 1600
 
@@ -330,6 +374,7 @@ def scrub( text, name ):
     text = scrub_author_attrs( text )
     text = scrub_emails( text )
     text = INTERNAL_DOC.sub( 'NOTES.md', text )
+    text = scrub_internal_rows( text )
     return text
 
 
@@ -640,6 +685,10 @@ def assert_scrubbed( text, what = 'refusing to write' ):
             bad.append( '%d: email address: %s' % ( i, line.strip()[ :90 ] ) )
         elif INTERNAL_DOC.search( line ):
             bad.append( '%d: internal document name: %s' % ( i, line.strip()[ :90 ] ) )
+        elif unredacted_internal_row( line ) is not None:
+            # the shape that shipped once: path anonymised, heading text not
+            bad.append( '%d: internal document HEADING on an anonymised row: %s'
+                        % ( i, unredacted_internal_row( line )[ :90 ] ) )
     if bad:
         sys.exit( 'docs_commands_build: %s — scrub violations:\n  %s' % ( what, '\n  '.join( bad[ :20 ] ) ) )
 
