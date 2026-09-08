@@ -20,6 +20,6 @@ python3 bench/shotgun/cochange_followup.py  "$T/log.txt" 3 0.5         # (c) is 
 
 `scatter.py` takes an optional third argument, a comma-separated list of paths to print every kept commit for.
 All five drop commits touching more than 30 files (the Code Maat bulk-commit rule every `--cochange` walk applies)
-and consider non-merge commits only. `cochange_backtest.py` and `cochange_followup.py` reproduce
+and consider non-merge commits only. `cochange_backtest.py` and `cochange_followup.py` share one history reader (`cochange_history.py`) and reproduce
 `cochangePartners` in `src/gitmine.h` — `together >= 3`, `deg = together / commits(A)`, an 18-month window that
 slides with the commit being scored, top 8 by `deg` — and score each commit against PRIOR history only.
