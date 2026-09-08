@@ -11,7 +11,7 @@
 // std::print where the library has it, std::format rendered and written with std::fputs where it does not.
 //
 // WHY THE CHOICE IS DISCLOSED. A silent fallback would let a CI leg on gcc 13 read as "the std::print floor
-// holds". kRipwireEmitter names the path that compiled in; --version prints it as emit= (gated by
+// holds". kEmitterName names the path that compiled in; --version prints it as emit= (gated by
 // test/versioncheck.sh #6) and each CI leg asserts the value it is supposed to have (.github/workflows).
 //
 // CONTRACT PARITY. std::fputs reports a failed write by return value, which every emitting site here has
@@ -35,7 +35,7 @@ namespace rw
 
 #if defined( __cpp_lib_print ) && __cpp_lib_print >= 202207L
 
-inline constexpr const char* kRipwireEmitter = "std::print";
+inline constexpr const char* kEmitterName = "std::print";
 
 template<class... A> inline void emitTo( std::FILE* stream, std::format_string<A...> f, A&&... a )
 {
@@ -51,7 +51,7 @@ template<class... A> inline void emitTo( std::FILE* stream, std::format_string<A
 
 #else
 
-inline constexpr const char* kRipwireEmitter = "std::format+fputs";
+inline constexpr const char* kEmitterName = "std::format+fputs";
 
 template<class... A> inline void emitTo( std::FILE* stream, std::format_string<A...> f, A&&... a )
 {

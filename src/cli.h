@@ -15,7 +15,7 @@
 
 #include "ingest.h"   // rw::kDefaultMaxFileBytes — the canonical crawl size ceiling (--max-file-size)
 #include "version.h"  // configure-generated kRipwireVersion + short build info (--version)
-#include "infra/emit.h" // rw::emitTo + kRipwireEmitter — --version discloses the emitter that compiled in (emit=)
+#include "infra/emit.h" // rw::emitTo + kEmitterName — --version discloses the emitter that compiled in (emit=)
 
 namespace rw
 {
@@ -4235,7 +4235,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // #6, and asserted per CI leg). It precedes built_from= on purpose: test/doctorcheck.sh arm (H)
             // reads built_from= as everything up to the closing paren, so the sha stays the LAST token.
             rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, built_from={})\n", kRipwireVersion, kRipwireBuildType,
-                        kRipwireCompilerId, kRipwireCompilerVer, rw::kRipwireEmitter, kRipwireGitStamp );
+                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, kRipwireGitStamp );
             std::exit( 0 );
         }
 
