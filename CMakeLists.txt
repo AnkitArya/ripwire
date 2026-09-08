@@ -810,18 +810,22 @@ file(WRITE "${_ripwire_bash_ignorelist}"
 # std::print CI run (34284272539, asan ubuntu-24.04: `ripwire --version` aborted, exit 134) — the emitter
 # (src/infra/emit.h) routes every formatted write through these headers, so the exemption is what lets the
 # complete G1 stack keep running on the clang leg now that --version itself exercises std::format.
+# Spelled c\+\+, not c++: LLVM before 18 (Xcode 16.2's Apple clang 16 among them) parses this list as REGEX
+# with * expanded to .*, and a bare c++ is a malformed regex — the macOS asan leg's BUILD failed on it
+# (run 34288200871, "malformed sanitizer ignorelist"). The escape is a literal + under both the regex and
+# the glob (LLVM 18+) readers; proved both ways locally by forcing v1 with #!special-case-list-v1.
 file(WRITE "${_ripwire_libstdcxx_ignorelist}"
   "[unsigned-integer-overflow]\nsrc:*/bits/string_view.tcc\n"
   "src:*/bits/basic_string.h\n"
   "src:*/bits/basic_string.tcc\n"
-  "src:*/include/c++/*/format\n"
-  "src:*/include/c++/*/print\n"
-  "[implicit-integer-sign-change]\nsrc:*/include/c++/*/format\n"
-  "src:*/include/c++/*/print\n"
-  "[implicit-signed-integer-truncation]\nsrc:*/include/c++/*/format\n"
-  "src:*/include/c++/*/print\n"
-  "[implicit-unsigned-integer-truncation]\nsrc:*/include/c++/*/format\n"
-  "src:*/include/c++/*/print\n")
+  "src:*/include/c\\+\\+/*/format\n"
+  "src:*/include/c\\+\\+/*/print\n"
+  "[implicit-integer-sign-change]\nsrc:*/include/c\\+\\+/*/format\n"
+  "src:*/include/c\\+\\+/*/print\n"
+  "[implicit-signed-integer-truncation]\nsrc:*/include/c\\+\\+/*/format\n"
+  "src:*/include/c\\+\\+/*/print\n"
+  "[implicit-unsigned-integer-truncation]\nsrc:*/include/c\\+\\+/*/format\n"
+  "src:*/include/c\\+\\+/*/print\n")
 
 if(RIPWIRE_ASAN)
   foreach(_t IN LISTS RIPWIRE_RUNTIME_COMPILE_TARGETS)
