@@ -67,8 +67,11 @@ the table below is what you reach for *instead*.
   sections. Two rules, both yours when you write the dump: **dump to `.md`** (`.txt`/`.log`/`.json`
   are not documents to `--recall`, and a dir of them answers `0 relevant of 0 document files`), and
   keep `##` headings — a headed document is served as whole ranked sections, so a mid-file answer
-  arrives at a small `--max-tokens` and a bigger ceiling returns a strict superset of it, while a
-  headless one is cut front-first.
+  arrives at a small `--max-tokens`, and while the served document SET stays fixed a bigger ceiling
+  returns a strict superset of it (a headless one is cut front-first instead). Dump several documents
+  into the same dir and that guarantee is per-document, not global: admitting another document
+  re-divides the shared budget and can shrink an already-served document's own slice — `share_bytes=`
+  in the header discloses exactly that redivision.
 
 The tell that you need this is linguistic, not architectural: if you just thought *"let me search the
 codebase"*, *"let me read that file"*, or *"let me look at a few files first"*, that sentence is the
