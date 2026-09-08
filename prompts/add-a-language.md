@@ -116,6 +116,35 @@ one that is absent.**
 
 ---
 
+## TRAPS — each one cost somebody a day here
+
+**A memo whose key is narrower than its inputs.** Found in PR #57 (Ruby constants) by an automated
+reviewer, reproduced, and fixed before merge. If your resolution *walks* — tries `A::B::Name`, then
+`A::Name`, then `Name` — and you memoize it, the key must carry the **whole chain**, not the
+innermost frame. Two sites with the same innermost scope and different chains have different correct
+answers.
+
+What made it nasty: the wrong answer was **deterministic**, so the determinism arm passed. It varied
+with *which other files were in the corpus*, and with their **filenames**, because crawl order
+decides who poisons the memo first. In one order it invented an edge; in the other it suppressed a
+correct one. Renaming a file changed the graph.
+
+    a_nested.rb visits BEFORE the compact form   ->  2 edges   (one invented)
+    z_nested.rb visits AFTER  the compact form   ->  0 edges   (one suppressed)
+    correct answer, both orders                  ->  1 edge
+
+Only languages with **lexically scoped name resolution** need a walk at all — Ruby constants today,
+plausibly Kotlin or Scala imports. Elixir cannot have this bug: it looks up a fully-qualified name in
+one `find()`, one key, one answer. If your language needs no walk, do not add a memo.
+
+**A case-insensitive filesystem resolving a name you never meant.** macOS will happily answer a probe
+for `Trackable` with `trackable.rb`. Plant a decoy in the fixture and assert the *right* file wins.
+
+**The `Lang` enum is serialized into the cache.** Append only. Reordering invalidates every cache in
+existence, silently, and the symptom appears somewhere else entirely.
+
+---
+
 ## STEP 7 — the gate, written RED first
 
 Write `test/LANGcheck.sh` **against a binary that does not yet have your change, and watch it fail.**
