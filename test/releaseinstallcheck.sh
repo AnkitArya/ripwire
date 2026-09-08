@@ -126,9 +126,15 @@ run_install()
     _h="$1"; _p="$2"; shift 2
     env "$@" HOME="$_h" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" \
         ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
+        HERMES_HOME= \
         RIPWIRE_REPO=redhat-et/ripwire RIPWIRE_VERSION=v0.3.6 RIPWIRE_INSTALL_PREFIX="$_p" RIPWIRE_INSTALL_YES=1 \
         bash "$INSTALL" >"$TMP/e.out" 2>"$TMP/e.err"; E_RC=$?
 }
+# NOTE: run_install defaults HERMES_HOME to EMPTY so a leaked real HERMES_HOME in the calling
+# environment can never make scripts/install.sh's Hermes-activation block target the operator's live
+# ~/.hermes/skills with the fixture's temp-bundled skills/install.sh (those temp src dirs are rm -rf'd
+# at EXIT, leaving dangling links in a real Hermes home). Arms that want Hermes set it explicitly, as
+# (E7) does, with a temp value.
 
 # (E1) Claude Code present -> its skills are ACTIVE, and the run says so.
 EH1="$TMP/home-claude"; mkdir -p "$EH1/.claude"
