@@ -2,6 +2,7 @@
 #if !defined( RIPWIRE_INGEST_TU )
 #error "ingest_crawl.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
+#include "infra/tablelookup.h"   // findByField — the same lookup wrap's agentTarget uses
 
 // ingest_crawl.h — crawl + parse setup, moved VERBATIM from ingest.cpp in the 2026-08-29 split: the
 // limits/skip config, the extension -> {lang, grammar, query} table (lookupLang), capture-role and
@@ -156,14 +157,7 @@ constexpr std::array<LangEntry, 42> kLangTable = {{
 
 const LangEntry* lookupLang( std::string_view ext ) noexcept
 {
-    for( const LangEntry& e : kLangTable )
-    {
-        if( e.ext == ext )
-        {
-            return &e;
-        }
-    }
-    return nullptr;
+    return findByField( kLangTable, &LangEntry::ext, ext );
 }
 
 std::string lowerExtensionOf( std::string_view path )

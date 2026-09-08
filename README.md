@@ -871,7 +871,7 @@ Wiring it into your agent takes one more minute — `wrap` **prints** the recipe
 never edits your config:
 
 ```bash
-ripwire wrap claude             # prints: claude mcp add ripwire -- ripwire --mcp
+ripwire wrap claude             # prints the wiring: the CLI call first, `claude mcp add` as the alternative
 ripwire wrap --all              # detect every installed agent, print each one's recipe
 skills/install.sh --codex       # Codex CLI: the task-shaped skills that say when to query — and when to stop
 ```
@@ -1845,13 +1845,14 @@ it when you want those verbs, not as a default.
 config — you read the line, then run it.
 
 ```bash
-ripwire wrap claude      # MCP:      claude mcp add ripwire -- ripwire --mcp
-ripwire wrap cursor      # MCP:      the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
+ripwire wrap claude      # CLI-first: the CLI call, then `claude mcp add` as the warm-index alternative
 ripwire wrap codex       # CLI-first: optional MCP restricted to audit/health verbs in Codex TOML
-ripwire wrap windsurf    # MCP:      that client's stanza
-ripwire wrap gemini      # MCP:      that client's stanza
-ripwire wrap opencode    # CLI-1st:  the AGENTS.md wiring; its "mcp" stanza offered as the alternative
-ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation that reads it
+ripwire wrap opencode    # CLI-first: the AGENTS.md wiring; its "mcp" stanza offered as the alternative
+ripwire wrap openclaw    # CLI-first: same ~/.agents/skills root Codex uses; no shell hook slot
+ripwire wrap cursor      # MCP:       the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
+ripwire wrap windsurf    # MCP:       that client's stanza
+ripwire wrap gemini      # MCP:       that client's stanza
+ripwire wrap aider       # no MCP:    a ranked map file, and the aider invocation that reads it
 ripwire wrap --all       # detect every installed agent and emit each one's config
 ```
 

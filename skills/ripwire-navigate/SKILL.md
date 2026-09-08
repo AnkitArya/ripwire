@@ -20,6 +20,34 @@ allowed-tools: Bash, Read
 service+client checkout — pass every root, `ripwire dir1 dir2 --impact=SYM` — the merged graph carries the
 cross-root evidence edges (include/import/FFI) a single-root call would never see.
 
+## Keep the legend on the FIRST call, drop it on every call after
+
+Every XML verb prefixes its answer with a legend defining the attributes. You need it once. After that
+you are paying for prose you have already read — and the cost is worst on exactly the verbs you call
+most, because the legend is a fixed size while these answers are small. Measured on ripwire's own repo:
+
+| verb | saved by `--legend=compact` |
+| --- | --- |
+| `--callers=SYM` | **~70%** |
+| `--uses=SYM` | **~65%** |
+| `--impact=SYM` | **~50%** |
+| `--affected=F1,F2` | **~67%** |
+| `--for="..."` | ~4% |
+
+**The payload is byte-identical** — the entire difference is legend prose. (Percentages, not byte counts:
+an exact byte total goes stale the next time anyone edits a legend, and a stale number in a skill is worse
+than no number. `ripwire --help` carries the range, and a gate holds it to it.) So:
+
+- **Orientation** (`--for`, `--pack-task`): leave the legend on. It is ~4% there, and it is where you
+  learn what `amb=`, `cx=` and `counts_floor=` mean. Reading a map whose legend you skipped is how
+  confident misreadings happen.
+- **Every navigation call after** (`--callers`, `--uses`, `--impact`, `--expand`): add
+  `--legend=compact`. Across a seven-call session that is ~34% fewer bytes, ~2,900 tokens.
+
+The MCP server already defaults to compact for this reason — the tool description carries the schema, so
+the legend would be redundant on every call. The CLI defaults to `full` because a human reading one map
+needs it. If you are an agent making repeated calls, you are the case the CLI default is not tuned for.
+
 ## `--callers` is 1-hop — don't let it answer "is it safe to change X?"
 
 `--callers=SYM` gives direct in-edges only. It under-counts on purpose (it's the *cheap* verb) — a caller

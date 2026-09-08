@@ -79,6 +79,7 @@
 // reaches the output. The one float pair (overlap_mean/overlap_max) is printed at fixed precision from
 // measureOverlap, which is itself a pure function of integer id sets.
 
+#include "infra/tablelookup.h"   // findByField — shared with wrap/ingest table lookups
 #include "model.h"
 #include "graph.h"
 #include "partition.h"          // planPartition / measureOverlap / groupKeyFor / kMinPartitions..kMaxPartitions
@@ -674,14 +675,7 @@ inline std::vector<mergescout::Arm> synthesizeArms( const std::vector<Lane>& lan
 
 inline const Claim* findClaimByKey( const Lane& lane, std::uint64_t key )
 {
-    for( const Claim& c : lane.claims )
-    {
-        if( c.key == key )
-        {
-            return &c;
-        }
-    }
-    return nullptr;
+    return rw::findByField( lane.claims, &Claim::key, key );
 }
 
 // One lane's claims that sit inside the OTHER lane's blast radius. Directional by construction, so a pair

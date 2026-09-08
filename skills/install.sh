@@ -4,7 +4,8 @@
 # current cross-agent ~/.agents/skills discovery root; --codex-legacy retains the older CODEX_HOME/skills
 # destination. An explicit path remains supported for CI and other clients: skills/install.sh PATH.
 # Add --hook explicitly to install the advisory PreToolUse + SessionStart hook for the selected client:
-# skills/install.sh --hook (Claude) or skills/install.sh --codex --hook (Codex).
+# skills/install.sh --hook (Claude) or skills/install.sh --codex --hook (Codex). --openclaw installs to
+# that same cross-agent root (openclaw's own "compatibility skill root"); it has no hook slot.
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
@@ -261,6 +262,7 @@ for arg in "$@"; do
         --hook) wantHook=1 ;;
         --contributor) wantContributor=1 ;;
         --codex) mode="codex"; explicitMode=1 ;;
+        --openclaw) mode="openclaw"; explicitMode=1 ;;
         --codex-legacy) mode="codex-legacy"; explicitMode=1 ;;
         --claude) mode="claude"; explicitMode=1 ;;
         --*) echo "skills/install.sh: unknown option $arg" >&2; exit 2 ;;
@@ -277,6 +279,22 @@ fi
 
 case "$mode" in
     codex) dst="${AGENTS_HOME:-$HOME/.agents}/skills" ;;
+    # openclaw resolves to the SAME root Codex uses -- openclaw's docs call it a "compatibility skill
+    # root". A repeated value, not a second code path. But it is conditional, and the condition is worth
+    # a line of output rather than a support thread: openclaw skips this root entirely unless its state
+    # dir is the default. Verified against docs.openclaw.ai, 2026-09-08.
+    openclaw) dst="$HOME/.agents/skills"
+              # NOT ${AGENTS_HOME:-...}: that is Codex's variable. openclaw honours no such override, so a
+              # user who relocated AGENTS_HOME for Codex would be told to install where openclaw never looks.
+              if [ -n "${AGENTS_HOME:-}" ] && [ "${AGENTS_HOME}" != "$HOME/.agents" ]; then
+                  echo "skills/install.sh: note — AGENTS_HOME is set to '${AGENTS_HOME}', but openclaw does not read it." >&2
+                  echo "  Installing to $dst, which is where openclaw actually looks." >&2
+              fi
+              if [ -n "${OPENCLAW_STATE_DIR:-}" ] && [ "${OPENCLAW_STATE_DIR}" != "$HOME/.openclaw" ]; then
+                  echo "skills/install.sh: WARNING — OPENCLAW_STATE_DIR is set to '${OPENCLAW_STATE_DIR}'." >&2
+                  echo "  openclaw only reads $dst when its state dir is the default $HOME/.openclaw." >&2
+                  echo "  Installing there anyway; openclaw will not discover these skills until that is unset." >&2
+              fi ;;
     codex-legacy) dst="${CODEX_HOME:-$HOME/.codex}/skills" ;;
     claude) dst="$HOME/.claude/skills" ;;
     path) dst="$explicitPath" ;;
@@ -342,6 +360,9 @@ if [ "$wantHook" -eq 1 ]; then
     case "$mode" in
         codex|codex-legacy) install_codex_hook ;;
         claude) install_claude_hook ;;
+        # Refuse rather than silently installing the Codex hook into a slot we have not verified. An
+        # agent that gets a hook it did not ask for is worse off than one that gets an honest no.
+        openclaw) echo "skills/install.sh: --hook is not supported for openclaw — it has a before_tool_call PLUGIN API, but no shell-command hook slot for this script to write into." >&2; exit 2 ;;
         path) echo "skills/install.sh: --hook needs --claude or --codex, not an explicit skill path" >&2; exit 2 ;;
     esac
 fi

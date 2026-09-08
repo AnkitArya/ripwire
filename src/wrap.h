@@ -12,6 +12,7 @@
 #include "mcp.h"       // kMcpVerbTable / kMcpVerbCount — the single source of truth for the MCP verb list (A4-S2)
 #include <unistd.h>   // wrapCommandToken (2026-09-06)
 #include "skillscan.h"
+#include "infra/tablelookup.h"   // findByField — shared with ingest's lookupLang
 
 #include <cstdio>
 #include <cstdlib>
@@ -50,6 +51,87 @@ inline std::vector<std::string> wrapVerbGroupLines()
     };
 }
 
+// ── THE AGENT REGISTRY ───────────────────────────────────────────────────────────────────────────
+// One row per agent. Adding an agent is a ROW, not a branch.
+//
+// WHY. Agent identity was branched on in ~30 places across 7 files, and this file alone held three
+// parallel lists — context file, detection root, and an if/else recipe chain — kept in agreement by
+// hand. Two contributor PRs (#46, #51) adding one agent had to touch all of them.
+//
+// COMMON vs SPECIFIC. The eighteen SKILL.md files are COMMON: every agent here reads the same
+// `name:`/`description:` frontmatter and the same body, so there is one copy of the content and no
+// per-agent fork of it. What genuinely varies is a handful of facts, and those are columns. Recipe
+// PROSE stays per-agent below, because a TOML stanza is not a JSON stanza and pretending otherwise
+// ships a config that parses and does nothing — the exact failure opencodewrapcheck.sh exists for.
+//
+// PRIMARY is separate from MCP FORM. What we RECOMMEND is a different question from how the agent's
+// MCP config is SPELLED. Conflating them is how the codex recipe came to carry a "CLI-first" header
+// above a body that emitted only TOML. Where an agent can shell out, the CLI is the recommendation:
+// it costs zero context until invoked, whereas a registered MCP server's verb schemas are resident
+// every turn whether a verb is called or not (docs/EVALS.md §5). The MCP form is still emitted.
+//
+// A SHARED ROOT IS A REPEATED VALUE, NEVER A SPECIAL CASE. Codex and openclaw both discover
+// ~/.agents/skills; openclaw's own docs call it a "compatibility skill root".
+//
+// CAVEATS ARE A COLUMN. A root can be conditional — openclaw excludes ~/.agents/skills entirely when
+// OPENCLAW_STATE_DIR is not the default ~/.openclaw. Flattening that away would make this tool claim
+// support it cannot deliver, so the condition is carried on the row and printed to the user.
+enum class WrapPrimary : std::uint8_t { Cli, Mcp, RepoMap };
+enum class McpForm     : std::uint8_t { None, CliAdd, Json, Toml, JsonMcpKey };
+
+struct AgentTarget
+{
+    std::string_view name;
+    std::string_view displayName;   // the PRODUCT name. Lost when a shared emitter replaced per-agent
+                                    // branches: "ripwire -> openclaw" and "-> Claude Code" are not the
+                                    // same sentence, and the branch that knew the difference is gone.
+    std::string_view contextFile;
+    std::string_view contextNote;   // the rest of the truth about contextFile — a second path it is also
+                                    // read from, or WHOSE file it is. openclaw needs this one badly.
+    std::string_view homeDir;
+    std::string_view skillsRoot;    // "" when this repo owns no verified discovery path
+    std::string_view skillsFlag;    // installer flag selecting that root ("" = installer default)
+    bool             hookSlot;
+    WrapPrimary      primary;
+    McpForm          mcpForm;
+    std::string_view mcpAddPre;    // McpForm::CliAdd only: the command up to where the path goes
+    std::string_view mcpAddPost;   //                     ... and the remainder after it
+    std::string_view caveat;
+};
+
+inline constexpr AgentTarget kAgentTargets[] = {
+    { "claude",   "Claude Code",  "CLAUDE.md",                   "",
+      "~/.claude",           "~/.claude/skills",                 "",            true,  WrapPrimary::Cli,     McpForm::CliAdd,     "claude mcp add ripwire -- ",          " --mcp\n",            "" },
+    { "codex",    "OpenAI Codex", "AGENTS.md",                   "",
+      "~/.codex",            "${AGENTS_HOME:-~/.agents}/skills", " --codex",    true,  WrapPrimary::Cli,     McpForm::Toml,       "",                                    "",                    "" },
+    { "cursor",   "Cursor",       ".cursor/rules (a .mdc file)", "",
+      "~/.cursor",           "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "" },
+    { "windsurf", "Windsurf",     ".windsurfrules",              "",
+      "~/.codeium/windsurf", "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "" },
+    { "gemini",   "Gemini CLI",   "GEMINI.md",                   "",
+      "~/.gemini",           "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "" },
+    { "opencode", "opencode",     "AGENTS.md",                   "also read globally from ~/.config/opencode/AGENTS.md",
+      "~/.config/opencode",  "",                                 "",            false, WrapPrimary::Cli,     McpForm::JsonMcpKey, "",                                    "",                    "" },
+    // openclaw, corrected 2026-09-08 after review. THE CONTEXT FILE WAS WRONG and it mattered: the first
+    // version of this row said "AGENTS.md", and the CLI-first prose then told a coding user to paste the
+    // wiring into their REPO's AGENTS.md. openclaw never reads that. Its AGENTS.md is the operator's
+    // WORKSPACE bootstrap file under the state dir. A recipe naming the wrong file is worse than no row.
+    //
+    // The skills root is a REPEATED VALUE (Codex's ~/.agents/skills — openclaw's docs call it a
+    // "compatibility skill root"), but written LITERALLY, not as ${AGENTS_HOME:-...}: openclaw honours no
+    // such env var, so a Codex user who has relocated AGENTS_HOME would otherwise be told to install
+    // exactly where openclaw will not look.
+    { "openclaw", "openclaw",     "~/.openclaw/workspace/AGENTS.md", "openclaw's own workspace bootstrap file — NOT your repository's AGENTS.md",
+      "~/.openclaw",         "~/.agents/skills",                 " --openclaw", false, WrapPrimary::Cli,     McpForm::CliAdd,     "openclaw mcp add ripwire --command ", " --arg --mcp\n",      "skills are read from ~/.agents/skills ONLY when OPENCLAW_STATE_DIR is the default ~/.openclaw; openclaw honours no AGENTS_HOME, and its before_tool_call is a plugin API, not a shell hook slot" },
+    { "aider",    "aider",        "CONVENTIONS.md",              "",
+      "",                    "",                                 "",            false, WrapPrimary::RepoMap, McpForm::None,       "",                                    "",                    "" },
+};
+
+inline constexpr const AgentTarget* agentTarget( const std::string_view name ) noexcept
+{
+    return findByField( kAgentTargets, &AgentTarget::name, name );
+}
+
 // Append the install command only where this repo owns a verified discovery path. Claude is the installer
 // default; Codex uses the cross-agent ~/.agents/skills discovery root documented by current Codex.
 //
@@ -62,13 +144,16 @@ inline std::vector<std::string> wrapVerbGroupLines()
 //   (c) else                                                  → a clone-pointer comment, never a dead command.
 inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, const std::string_view executablePath )
 {
-    if( agent != "claude" && agent != "codex" )
+    const AgentTarget* row = agentTarget( agent );
+    if( row == nullptr || row->skillsRoot.empty() )
     {
-        return;
+        return;                      // no verified discovery path for this agent — say nothing
     }
-    const bool  isCodex     = ( agent == "codex" );
-    const char* codexFlag   = isCodex ? " --codex" : "";
-    const char* destComment = isCodex ? "${AGENTS_HOME:-~/.agents}/skills" : "~/.claude/skills";
+    const std::string flagStr( row->skillsFlag );
+    const std::string destStr( row->skillsRoot );
+    const char* const codexFlag   = flagStr.c_str();
+    const char* const destComment = destStr.c_str();
+    const bool        hasHook     = row->hookSlot;   // a COLUMN, not inferred from the skills flag
 
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -78,9 +163,17 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
     // fires only if the agent recognizes a moment AND spends a call to load it, whereas reaching for
     // Read costs nothing. Still a SEPARATE command, never folded into the line above — opt-in is the
     // hook's design contract, and hookcheck.sh asserts a bare install never touches settings.json.
-    const auto hookLine = [ out, isCodex ]( const char* installer, const bool quoted )
+    // openclaw was the case that proved this has to be a column: it shares Codex's skills root, so any
+    // rule inferring "codex-shaped" from a non-empty skills flag hands it a --codex --hook line for a
+    // hook slot it does not have. A row now states it.
+    const auto hookLine = [ out, hasHook, &flagStr ]( const char* installer, const bool quoted )
     {
-        const char* hookFlags = isCodex ? " --codex --hook" : " --hook";
+        if( !hasHook )
+        {
+            return;
+        }
+        const std::string hookFlagStr = flagStr + " --hook";
+        const char* hookFlags = hookFlagStr.c_str();
         std::fprintf( out, quoted ? "bash \"%s\"%s   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n"
                                   : "bash %s%s   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n",
                       installer, hookFlags );
@@ -109,21 +202,7 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
 }
 
 // agent → the context/rules file its use-when blurb belongs in (declarative table, one row per client)
-struct WrapBlurbTarget
-{
-    std::string_view agent;        // agent identifier (CLI argument)
-    std::string_view targetFile;   // the file the user pastes the blurb into
-};
-
-inline constexpr WrapBlurbTarget kWrapBlurbTargets[] = {
-    { "claude",   "CLAUDE.md" },
-    { "codex",    "AGENTS.md" },
-    { "opencode", "AGENTS.md" },   // read automatically: project root, and ~/.config/opencode/AGENTS.md
-    { "cursor",   ".cursor/rules (a .mdc file)" },
-    { "windsurf", ".windsurfrules" },
-    { "gemini",   "GEMINI.md" },
-    { "aider",    "CONVENTIONS.md" },
-};
+// (the per-agent context file is a column in kAgentTargets above)
 
 // The ONE shared use-when blurb — single source of truth for every agent recipe (the gate diffs the
 // body across agents, so a per-agent fork of this text is a red gate, not a variant). A binary on
@@ -170,14 +249,8 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines()
 // prefix — a leading `#` would turn prose into headings on paste), and a closing comment fence.
 inline void wrapPrintBlurb( std::FILE* out, const std::string_view agent )
 {
-    std::string_view targetFile;
-    for( const WrapBlurbTarget& t : kWrapBlurbTargets )
-    {
-        if( t.agent == agent )
-        {
-            targetFile = t.targetFile;
-        }
-    }
+    const AgentTarget* blurbRow = agentTarget( agent );
+    std::string_view   targetFile = ( blurbRow != nullptr ) ? blurbRow->contextFile : std::string_view{};
     if( targetFile.empty() )
     {
         return;
@@ -196,10 +269,29 @@ inline void wrapPrintBlurb( std::FILE* out, const std::string_view agent )
 inline void wrapList( std::FILE* out )
 {
     std::fprintf( out,
-        "ripwire wrap <agent> — print the recipe to wire ripwire into an agent's loop.\n"
-        "  MCP agents:  claude  cursor  codex  windsurf  gemini\n"
-        "  CLI-first:   opencode\n"
-        "  repo-map:    aider\n"
+        "ripwire wrap <agent> — print the recipe to wire ripwire into an agent's loop.\n" );
+
+    // Printed FROM the table: a row added above shows up here without anyone remembering to update prose.
+    static constexpr struct { WrapPrimary p; std::string_view label; } kGroups[] = {
+        { WrapPrimary::Cli,     "  CLI-first:   " },
+        { WrapPrimary::Mcp,     "  MCP config:  " },
+        { WrapPrimary::RepoMap, "  repo-map:    " },
+    };
+    for( const auto& g : kGroups )
+    {
+        std::fprintf( out, "%.*s", int( g.label.size() ), g.label.data() );
+        const char* sep = "";
+        for( const AgentTarget& a : kAgentTargets )
+        {
+            if( a.primary == g.p )
+            {
+                std::fprintf( out, "%s%.*s", sep, int( a.name.size() ), a.name.data() );
+                sep = "  ";      // SEPARATOR, not a suffix — a suffix leaves trailing blanks on every line
+            }
+        }
+        std::fprintf( out, "\n" );
+    }
+    std::fprintf( out,
         "  example:     ripwire wrap claude\n"
         "  --all        detect every installed agent + emit each one's config\n" );
 }
@@ -301,69 +393,62 @@ struct AgentConfig
     std::function<bool()> isInstalled;
 };
 
-inline std::vector<AgentConfig> getAgentConfigs() noexcept
+// Detection for ONE row. Split out of getAgentConfigs so that an agent's exception does not raise the
+// complexity of the loop that walks the table — --quality-delta refused the combined version (19 -> 24
+// against a bar of 15), and it was right: "how do we detect opencode" and "walk every row" are two
+// different jobs that happened to be in one function.
+inline std::function<bool()> agentDetector( const AgentTarget& row, const std::string& home )
 {
     namespace fs = std::filesystem;
-    const char* home = std::getenv( "HOME" );
-    if( !home )
+
+    if( row.homeDir.empty() )
     {
-        home = "";
+        return []() { return true; };   // aider ships no config dir — it is always available
     }
 
-    // Each agent's detection: expand ~ in the template path and check if it exists
-    const auto expandPath = [ home ]( std::string_view tpl ) -> std::string
+    if( row.name == "opencode" )
     {
-        if( tpl.empty() )
+        // opencode resolves every path through xdg-basedir, so ~/.config/opencode is the DEFAULT, not
+        // the location — XDG_CONFIG_HOME relocates it. Accept ~/.opencode as the second candidate.
+        return [ home ]() -> bool
         {
-            return std::string();
-        }
-        if( tpl.front() == '~' )
-        {
-            std::string s( home );
-            s.append( tpl.begin() + 1, tpl.end() );
-            return s;
-        }
-        return std::string( tpl );
-    };
-    const auto checkExists = [ home ]( std::string_view tpl ) -> std::function<bool()>
-    {
-        return [ tpl, home ]() -> bool
-        {
-            if( tpl.empty() )
+            std::error_code   ec;
+            const char*       xdg  = std::getenv( "XDG_CONFIG_HOME" );
+            const std::string base = ( xdg && *xdg ) ? std::string( xdg ) : home + "/.config";
+            if( fs::is_directory( base + "/opencode", ec ) && !ec )
             {
-                return false; // aider has no config dir
+                return true;
             }
-            std::string path = tpl.front() == '~' ? std::string( home ) + std::string( tpl.begin() + 1, tpl.end() )
-                                                   : std::string( tpl );
-            std::error_code ec;
-            return fs::is_directory( path, ec ) && !ec;
+            ec.clear();
+            return fs::is_directory( home + "/.opencode", ec ) && !ec;
         };
-    };
+    }
 
-    // opencode resolves every path through xdg-basedir, so ~/.config/opencode is the DEFAULT, not
-    // the location — XDG_CONFIG_HOME relocates it. Accept ~/.opencode as the second candidate.
-    const auto opencodeInstalled = [ home ]() -> bool
+    const std::string expanded = ( row.homeDir.front() == '~' )
+                                     ? home + std::string( row.homeDir.begin() + 1, row.homeDir.end() )
+                                     : std::string( row.homeDir );
+    return [ expanded ]() -> bool
     {
-        std::error_code   ec;
-        const char*       xdg  = std::getenv( "XDG_CONFIG_HOME" );
-        const std::string base = ( xdg && *xdg ) ? std::string( xdg ) : std::string( home ) + "/.config";
-        if( fs::is_directory( base + "/opencode", ec ) && !ec )
-        {
-            return true;
-        }
-        ec.clear();
-        return fs::is_directory( std::string( home ) + "/.opencode", ec ) && !ec;
+        std::error_code ec;
+        return fs::is_directory( expanded, ec ) && !ec;
     };
+}
 
-    return {
-        { "claude",   "~/.claude",                         checkExists( "~/.claude" ) },
-        { "cursor",   "~/.cursor",                         checkExists( "~/.cursor" ) },
-        { "codex",    "~/.codex",                          checkExists( "~/.codex" ) },
-        { "windsurf", "~/.codeium/windsurf",               checkExists( "~/.codeium/windsurf" ) },
-        { "gemini",   "~/.gemini",                         checkExists( "~/.gemini" ) },
-        { "opencode", "~/.config/opencode",                opencodeInstalled },
-        { "aider",    "",                                  []() { return true; } },   // aider is always available
-    };
+// BUILT FROM THE TABLE, not beside it. This was the FIFTH parallel list and the one that mattered most:
+// `wrap openclaw` printed a correct recipe while `wrap --all` could not see openclaw at all, because a
+// row had been added to the table and nowhere else. The homeDir column was dead until this loop read it.
+inline std::vector<AgentConfig> getAgentConfigs() noexcept
+{
+    const char*       homeEnv = std::getenv( "HOME" );
+    const std::string home    = ( homeEnv != nullptr ) ? homeEnv : "";
+
+    std::vector<AgentConfig> configs;
+    configs.reserve( std::size( kAgentTargets ) );
+    for( const AgentTarget& a : kAgentTargets )
+    {
+        configs.push_back( { a.name, a.homeDir, agentDetector( a, home ) } );
+    }
+    return configs;
 }
 
 // Scan a local skills directory (best-effort). Returns worst severity found (0/1/2).
@@ -415,23 +500,117 @@ inline int wrapScanSkillDir( const std::string& dir, bool force ) noexcept
     return maxSev;
 }
 
+// ONE recipe path for every agent that can shell out, and the point is that the RECOMMENDATION does
+// not vary by agent — only the MCP alternative does. Before this there were four near-identical
+// CLI-first blocks waiting to happen (opencode had one; codex claimed to be CLI-first in its header
+// and emitted only TOML; claude emitted `claude mcp add` while the README told readers to reach for
+// the CLI first). A shared emitter makes the recommendation impossible to state inconsistently.
+//
+// WHY THE CLI IS THE RECOMMENDATION, once, here, instead of in four places: it costs zero context
+// until it is invoked. A registered MCP server's verb schemas are resident in the model's context
+// every turn whether a verb is called or not (docs/EVALS.md §5). The MCP form is still emitted below
+// it, because a warm index across calls is a real reason to want one.
+inline void wrapEmitCliFirst( const AgentTarget& row, const std::string& token,
+                              const std::string_view executablePath,
+                              const std::vector<std::string>& verbLines ) noexcept
+{
+    std::printf( "# ripwire -> %.*s (CLI-first)\n", static_cast<int>( row.displayName.size() ), row.displayName.data() );
+    wrapPrintPathNote( token );
+    std::printf(
+        "# RECOMMENDED — this agent can run shell commands, so call the CLI directly. It costs\n"
+        "# nothing until you invoke it, and it reads %.*s, so the paste block below IS the wiring:\n"
+        "%s . --for=\"<your task>\" --token-budget=2000\n"
+        "#\n"
+        "# ...then add --legend=compact to every FOLLOW-UP call: the legend is a small share of a --for\n"
+        "# bundle but most of a --callers/--uses/--impact answer, and the payload is byte-identical either\n"
+        "# way. `ripwire --help` carries the measured range (one place, gate-held) -- this line does not\n"
+        "# repeat it, because two copies of a number is one copy that goes stale:\n"
+        "#   ripwire . --callers=SYM --legend=compact\n",
+        static_cast<int>( row.contextFile.size() ), row.contextFile.data(), token.c_str() );
+    if( !row.contextNote.empty() )
+    {
+        std::printf( "#        (%.*s)\n", static_cast<int>( row.contextNote.size() ), row.contextNote.data() );
+    }
+    if( !row.caveat.empty() )
+    {
+        std::printf( "# NOTE: %.*s\n", static_cast<int>( row.caveat.size() ), row.caveat.data() );
+    }
+    if( row.mcpForm == McpForm::None )
+    {
+        return;
+    }
+    std::printf( "#\n# ALTERNATIVE — register the MCP server instead, for a warm index across calls:\n" );
+    switch( row.mcpForm )
+    {
+        case McpForm::CliAdd:
+        {
+            // Two plain literals printed as DATA. An earlier draft stored one printf template here and
+            // passed it as a non-literal format string, which then wanted a consteval guard proving
+            // every row held exactly one %s. Splitting the command at its substitution point removes
+            // the hazard rather than containing it: there is no format string left to get wrong.
+            std::printf( "%.*s%s%.*s",
+                         static_cast<int>( row.mcpAddPre.size() ),  row.mcpAddPre.data(),
+                         token.c_str(),
+                         static_cast<int>( row.mcpAddPost.size() ), row.mcpAddPost.data() );
+            break;
+        }
+        case McpForm::Toml:
+        {
+            // ABSOLUTE, never the PATH token: Codex Desktop may not inherit the shell PATH, so a
+            // bare "ripwire" here produces a config that looks right and never starts. Gated by
+            // skillinstallcheck.sh, which caught exactly this when the shared emitter first landed.
+            const std::string command = wrapTomlString( executablePath );
+            std::printf(
+                "# The MCP surface here is deliberately RESTRICTED to audit/health verbs — the CLI above is\n"
+                "# the general-purpose path, and a narrow always-on server is easier to trust than a wide one.\n"
+                "# Add this ABSOLUTE command to ~/.codex/config.toml (Desktop may not inherit shell PATH):\n"
+                "[mcp_servers.ripwire]\n"
+                "command = \"%s\"\n"
+                "args = [\"--mcp\"]\n"
+                "enabled_tools = [\"analyze\", \"quality_delta\", \"flags\", \"doc_drift\"]\n"
+                "default_tools_approval_mode = \"approve\"\n", command.c_str() );
+            break;
+        }
+        case McpForm::JsonMcpKey:
+            std::printf(
+                "# opencode.json (project) or ~/.config/opencode/opencode.json (global; merged\n"
+                "# per-key, project wins). The key is \"mcp\" — the \"mcpServers\" shape other clients\n"
+                "# use parses fine here and is then silently ignored:\n" );
+            wrapMcpJsonOpencode( token );
+            break;
+        case McpForm::Json:
+        case McpForm::None:
+            break;
+    }
+    std::printf( "# verbs the agent can then call mid-task (%zu total):\n", kMcpVerbCount );
+    for( const std::string& line : verbLines )
+    {
+        std::printf( "%s\n", line.c_str() );
+    }
+}
+
 // Emit the configuration recipe for a single agent (shared by runWrap and --all logic)
 inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::string>& verbLines,
                            const std::string_view executablePath ) noexcept
 {
     const std::string token = wrapCommandToken( executablePath );   // 2026-09-06: "ripwire", or this binary's absolute path when PATH has none
-    if( agent == "claude" )
+
+    // Every agent that can shell out takes ONE shared path. Rows decide, not branches.
+    const AgentTarget* const cliRow = agentTarget( agent );
+    const bool cliFirst = ( cliRow != nullptr && cliRow->primary == WrapPrimary::Cli );
+
+    // MCP clients get their product name from the row too — only the STANZA SHAPE differs between them,
+    // and that is all the branches below decide. Emitted here rather than inside each branch so a new
+    // MCP row cannot forget it.
+    if( cliRow != nullptr && cliRow->primary == WrapPrimary::Mcp )
     {
-        std::printf( "# ripwire -> Claude Code (MCP — deterministic, no LLM, no embeddings)\n" );
-        wrapPrintPathNote( token );
-        std::printf(
-            "claude mcp add ripwire -- %s --mcp\n"
-            "# verbs the agent can then call mid-task (%zu total):\n", token.c_str(), kMcpVerbCount );
-        for( const std::string& line : verbLines )
-        {
-            std::printf( "%s\n", line.c_str() );
-        }
-        std::printf( "# (no-MCP one-shot orientation: ripwire . --for=\"<task>\" --token-budget=2000)\n" );
+        std::printf( "# ripwire -> %.*s (MCP — deterministic, no LLM, no embeddings)\n",
+                     static_cast<int>( cliRow->displayName.size() ), cliRow->displayName.data() );
+    }
+
+    if( cliFirst )
+    {
+        wrapEmitCliFirst( *cliRow, token, executablePath, verbLines );
     }
     else if( agent == "cursor" )
     {
@@ -445,38 +624,6 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     {
         wrapMcpJson( "~/.gemini/settings.json", token );
     }
-    else if( agent == "codex" )
-    {
-        const std::string command = wrapTomlString( executablePath );
-        std::printf(
-            "# ripwire -> OpenAI Codex (CLI-first; optional MCP is restricted to audit/health verbs)\n"
-            "# Add this absolute command to ~/.codex/config.toml (Desktop may not inherit shell PATH):\n"
-            "[mcp_servers.ripwire]\n"
-            "command = \"%s\"\n"
-            "args = [\"--mcp\"]\n"
-            "enabled_tools = [\"analyze\", \"quality_delta\", \"flags\", \"doc_drift\"]\n"
-            "default_tools_approval_mode = \"approve\"\n", command.c_str() );
-    }
-    else if( agent == "opencode" )
-    {
-        // CLI FIRST, MCP second — the one recipe in this table that leads with the shell path.
-        // opencode ships a `bash` tool, so the CLI is available to it, and the CLI costs zero
-        // context until it is invoked; a registered MCP server's verb schemas are resident every
-        // turn whether any verb is called or not (measured in docs/EVALS.md §5). Where an agent can
-        // shell out, that standing cost is the whole difference, so the shell recipe goes first.
-        std::printf(
-            "# ripwire -> opencode (github.com/anomalyco/opencode)\n"
-            "# RECOMMENDED — opencode has a `bash` tool, so call the CLI directly. It costs nothing\n"
-            "# until you invoke it, and opencode reads AGENTS.md automatically (project root, plus\n"
-            "# ~/.config/opencode/AGENTS.md globally), so the paste block below IS the whole wiring:\n"
-            "ripwire . --for=\"<your task>\" --token-budget=2000\n"
-            "#\n"
-            "# ALTERNATIVE — register the MCP server instead, for a warm index across calls. Add to\n"
-            "# opencode.json (project) or ~/.config/opencode/opencode.json (global; the two are\n"
-            "# merged per-key and the project file wins). The key is \"mcp\" — the \"mcpServers\" shape\n"
-            "# other clients use parses fine here and is then silently ignored:\n" );
-        wrapMcpJsonOpencode( token );
-    }
     else if( agent == "aider" )
     {
         std::printf(
@@ -489,7 +636,7 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     // every MCP agent recipe also gets the grouped verb list printed as a comment (cursor/windsurf/
     // gemini/codex use a plain JSON/TOML stanza with no verb comment of their own, so add it here
     // instead of duplicating the printf calls per-branch); aider has no MCP verbs to list.
-    if( agent == "cursor" || agent == "windsurf" || agent == "gemini" || agent == "codex" || agent == "opencode" )
+    if( !cliFirst && ( agent == "cursor" || agent == "windsurf" || agent == "gemini" ) )
     {
         std::printf( "# verbs the agent can then call mid-task (%zu total):\n", kMcpVerbCount );
         for( const std::string& line : verbLines )
@@ -565,8 +712,7 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
 
     // ── Handle single agent request ───────────────────────────────────────────────────────────
     const std::string_view agent = arg;
-    if( agent == "claude" || agent == "cursor" || agent == "windsurf" || agent == "gemini" ||
-        agent == "codex" || agent == "aider" || agent == "opencode" )
+    if( agentTarget( agent ) != nullptr )   // the table IS the accept-list; a new row needs no edit here
     {
         wrapEmitAgent( agent, verbLines, executablePath );
         return 0;
