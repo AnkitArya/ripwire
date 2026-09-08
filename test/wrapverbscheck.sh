@@ -149,7 +149,7 @@ else
 fi
 
 # Det-gate: run twice and verify output is identical
-WRAP_ALL_OUT2="$( HOME="$TEST_HOME" HERMES_HOME= "$BIN" wrap --all 2>&1 )"
+WRAP_ALL_OUT2="$( HOME="$TEST_HOME" XDG_CONFIG_HOME= HERMES_HOME= "$BIN" wrap --all 2>&1 )"
 if [ "$WRAP_ALL_OUT" = "$WRAP_ALL_OUT2" ]; then
     ok "wrap --all output is deterministic (byte-identical on two runs)"
 else
