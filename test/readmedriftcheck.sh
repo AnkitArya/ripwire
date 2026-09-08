@@ -733,6 +733,53 @@ PYEOF
     esac
 fi
 
+# ── (I) PROMPT COUNT AND PROMPT PATHS ────────────────────────────────────────────────────────────
+# WHY. README.md said "eleven self-contained orchestrator prompts" and nothing derived that from
+# prompts/. It was correct only because nobody had added one. This is the third instance of the same
+# class found on 2026-09-08 -- the lineage summary read 34 against LINEAGE tables saying 42, and the
+# GitHub description claimed "80% fewer bytes" where the measured figure is 74.7%. A count that
+# describes repo contents and is not re-derived is a count waiting to go stale.
+#
+# (I1) the README count equals the number of prompt files that actually exist.
+# (I2) every repo-relative path named inside prompts/add-a-language.md resolves. That prompt tells a
+#      contributor which files a new language touches; a path that has moved sends them to the wrong
+#      file with full confidence, which is worse than saying nothing. Substituting the LANG
+#      placeholder with a real indexed language is how the template paths are checked.
+
+promptCount="$( find prompts -maxdepth 1 -name '*.md' ! -name 'README.md' | wc -l | tr -d ' ' )"
+WORDS="one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty"
+statedWord="$( grep -oE '[a-z]+ \*\*self-contained orchestrator prompts\*\*' README.md | head -1 | awk '{print $1}' )"
+statedNum=""
+i=0
+for w in $WORDS; do
+    i=$(( i + 1 ))
+    if [ "$w" = "$statedWord" ]; then statedNum="$i"; fi
+done
+if [ -z "$statedWord" ]; then
+    no "(I1) could not find a '<word> self-contained orchestrator prompts' sentence in README.md"
+elif [ -z "$statedNum" ]; then
+    no "(I1) README.md says '$statedWord ... orchestrator prompts' — not a number word this gate can resolve"
+elif [ "$statedNum" = "$promptCount" ]; then
+    ok "(I1) README.md states $statedWord ($statedNum) orchestrator prompts, matching the $promptCount files in prompts/"
+else
+    no "(I1) README.md states $statedWord ($statedNum) orchestrator prompts but prompts/ holds $promptCount — update README.md"
+fi
+
+LANGPROMPT="prompts/add-a-language.md"
+if [ ! -r "$LANGPROMPT" ]; then
+    no "(I2) $LANGPROMPT is missing — it is indexed in prompts/README.md"
+else
+    missing=""
+    for raw in $( grep -oE '`(src|test|queries|prompts|docs)/[A-Za-z0-9_./-]+`|`CMakeLists\.txt`|`CONTRIBUTING\.md`|`CLAUDE\.md`' "$LANGPROMPT" | tr -d '`' | sed 's/LANG/elixir/g' | sort -u ); do
+        if [ ! -e "$raw" ]; then missing="$missing $raw"; fi
+    done
+    if [ -n "$missing" ]; then
+        no "(I2) $LANGPROMPT names paths that do not exist:$missing"
+    else
+        ok "(I2) every repo path named in $LANGPROMPT resolves (LANG substituted with a real indexed language)"
+    fi
+fi
+
 if [ "$fail" -eq 0 ]; then
     echo "ALL PASS"
 else
