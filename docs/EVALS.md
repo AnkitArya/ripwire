@@ -12781,8 +12781,9 @@ either side (METHODOLOGY §9, principle 1).
 
 ### (d) The validation set neither formulation can see
 
-While one 6-line table lookup was being deduplicated on 2026-09-08, `--quality-delta` walked a human to a FOURTH
-copy of the same linear-search shape across four modules (`wrap.h`, `ingest_crawl.h`, `lanes.h`,
+Measured at `5e96a6a5`, before `75ed8d3a` folded two of the four copies below into `findByField` — the numbers
+describe that tree. While one 6-line table lookup was being deduplicated on 2026-09-08, `--quality-delta` walked a
+human to a FOURTH copy of the same linear-search shape across four modules (`wrap.h`, `ingest_crawl.h`, `lanes.h`,
 `namingconsistency.h`), one per fold. Git shows those four files together only in commits of more than 30 files
 (the initial import, the namespace rename, the brace sweep), never inside the miner's cap; and each function has
 a single caller, so CC = 1. Both formulations are blind to it by construction, and correctly so: it is a **clone
