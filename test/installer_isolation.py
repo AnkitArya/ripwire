@@ -34,6 +34,12 @@ with tempfile.TemporaryDirectory(prefix="ripwire-installer-sentinels-") as tempo
         home.mkdir()
         (home / "sentinel").write_text("leave unchanged\n")
         environment[variable] = str(home)
+    # Without this the PR's third claim has no regression proof: removing RIPWIRE_NO_ACTIVATE from the
+    # release gate's unset (releaseinstallcheck.sh:15) leaves this helper GREEN in a clean environment,
+    # and it only reds if the operator's own shell happens to export the variable. A gate whose liveness
+    # depends on who runs it is not a gate. Injected so the mutation fails on any machine.
+    environment["RIPWIRE_NO_ACTIVATE"] = "1"
+
     claude = outside / "HOME" / ".claude"
     claude.mkdir()
     (claude / "settings.json").write_text('{"sentinel": true}\n')
