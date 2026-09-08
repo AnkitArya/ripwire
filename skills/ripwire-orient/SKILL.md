@@ -35,7 +35,10 @@ so, stop here. It also works unmodified as a zero-setup knowledge base over a sc
 output (a git log, fetched docs, `--help` text) — not just a source repo. Two conditions are yours to meet
 when you WRITE the dump: dump it as `.md` (`.txt`/`.log`/`.json` are not documents to `--recall`, and a dir
 of them answers `0 relevant of 0 document files`), and keep `##` headings in it, so a deep answer is served
-as a ranked section instead of waiting behind a front-first cut. Full form in
+as a ranked section instead of waiting behind a front-first cut. Raising `--max-tokens` then grows what ONE
+already-served document gets — that per-document guarantee is not global: dump several documents into one
+dir and admitting another one re-divides the shared budget, which can shrink an already-served document's
+own slice (`share_bytes=` in the header discloses it). Full form in
 [`map-before-you-read.md`](map-before-you-read.md); the recorded run is `docs/COMMANDS.md`'s `--recall`
 pattern subsection.
 
