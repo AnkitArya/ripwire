@@ -310,6 +310,17 @@ def pick_sample( entry, captures ):
     return best
 
 
+def pattern_sample( captures, marker ):
+    """A hand-authored PATTERN subsection (see render_recall_pattern) needs ONE specific real
+    invocation, not pick_sample's generic per-flag pick — several captured commands can share a flag,
+    and pick_sample would happily hand back a different one. MARKER is a substring unique to the
+    intended command; the first captured item containing it, with a non-empty body, wins."""
+    for item in captures:
+        if marker in item[ 'cmd' ] and item[ 'body' ]:
+            return item
+    return None
+
+
 # ── scrubbing + trimming ──────────────────────────────────────────────────────────────────────────
 
 def scrub( text, name ):
@@ -418,6 +429,66 @@ def anchor_of( spec ):
     return re.sub( r'[^a-z0-9]+', '-', spec.lower() ).strip( '-' )
 
 
+# The --recall FLAG's own --help text says nothing about pointing it at a directory that is not a
+# source repo, because that usage needs no new flag at all — it is documented here as a hand-authored
+# subsection, not derived from --help like every other section in this file. The one real invocation
+# is still pulled from the SAME showcase capture every other sample in this document comes from (see
+# pattern_sample), so the doc's "everything here is either read from --help or a real recorded run"
+# contract holds for this subsection too.
+RECALL_PATTERN_MARKER = 'field affinity cache line data layout which fields are read together'
+
+
+def render_recall_pattern( captures, name ):
+    out = []
+    w   = out.append
+    sample = pattern_sample( captures, RECALL_PATTERN_MARKER )
+
+    w( '#### Pattern: a directory of dumped tool output as a knowledge base' )
+    w( '' )
+    w( '**Answers:** can `--recall` serve as a zero-setup knowledge base over logs, API dumps, fetched' )
+    w( 'docs, or `--help` text sitting in a scratch directory — instead of a source repo?' )
+    w( '' )
+    w( 'Yes, unmodified. `--recall` never distinguishes "a codebase" from any other directory it can' )
+    w( 'walk for markdown/text/JSON/etc — point it at a scratch dir holding a `git log`, an API' )
+    w( 'response dump, a fetched doc, or `<tool> --help` output and query it directly. No index to' )
+    w( 'build, no daemon, no mutable store between runs: the whole cost is one cold parse.' )
+    w( '' )
+    if sample:
+        w( '**Try it**' )
+        w( '' )
+        caption = scrub( sample[ 'caption' ], name )
+        if caption and not COORD.search( caption ):
+            w( '_%s_' % caption )
+            w( '' )
+        w( '```' )
+        w( '$ ' + rewrite_command( sample[ 'cmd' ], name ) )
+        for line in trim_sample( sample[ 'body' ], name ):
+            w( line )
+        w( '```' )
+        w( '' )
+    w( '**Caveats:**' )
+    w( '' )
+    w( '- KNOWN LIMIT — DELETE THIS BULLET OUTRIGHT (not just reword it) once `src/recall.h` gets a' )
+    w( '  passage-serving fix. Today `--recall` computes a relevance ranking over a document\'s' )
+    w( '  sections and then serves a document-order PREFIX, not the ranked sections — so on a dumped' )
+    w( '  document LARGER than its computed byte share, the answer can be structurally unreachable at' )
+    w( '  every `--max-tokens`. Measured on the run above\'s own corpus: the' )
+    w( '  query\'s true answer (the `--field-affinity` section of the dumped `commands.md`) is ranked' )
+    w( '  #1, selected, and still absent from the served bytes at `--max-tokens` 1500, 4000, 12000 and' )
+    w( '  40000 alike — only front matter is ever served. Until that fix lands, point this pattern at' )
+    w( '  dumps that individually fit inside their computed share, or split one large dump into' )
+    w( '  several smaller files.' )
+    w( '' )
+    return out
+
+
+def recall_pattern_if_due( spec, captures, name ):
+    """The one line render()'s entry loop calls — kept a plain call, no `if`, so this hand-authored
+    subsection adds zero branches to render() itself (already well past its own complexity bar; the
+    branch belongs here, on a fresh symbol, not stacked onto that one)."""
+    return render_recall_pattern( captures, name ) if spec == '--recall=TASK' else []
+
+
 def render( name, preamble, sections, captures, capturePath ):
     out = []
     w   = out.append
@@ -521,6 +592,8 @@ def render( name, preamble, sections, captures, capturePath ):
                 for c in cav:
                     w( '- %s' % scrub_prose( c, name ) )
                 w( '' )
+
+            out.extend( recall_pattern_if_due( spec, captures, name ) )
 
     w( '---' )
     w( '' )
