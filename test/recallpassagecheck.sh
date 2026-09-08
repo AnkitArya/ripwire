@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# recallpassagecheck.sh — §5 gate (DESIGN_RECALL_PASSAGE_SERVING.md) for --recall's section-granular
-# passage-serving defect: a document's ranked sections are picked correctly, then thrown away by a
-# document-order prefix cut before the reader ever sees them (design §1-§2). WRITTEN BEFORE THE FIX
-# EXISTS — CLAUDE.md non-negotiable #1 ("write the gate before the code it measures"). Lane L1 builds
-# src/recall.h §3.1/§3.2 against this gate as the contract; this file and test/fixtures/recallpassage/**
-# are lane L2's whole footprint (see DESIGN_RECALL_PASSAGE_SERVING.md §8/§9).
+# recallpassagecheck.sh — the passage-serving gate for --recall. The defect it pins: a document's
+# ranked sections are picked correctly, then thrown away by a document-order prefix cut before the
+# reader ever sees them (see the per-arm table below). WRITTEN BEFORE THE FIX EXISTED — CLAUDE.md non-negotiable #1 ("write the gate before the code it measures"). Lane L1 builds
+# src/recall.h's section path against this gate as the contract; this file and
+# test/fixtures/recallpassage/** are that lane's whole footprint.
 #
 # MEASURED against build/ripwire at 113c7aea (the main tip this design branched from), 2026-09-08, on
 # macOS/AppleClang — reproduced with the exact commands each arm below runs. Recorded here so a future
@@ -21,16 +20,26 @@
 #   P2   FAIL    same fixture, --max-tokens in {1500,3000,8000,40000}: sentinel ABSENT at ALL FOUR —
 #                even 84,658 B (40000 tok, ~95x the 890 B the answer alone would need) does not reach it.
 #                Not "present only at large budgets" — present at NONE of them.
-#   P3   PASS    small_fits.md (261 B; the one matched section is 90 B, comfortably under the 8000-tok
-#                default): output is byte-identical to the committed
-#                test/fixtures/recallpassage/small_fits.golden (captured from this same pre-fix binary).
-#                This is the invariant design §3.3 #1 requires to KEEP holding after the fix.
+#   P3   PASS    small_fits.md (261 B; the matched content is comfortably under the 8000-tok default):
+#                output is byte-identical to test/fixtures/recallpassage/small_fits.golden.
+#
+#                THE ORIGINAL SPEC FOR THIS ARM WAS WRONG, and the arm is the evidence. It asked for
+#                byte-identity against the PRE-FIX binary whenever the budget does not bind — but the
+#                fix redefines what a unit IS, so the two cannot both hold. On this very fixture the pre-fix overlap loop
+#                dropped `# Widget cache notes` because its span (1-9) contained the matching
+#                subsection; that heading's own prose carries "widget" and "cache" and was unreachable
+#                at ANY budget. Post-fix it is a two-line unit of its own and the output legitimately
+#                grows by those two lines. The golden is therefore re-captured from the POST-fix
+#                binary, and what this arm pins now is the property that is both available and worth
+#                having: a non-binding budget is byte-STABLE — no unit selection, note form or lines=
+#                list may move while nothing is being cut. That still fails loudly on accidental
+#                drift; it just no longer asserts the equivalence the fix was commissioned to break.
 #   P4   FAIL    the disclosed `lines="..."` attribute on large_late_answer.md is BYTE-IDENTICAL at
 #                --max-tokens=3000 and --max-tokens=200000 (299 ranges, same text, both times) — it is
-#                computed once in LOAD before the budget is known (design §2 step 5 / §4 "today"), so it
+#                computed once in LOAD before the budget is known (the pre-fix LOAD path), so it
 #                never moves regardless of how much the budget grows.
 #   P5   FAIL    (a) NO --recall output today carries a `dropped_by_budget=` attribute or the
-#                "S of R selected (N in doc)" note shape design §4 specifies — grep absence, not a wrong
+#                "S of R selected (N in doc)" note shape the disclosure contract specifies — grep absence, not a wrong
 #                value: the disclosure surface does not exist yet.
 #                (b) at --max-tokens=2000, `lines=` names 300 ranges; checked against the fixture file
 #                DIRECTLY (ground truth independent of ripwire, matching recallanchorcheck.sh's
@@ -44,13 +53,13 @@
 #                literally contains the query's exact phrase). Vortex ranks #2 by --for and gets dropped
 #                by buildSectionGranularBody's overlap-drop as "overlapping" its kept parent — whose span
 #                reaches to EOF because nothing follows it at an equal-or-shallower heading depth, so it
-#                swallows every descendant it has (design §2.B root cause).
+#                swallows every descendant it has (the ancestor-swallows-descendants root cause).
 #   P8   PASS    degenerate_single.md, --max-tokens=500 (the doc's one matching section is bigger than
 #                its share): shown=1, `[truncated: 422 of 15866 bytes]` is disclosed — nothing is silently
 #                dropped to shown=0. A single-candidate document has no "front matter vs top-ranked unit"
 #                distinction to get wrong, so today's document-order cut and the fix's rank-order cut
 #                degenerate to the same cut here. Deliberately NOT where the defect shows; must stay
-#                green after the fix too (design §3.2's own "degenerate case" bullet).
+#                green after the fix too (the fix's own degenerate case).
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/recallpassagecheck.sh    (no positional arguments — this
 #         repo's gates take none; see test/regression.sh's absorb loop, which is how this gate is run)
@@ -136,13 +145,14 @@ else
     no "P2 ceiling sweep: expected present from 1500 upward with no gaps; first_present=${firstPresent:-none} gap_after_first=$gapAfterFirst — see the per-budget rows above"
 fi
 
-# ── P3 — identity: a document whose units all fit is byte-identical to the (pre-fix) captured golden
-echo "  ---- P3 identity (budget not binding) ----"
+# ── P3 — stability: a document whose units all fit is byte-identical to the captured golden. See the
+# header note on P3 for why this golden is captured POST-fix and what the original spec for it got wrong.
+echo "  ---- P3 stability (budget not binding) ----"
 run "$SMALL" "$Q_SMALL" > "$TMP/p3.out"
 if cmp -s "$TMP/p3.out" "$FIX/small_fits.golden"; then
-    ok "P3 identity: small_fits.md (all matched content fits under the default 8000-tok ceiling) is byte-identical to test/fixtures/recallpassage/small_fits.golden"
+    ok "P3 stability: small_fits.md (all matched content fits under the default 8000-tok ceiling) is byte-identical to test/fixtures/recallpassage/small_fits.golden"
 else
-    no "P3 identity: output differs from test/fixtures/recallpassage/small_fits.golden — a non-binding budget must never change a byte"
+    no "P3 stability: output differs from test/fixtures/recallpassage/small_fits.golden — with nothing being cut, not a byte may move"
     diff "$FIX/small_fits.golden" "$TMP/p3.out" | head -10 | sed 's/^/        | /'
 fi
 
@@ -165,16 +175,16 @@ echo "      $P4_LINE"
 if printf '%s' "$P4_LINE" | grep -q '^subset=1 grew=1 '; then
     ok "P4 monotonicity: the emitted line-range set only grows as --max-tokens grows (3000 -> 200000): $P4_LINE"
 else
-    no "P4 monotonicity: the disclosed lines= set does not strictly grow with the budget (3000 vs 200000): $P4_LINE — a set that never moves is not a chain, it is a constant pre-truncation dump (design §2 step 5)"
+    no "P4 monotonicity: the disclosed lines= set does not strictly grow with the budget (3000 vs 200000): $P4_LINE — a set that never moves is not a chain, it is a constant pre-truncation dump"
 fi
 
 # ── P5 — disclosure: S/R/N and dropped_by_budget= must exist and be self-consistent with the body
 echo "  ---- P5 disclosure self-consistency ----"
 run "$LARGE" "$Q_LARGE" --max-tokens=2000 > "$TMP/p5.out"
 if grep -qE 'sections: [0-9]+ of [0-9]+ selected \([0-9]+ in doc\)' "$TMP/p5.out" && grep -qE 'dropped_by_budget=[0-9]+' "$TMP/p5.out"; then
-    ok "P5a format: the note carries design §4's 'S of R selected (N in doc)' and dropped_by_budget= fields"
+    ok "P5a format: the note carries the disclosure contract's 'S of R selected (N in doc)' and dropped_by_budget= fields"
 else
-    no "P5a format: the note does not carry design §4's 'S of R selected (N in doc)' / dropped_by_budget= fields — the disclosure surface does not exist"
+    no "P5a format: the note does not carry the disclosure contract's 'S of R selected (N in doc)' / dropped_by_budget= fields — the disclosure surface does not exist"
 fi
 P5_LINE="$( python3 - "$FIX/large_late_answer.md" "$TMP/p5.out" <<'PY'
 import sys, re
