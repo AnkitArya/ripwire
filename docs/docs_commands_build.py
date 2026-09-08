@@ -435,6 +435,16 @@ def anchor_of( spec ):
 # is still pulled from the SAME showcase capture every other sample in this document comes from (see
 # pattern_sample), so the doc's "everything here is either read from --help or a real recorded run"
 # contract holds for this subsection too.
+#
+# NO `**Caveats:**` BLOCK HERE, deliberately — do not add one back. This document's own "How to read a
+# section" defines Caveats as "the limits the binary itself states for this flag ... extracted from its
+# own help text, so they cannot drift from the code". A hand-authored bullet under that heading claims a
+# provenance it does not have, and this subsection had exactly that: a KNOWN LIMIT describing --recall
+# serving a document-order PREFIX instead of the ranked sections, still printed after the passage-serving
+# fix landed in src/recall.h, because nothing derived it from anything and so nothing could retire it.
+# The two conditions that DO govern this pattern (a `.md` extension, and `##` headings in the dump) are
+# not defects and will not expire, so they belong in the prose above, where they read as instructions for
+# writing the dump rather than as apologies for the tool.
 RECALL_PATTERN_MARKER = 'field affinity cache line data layout which fields are read together'
 
 
@@ -445,13 +455,35 @@ def render_recall_pattern( captures, name ):
 
     w( '#### Pattern: a directory of dumped tool output as a knowledge base' )
     w( '' )
-    w( '**Answers:** can `--recall` serve as a zero-setup knowledge base over logs, API dumps, fetched' )
-    w( 'docs, or `--help` text sitting in a scratch directory — instead of a source repo?' )
+    w( '**Answers:** can `--recall` serve as a zero-setup knowledge base over dumped tool output — a' )
+    w( '`git log`, an API response dump, a fetched doc, `<tool> --help` text — sitting in a scratch' )
+    w( 'directory, instead of a source repo?' )
     w( '' )
     w( 'Yes, unmodified. `--recall` never distinguishes "a codebase" from any other directory it can' )
-    w( 'walk for markdown/text/JSON/etc — point it at a scratch dir holding a `git log`, an API' )
-    w( 'response dump, a fetched doc, or `<tool> --help` output and query it directly. No index to' )
-    w( 'build, no daemon, no mutable store between runs: the whole cost is one cold parse.' )
+    w( 'walk: point it at the scratch dir and query it. No index to build, no daemon, no mutable store' )
+    w( 'between runs — the whole cost is one cold parse. Two conditions decide whether it works at all,' )
+    w( 'and both are yours, because the file you write is the only thing that sets them:' )
+    w( '' )
+    w( '1. **Dump to `.md`.** `--recall` ranks DOCUMENT files: `.md`, plus the docparse\'d' )
+    w( '   `.ipynb`/`.html`/`.csv` (and Office/PDF through the optional markitdown bridge). `.txt`,' )
+    w( '   `.log`, `.json` and extensionless files are **not** documents to it. A directory of those' )
+    w( '   answers `0 relevant of 0 document files` and exits 0 — which reads like "nothing matched' )
+    w( '   your terms" when what happened is "nothing was indexed at all". Redirect to `notes.md`,' )
+    w( '   never `notes.txt`. The recorded run below is that rule\'s own demonstration: its scratch dir' )
+    w( '   holds five dumps, and the header says `2 relevant of 2 document files` because only the two' )
+    w( '   `.md` ones are documents — the `git log`, the `--help` text and the JSON access log are not' )
+    w( '   in the population at all.' )
+    w( '' )
+    w( '2. **Keep `##` headings in the dump.** A headed document is served as whole ranked SECTIONS, so' )
+    w( '   an answer buried mid-file arrives at a small `--max-tokens` and a larger ceiling returns a' )
+    w( '   strict superset of it; the `[sections: S of R selected (N in doc) … lines="…";' )
+    w( '   dropped_by_budget=D]` note names the ranges you actually got and what the ceiling cost. A' )
+    w( '   HEADLESS dump has no sections to rank, so it is cut front-first and carries no such note.' )
+    w( '   Measured on a 73811-byte, 2001-line dump whose answer sat at line 1748: the headed copy' )
+    w( '   served exactly that answer at `--max-tokens=1000` (`lines="1748-1752"`, est_tokens=194),' )
+    w( '   while the headless copy of the same content withheld it at 1000, 2000, 4000, 8000 and 16000' )
+    w( '   and produced it only at 40000 — by which point the front-first cut had emitted the whole' )
+    w( '   file.' )
     w( '' )
     if sample:
         w( '**Try it**' )
@@ -466,19 +498,6 @@ def render_recall_pattern( captures, name ):
             w( line )
         w( '```' )
         w( '' )
-    w( '**Caveats:**' )
-    w( '' )
-    w( '- KNOWN LIMIT — DELETE THIS BULLET OUTRIGHT (not just reword it) once `src/recall.h` gets a' )
-    w( '  passage-serving fix. Today `--recall` computes a relevance ranking over a document\'s' )
-    w( '  sections and then serves a document-order PREFIX, not the ranked sections — so on a dumped' )
-    w( '  document LARGER than its computed byte share, the answer can be structurally unreachable at' )
-    w( '  every `--max-tokens`. Measured on the run above\'s own corpus: the' )
-    w( '  query\'s true answer (the `--field-affinity` section of the dumped `commands.md`) is ranked' )
-    w( '  #1, selected, and still absent from the served bytes at `--max-tokens` 1500, 4000, 12000 and' )
-    w( '  40000 alike — only front matter is ever served. Until that fix lands, point this pattern at' )
-    w( '  dumps that individually fit inside their computed share, or split one large dump into' )
-    w( '  several smaller files.' )
-    w( '' )
     return out
 
 
