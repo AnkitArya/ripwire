@@ -169,6 +169,10 @@ jobs:
           - { os: ubuntu-24.04, flavor: plain,   cc: clang, shard: 3, shards: 4 }
           - { os: ubuntu-24.04, flavor: plain,   cc: clang, shard: 4, shards: 4 }
     runs-on: ${{ matrix.os }}
+    # Xcode 16.2 on the macOS legs (the image default is 15.4): its libc++ carries <print> at a macOS 14
+    # deployment target, the default's does not. An empty DEVELOPER_DIR on the Linux legs is inert.
+    env:
+      DEVELOPER_DIR: ${{ matrix.os == 'macos-14' && '/Applications/Xcode_16.2.app/Contents/Developer' || '' }}
     steps:
       # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
       # in the tree. The churn / co-change / ownership gates (churnjoincheck, hotspots, --owners, the
@@ -193,12 +197,16 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ripgrep
 
-      # CC/CXX are set for the clang leg ONLY. Leaving them unset elsewhere is deliberate: the gcc leg and
-      # the macOS leg must each get their platform's own default, which is what a stranger's clone gets.
+      # CC/CXX: the clang leg names clang; the gcc leg names gcc-14 (the std::print floor, 2026-09-08 — the
+      # ubuntu-24.04 image ships GNU C++ 12.4 / 13.3 / 14.2, and the SYSTEM default `g++` is 13.3, whose
+      # libstdc++ has <format> but not <print>); the macOS leg is left to its platform default under the
+      # DEVELOPER_DIR pinned at the job level. The stranger's-clone question this used to answer — does
+      # the stock ubuntu g++ 13 still build? — is answered by the `fallback-emitter` job below instead,
+      # which builds with g++-13 on purpose and proves the fallback path emits the same bytes.
       - name: Configure (portable — no RIPWIRE_NATIVE; empty build type = the plain flavour)
         env:
-          CC:  ${{ matrix.cc == 'clang' && 'clang'   || '' }}
-          CXX: ${{ matrix.cc == 'clang' && 'clang++' || '' }}
+          CC:  ${{ matrix.cc == 'clang' && 'clang'   || matrix.cc == 'gcc' && 'gcc-14' || '' }}
+          CXX: ${{ matrix.cc == 'clang' && 'clang++' || matrix.cc == 'gcc' && 'g++-14' || '' }}
         run: cmake -S . -B build ${{ matrix.flavor == 'Release' && '-DCMAKE_BUILD_TYPE=Release' || '' }}
 
       # The front end is recorded per leg so a log reader never has to infer it from the job name alone —
@@ -209,6 +217,15 @@ jobs:
 
       - name: Build
         run: cmake --build build -j
+
+      # The floor this matrix exists to hold, read off the BINARY rather than inferred from the compiler
+      # version: emit= names the emitter that compiled in (src/infra/emit.h). A leg whose standard library
+      # lacks <print> still builds — the emitter falls back to std::format+fputs by feature test — so
+      # without this line such a leg would build green and read as "the std::print floor holds".
+      - name: The emitter this leg compiled in is std::print
+        run: |
+          ./build/ripwire --version
+          ./build/ripwire --version | grep -q 'emit=std::print'
 
       # test/pargates.py runs the SAME authoritative gate list regression.sh holds (manifestcheck.sh
       # keeps that list honest) in parallel, with the timing-sensitive edit-check budget isolated via
@@ -233,6 +250,48 @@ jobs:
 
       - name: G4 — xmllint --noout
         run: ./build/ripwire test/fixture --no-cache | xmllint --noout -
+
+  # ─── fallback-emitter: the stock ubuntu compiler still builds, and emits the SAME bytes ───────────────
+  #
+  # Every leg above pins a toolchain with <print>. A stranger's `apt install g++` on ubuntu-24.04 is still
+  # 13.3, whose libstdc++ has no <print>; src/infra/emit.h then compiles the std::format+fputs arm. This job
+  # builds that arm ON PURPOSE (CC/CXX = gcc-13/g++-13, both on the image), asserts the binary discloses it,
+  # and runs the printf-family parity fence against the manifest the std::print legs pinned — so the two
+  # arms are proven byte-identical on every CI run, not assumed. Without this job the fallback would rot
+  # unobserved until the next stranger hit it.
+  fallback-emitter:
+    name: fallback-emitter (ubuntu gcc-13, std::format+fputs)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc
+      - name: Configure with the image's stock gcc 13 (plain flavour)
+        env:
+          CC:  gcc-13
+          CXX: g++-13
+        run: cmake -S . -B build
+      - name: Confirm the front end this leg actually configured with
+        run: grep -h 'CMAKE_CXX_COMPILER_ID\|CMAKE_CXX_COMPILER_VERSION' build/CMakeFiles/*/CMakeCXXCompiler.cmake
+      - name: Build
+        run: cmake --build build -j
+      - name: The emitter this leg compiled in is the fallback, and says so
+        run: |
+          ./build/ripwire --version
+          ./build/ripwire --version | grep -q 'emit=std::format+fputs'
+      - name: Byte parity — the fallback arm reproduces the manifest the std::print legs pinned
+        run: bash test/printffmtparitycheck.sh
+      - name: versioncheck — the disclosure arm on this arm
+        run: bash test/versioncheck.sh
+      - name: det-gate — 2-run byte-identical diff
+        run: |
+          ./build/ripwire test/fixture --no-cache >/tmp/run_a.xml
+          ./build/ripwire test/fixture --no-cache >/tmp/run_b.xml
+          diff -q /tmp/run_a.xml /tmp/run_b.xml
 
   # ─── rhel: the platform this project actually ships a prebuilt for, checked at PR time ───────────────
   #
@@ -272,23 +331,23 @@ jobs:
       # Whichever is found is ECHOED, so the log always records which compiler actually built this leg rather
       # than leaving it to be inferred.
       #
-      # Floor is 13, not merely "whichever toolset exists": src/verbs_lint.h's printf-family pilot calls
-      # std::format (<format>), which libstdc++ implements starting at GCC 13 — see that file's shim comment
-      # for the evidence (CI run IDs). A
-      # probe that accepted 12/13 here would report "toolset found, leg is fine" right up to the AppStream
-      # refresh that makes it false; raise this floor again if a later conversion needs a newer libstdc++.
+      # Floor is 14, not merely "whichever toolset exists": the house emitter (src/infra/emit.h) is
+      # std::print, which libstdc++ implements starting at GCC 14 (<format> arrived at 13, <print> at 14).
+      # A lower toolset still BUILDS — the emitter falls back by feature test — which is exactly why the
+      # probe must not accept one: the leg would report "toolset found, leg is fine" while the binary it
+      # built took the fallback. The assertion step after Build reads the truth off the binary.
       - name: Install the RHEL build toolchain
         run: |
           set -eu
           dnf install -y cmake git libxml2 python3 make diffutils findutils
           found=""
-          for v in $( seq 20 -1 13 ); do
+          for v in $( seq 20 -1 14 ); do
             if dnf install -y "gcc-toolset-$v-gcc-c++"; then
               found="$v"
               break
             fi
           done
-          [ -n "$found" ] || { echo "no gcc-toolset-N (N>=13) in this UBI9 AppStream — this tree's C++23 <format> needs libstdc++ 13+; gcc-toolset-12 and older cannot build it"; exit 1; }
+          [ -n "$found" ] || { echo "no gcc-toolset-N (N>=14) in this UBI9 AppStream — the house emitter is std::print, which needs libstdc++ 14+ (<print>); gcc-toolset-13 and older would silently take the std::format+fputs fallback"; exit 1; }
           echo "TOOLSET=$found" >> "$GITHUB_ENV"
 
       - name: Record the toolchain this leg is using
@@ -309,6 +368,11 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
+      - name: The emitter this leg compiled in is std::print (gcc-toolset-14's libstdc++ has <print>)
+        run: |
+          ./build/ripwire --version
+          ./build/ripwire --version | grep -q 'emit=std::print'
+
       - name: Self-run on the fixture (it parses and ranks under RHEL userland)
         run: ./build/ripwire test/fixture --no-cache | head -c 400; echo
 
@@ -328,6 +392,8 @@ jobs:
       matrix:
         os: [macos-14, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    env:
+      DEVELOPER_DIR: ${{ matrix.os == 'macos-14' && '/Applications/Xcode_16.2.app/Contents/Developer' || '' }}
     env:
       # Darwin's arm64 runtime rejects the standalone leak sanitizer at startup (CMakeLists.txt's own
       # comment on this, `ripwire_asan_fixture`); Linux gets full leak detection.
@@ -381,6 +447,11 @@ jobs:
 
       - name: Build
         run: cmake --build asan -j
+
+      - name: The emitter this leg compiled in is std::print
+        run: |
+          ./asan/ripwire --version
+          ./asan/ripwire --version | grep -q 'emit=std::print'
 
       - name: G1 fixture self-run (ripwire_asan_fixture)
         run: cmake --build asan --target ripwire_asan_fixture
