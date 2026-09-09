@@ -185,4 +185,96 @@ echo "$outD" | grep -q 'TIMEOUT after 2s' && echo "$outD" | grep -q 'NEEDLE-9c17
     && ok "functional: a gate killed at its budget still reports what it printed before the kill" \
     || { no "functional: the timeout report lost the gate's own pre-kill output:"; echo "$outD" | sed -n '/FAILURES/,$p' | sed 's/^/    /'; }
 
+# ── THE SHARED-TREE TRIPWIRE (2026-09-09, CI run 34298150602) ───────────────────────────────────────────
+# pargates.py samples `git status --porcelain` on the checkout while the suite runs and fails the run when
+# a gate leaves a NEW untracked/modified path there, naming the gates in flight. Every stamped verb reads
+# that same command, from ANY crawl root inside the checkout, for its at="<sha>+dirty" bit, so a writer
+# flips every determinism arm running beside it -- tokenbudgetcheck's `--for` arm got est_tokens 3949
+# then 3947 while gateexitcheck's probe copy sat in test/gateexitfix/, and the issue thread blamed a
+# third gate. Three functional arms on the REAL script (unpatched), each on its own synthetic corpus:
+#   WRITER   a git corpus whose one gate holds an untracked file for 1.5 s -> tree_writes=1, the path and
+#            the gate named, rc != 0 -- although the gate itself PASSED. The arm that has been seen red.
+#   CONTROL  the same gate writing into its own mktemp instead -> tree_writes=0, rc 0. Mutation control:
+#            the only difference between the two corpora is where the file lands.
+#   UNWATCHED a corpus that is not a git repository -> the tripwire says so (tree_writes=unwatched), and a
+#            git-less run is never turned red by a sampler that cannot see anything.
+# The sampler is honest about being a sampler: its report calls the list a floor. 1.5 s against a 0.25 s
+# poll is six samples of margin, chosen so the WRITER arm cannot flake on a loaded CI runner.
+grep -qE 'PARGATES_DIRT_POLL_SEC", "0\.25"' "$PARGATES" \
+    && ok "static: the tree tripwire samples every 0.25 s by default (PARGATES_DIRT_POLL_SEC)" \
+    || no "static: PARGATES_DIRT_POLL_SEC default is not 0.25 -- the WRITER arm's 1.5 s margin below assumes it"
+grep -qE 'sys\.exit\(1 if fails or dirt_seen else 0\)' "$PARGATES" \
+    && ok "static: a tree write fails the run (sys.exit reads dirt_seen)" \
+    || no "static: the exit status no longer reads dirt_seen -- a writer would be reported but not fail the run"
+
+mkTreeCorpus(){   # mkTreeCorpus <dir> <where-the-gate-writes: checkout|mktemp> [git]
+    local d="$1" where="$2" git="${3:-}"
+    mkdir -p "$d/test"
+    if [ -n "$git" ]; then
+        ( cd "$d" && git init -q . && git config user.email t@t && git config user.name t \
+          && printf 'base\n' > README.md && git add README.md && git commit -qm base ) >/dev/null 2>&1 \
+          || { no "functional(tree): could not init the synthetic git corpus at $d"; return 1; }
+    fi
+    if [ "$where" = checkout ]; then
+        cat > "$d/test/treeprobecheck.sh" <<'EOF'
+#!/usr/bin/env bash
+fail=0
+ok(){ printf '  PASS  %s\n' "$*"; }
+no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+printf 'probe\n' > "$ROOT/test/tree.probe.tmp"; sleep 1.5; rm -f "$ROOT/test/tree.probe.tmp"
+ok "held an untracked file inside the checkout for 1.5 s, then removed it"
+[ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
+exit $fail
+EOF
+    else
+        cat > "$d/test/treeprobecheck.sh" <<'EOF'
+#!/usr/bin/env bash
+fail=0
+ok(){ printf '  PASS  %s\n' "$*"; }
+no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+T="$( mktemp -d )"; trap 'rm -rf "$T"' EXIT
+printf 'probe\n' > "$T/tree.probe.tmp"; sleep 1.5
+ok "held a file inside its own mktemp for 1.5 s"
+[ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
+exit $fail
+EOF
+    fi
+    chmod +x "$d/test/treeprobecheck.sh"
+}
+
+WRITER="$TMP/treewriter";   mkTreeCorpus "$WRITER"   checkout git
+CONTROL="$TMP/treecontrol"; mkTreeCorpus "$CONTROL"  mktemp   git
+NOGIT="$TMP/treenogit";     mkTreeCorpus "$NOGIT"    checkout
+
+outW="$( python3 "$PARGATES" "$WRITER" "$FAKEBIN" --only treeprobecheck 2>&1 )"; rcW=$?
+printf '%s\n' "$outW" | grep -qE '^gates=1 pass=1 .* tree_writes=1$' \
+    && ok "functional(tree): WRITER -- the gate passed, and the run still counts tree_writes=1" \
+    || { no "functional(tree): WRITER -- expected 'gates=1 pass=1 ... tree_writes=1', got: $( printf '%s\n' "$outW" | grep -E '^gates=' )"; printf '%s\n' "$outW" | sed 's/^/    /' | head -20; }
+printf '%s\n' "$outW" | grep -qE '^\*\*\* +\?\? test/tree\.probe\.tmp .*running then: treeprobecheck\.sh' \
+    && ok "functional(tree): WRITER -- the report names the path AND the gate in flight when it was seen" \
+    || no "functional(tree): WRITER -- the report does not name '?? test/tree.probe.tmp' with 'running then: treeprobecheck.sh'"
+printf '%s\n' "$outW" | grep -q 'a floor, not a total' \
+    && ok "functional(tree): WRITER -- the report calls its list a floor (a sampler never claims a total)" \
+    || no "functional(tree): WRITER -- the report no longer says the list is a floor"
+[ "$rcW" -ne 0 ] \
+    && ok "functional(tree): WRITER -- a tree write fails the run (rc=$rcW) even though every gate passed" \
+    || no "functional(tree): WRITER -- pargates.py exited 0 with a gate writing into the shared checkout"
+
+outC="$( python3 "$PARGATES" "$CONTROL" "$FAKEBIN" --only treeprobecheck 2>&1 )"; rcC=$?
+printf '%s\n' "$outC" | grep -qE '^gates=1 pass=1 .* tree_writes=0$' && [ "$rcC" -eq 0 ] \
+    && ok "functional(tree): CONTROL -- the same gate writing into its own mktemp: tree_writes=0, rc 0" \
+    || no "functional(tree): CONTROL -- expected tree_writes=0 and rc 0, got rc=$rcC: $( printf '%s\n' "$outC" | grep -E '^gates=' )"
+printf '%s\n' "$outC" | grep -q 'WROTE INTO THE SHARED CHECKOUT' \
+    && no "functional(tree): CONTROL -- a mktemp write was reported as a tree write (false positive)" \
+    || ok "functional(tree): CONTROL -- no tree-write report for a gate that never touched the checkout"
+
+outN="$( python3 "$PARGATES" "$NOGIT" "$FAKEBIN" --only treeprobecheck 2>&1 )"; rcN=$?
+printf '%s\n' "$outN" | grep -qE '^gates=1 pass=1 .* tree_writes=unwatched$' && [ "$rcN" -eq 0 ] \
+    && ok "functional(tree): UNWATCHED -- a non-git corpus reports tree_writes=unwatched and stays rc 0" \
+    || no "functional(tree): UNWATCHED -- expected tree_writes=unwatched and rc 0, got rc=$rcN: $( printf '%s\n' "$outN" | grep -E '^gates=' )"
+printf '%s\n' "$outN" | grep -q 'tree tripwire: DISARMED' \
+    && ok "functional(tree): UNWATCHED -- the run says the tripwire is disarmed rather than implying a clean tree" \
+    || no "functional(tree): UNWATCHED -- no DISARMED disclosure on a corpus git cannot see"
+
 [ "$fail" -eq 0 ] && echo "pargatescheck: ALL PASS" || { echo "pargatescheck: SOME CHECKS FAILED"; exit 1; }

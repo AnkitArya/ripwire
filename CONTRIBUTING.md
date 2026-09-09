@@ -106,6 +106,13 @@ in the same commit that adds the gate**.
 Run your gates in the foreground. A suite left running in the background at the end of a work
 session is a suite nobody read.
 
+Gates share one checkout. **Never write into it**, not even for a moment: every stamped verb reads
+`git status --porcelain` from any crawl root inside the checkout for its `at="…+dirty"` bit, so a
+transient untracked file flips every determinism arm running beside you under `-j N`. Work in a
+`mktemp` dir; if a copy genuinely has to sit beside a real gate, give it a name `.gitignore` hides
+(`.gateprobe.*`). `test/pargates.py` samples that command while the suite runs and fails the run
+naming the gate in flight. It is a sampler, so a clean run there is "none found", never "none exists".
+
 ### The formatting gate — and the rule for when it disagrees with you
 
 ```bash
