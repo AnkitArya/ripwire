@@ -184,7 +184,19 @@ echo "$COUT" | grep -q 'copied="1"' \
 #     the check claims to measure. ──
 STALEDIR="$TMP/staledir"; mkdir -p "$STALEDIR"
 cp -p "$BIN" "$STALEDIR/ripwire"; chmod +x "$STALEDIR/ripwire"
-printf 'X' | dd of="$STALEDIR/ripwire" bs=1 seek=100000 conv=notrunc 2>/dev/null   # one byte differs; size identical
+# Flip the byte at a fixed offset to a value it provably is NOT. Writing a CONSTANT here is a
+# 1-in-256 no-op PER BUILD CONFIGURATION: if that offset already holds the constant, the copy stays
+# byte-identical, --doctor correctly answers copied="1" same_bytes="1" ok="1", and every assertion
+# below inverts — the fixture reports a stale-detection bug that does not exist. Release+gcc on
+# ubuntu-24.04 drew exactly that byte (run 34299292778, the only red leg of 26). Read, then write
+# something else, so the fixture differs in the fact the check claims to measure on every toolchain.
+staleOld="$( dd if="$STALEDIR/ripwire" bs=1 skip=100000 count=1 2>/dev/null | od -An -tu1 | tr -d ' \n' )"
+staleNew=$(( ( ${staleOld:-0} + 1 ) % 256 ))
+printf "\\$( printf '%03o' "$staleNew" )" | dd of="$STALEDIR/ripwire" bs=1 seek=100000 conv=notrunc 2>/dev/null
+# and PROVE the flip landed: a silent no-op here is the whole defect, so it fails loudly instead.
+if cmp -s "$BIN" "$STALEDIR/ripwire"; then
+    no "genuine-stale fixture is byte-identical to \$BIN — the flip was a no-op, arm (F) cannot mean anything"
+fi
 touch -t 202001010000 "$STALEDIR/ripwire"   # and an older mtime, so the hint names the right side
 STALECACHE="$TMP/stalecache"; mkdir -p "$STALECACHE"
 SOUT="$( PATH="$STALEDIR:$PATH" TMPDIR="$STALECACHE" "$BIN" "$REPO" --doctor --no-cache 2>/dev/null )"

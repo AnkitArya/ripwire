@@ -30,10 +30,10 @@ except ImportError as exc:
 TRACE = """AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:1148
-    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:1174
-    #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:5155
-    #3 0x102e01a44 in main src/main.cpp:5594
+    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:2930
+    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:2971
+    #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:1121
+    #3 0x102e01a44 in main src/main.cpp:2780
     #4 0x1a2b3c0dc in start+0x9dc (dyld:arm64e+0x60dc)
 ==41337==ABORTING
 """
@@ -143,6 +143,43 @@ def mcp_call(verb, **args):
     return json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                        "params": {"name": verb, "arguments": dict(path=".", **args)}}, separators=(",", ":"))
 
+# --- directory-as-knowledge-base fixture ------------------------------------------------------------
+# --recall never distinguishes "a codebase" from any other directory it can walk. This scratch dir
+# holds only DUMPED TOOL OUTPUT — a git log, this repo's own generated command reference, --help
+# text, an architecture doc, and a fabricated API access log — the shapes an agent actually
+# accumulates mid-task, never crawled as source. Real files, built at capture time, not fabricated
+# sample text.
+KBCORPUS = os.path.join(AUX, "kbcorpus")
+os.makedirs(KBCORPUS, exist_ok=True)
+_kbGitLog = subprocess.run("git log --stat -n 400", shell=True, cwd=REPO, capture_output=True).stdout.decode(errors="replace")
+open(os.path.join(KBCORPUS, "git-log-stat.txt"), "w").write(_kbGitLog)
+shutil.copy(os.path.join(REPO, "docs", "COMMANDS.md"), os.path.join(KBCORPUS, "commands.md"))
+shutil.copy(os.path.join(REPO, "docs", "ARCHITECTURE.md"), os.path.join(KBCORPUS, "architecture.md"))
+_kbHelp = subprocess.run(f"{ABIN} --help", shell=True, cwd=REPO, capture_output=True).stdout.decode(errors="replace")
+open(os.path.join(KBCORPUS, "ripwire-help.txt"), "w").write(_kbHelp)
+# A fabricated 1,200-row JSON access log — the kind of API/tool dump an agent pastes into a scratch
+# dir mid-task. Seeded so the capture is reproducible.
+import random as _kbrandom, datetime as _kbdatetime
+_kbRng      = _kbrandom.Random(42)
+_kbPaths    = ["/api/v1/users", "/api/v1/orders", "/api/v1/products", "/api/v1/search", "/api/v1/health",
+               "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/cart", "/api/v1/checkout", "/api/v1/webhooks"]
+_kbMethods  = ["GET", "POST", "PUT", "DELETE", "PATCH"]
+_kbStatuses = [200, 200, 200, 201, 204, 301, 400, 401, 403, 404, 404, 500, 502, 503]
+_kbBase     = _kbdatetime.datetime(2026, 8, 1)
+_kbRows = [{
+    "id": i,
+    "ts": (_kbBase + _kbdatetime.timedelta(seconds=i * 37)).isoformat() + "Z",
+    "method": _kbRng.choice(_kbMethods),
+    "path": _kbRng.choice(_kbPaths),
+    "status": _kbRng.choice(_kbStatuses),
+    "latency_ms": round(_kbRng.uniform(1.2, 890.5), 2),
+    "ip": f"10.{_kbRng.randint(0,255)}.{_kbRng.randint(0,255)}.{_kbRng.randint(0,255)}",
+    "user_agent": _kbRng.choice(["curl/8.4.0", "Mozilla/5.0", "python-requests/2.31", "Go-http-client/1.1"]),
+    "bytes_sent": _kbRng.randint(120, 98304),
+} for i in range(1200)]
+open(os.path.join(KBCORPUS, "access-log.json"), "w").write(json.dumps(_kbRows, indent=2))
+KBCORPUS_BYTES = sum(os.path.getsize(os.path.join(KBCORPUS, f)) for f in os.listdir(KBCORPUS))
+
 # --- the recorded tree condition ----------------------------------------
 # The diff-aware verbs (--situ / --test-gate / --quality-delta / --pr-context / --map-diff / --edit-check)
 # answer a question ABOUT THE WORKING TREE, so their captions are claims about the tree this run recorded
@@ -181,6 +218,7 @@ add(S1, f'{BIN} . --exemplar="format byte sizes for humans"', "The repo's best-i
 add(S1, f'{BIN} . --help-task="calls(runDefaultMap, rankGraphTeleport)"', "Deterministic enhanced help: a closed claim in the task is a structured shape, so the router recommends the ONE command that answers it (--verify) with the evidence behind the pick. Advice only — nothing executes.")
 add(S1, f'{BIN} . --help-task="write a cheerful release announcement"', "The honest half of the contract: a task with no ripwire-shaped evidence ABSTAINS with zero commands rather than guessing.")
 add(S1, f'{BIN} . --recall="quality delta gating exit codes"', "Most relevant DOCS' full bodies (markdown only) — recall what is already written down.")
+add(S1, f'{BIN} {KBCORPUS} --recall="field affinity cache line data layout which fields are read together" --top-k=3 --max-tokens=1200', f"The directory-as-knowledge-base pattern: --recall pointed at a {KBCORPUS_BYTES}-byte scratch dir of DUMPED TOOL OUTPUT (a git log, this repo's own generated command reference, --help text, an architecture doc, a fabricated JSON access log) instead of a source repo — no index to build, no daemon.")
 add(S1, f"{BIN} . --tree", "File-by-file orientation map (top symbols per file).")
 add(S1, f"{BIN} . --html={html_out}", "Self-contained HTML force-directed call graph.", post=f"wc -c {html_out}")
 add(S1, f"{BIN} . --order=stable --top-k=5", "Stable (path/id) emit order — provider KV-cache hits across re-runs.")
@@ -335,8 +373,8 @@ add(S7, f"{BIN} --version", "Version + short build info.")
 
 
 S2B = "navigate — seeds, claims, slices, shapes"
-add(S2B, f"{BIN} . --at=src/graph.h:1148", "Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost.")
-add(S2B, f"{BIN} . --callers=@src/graph.h:1148", "The same seed in a SELECTOR position: @FILE:LINE resolves to the innermost enclosing definition, then --callers runs on it.")
+add(S2B, f"{BIN} . --at=src/graph.h:2930", "Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost.")
+add(S2B, f"{BIN} . --callers=@src/graph.h:2930", "The same seed in a SELECTOR position: @FILE:LINE resolves to the innermost enclosing definition, then --callers runs on it.")
 add(S2B, f"{BIN} . --at=src/graph.h:999999", "A seed past the end of the file — the refusal shape for a faulted location.")
 add(S2B, f'{BIN} . --verify="calls(runDefaultMap, rankGraphTeleport)"', "VERIFY a closed claim in one call: three-valued verdict (confirmed / refuted / not-established) with the evidence rows inline.")
 add(S2B, f'{BIN} . --verify="unused(rankGraphTeleport)"', "A claim that is FALSE — the refuted shape, with the references that refute it.")
