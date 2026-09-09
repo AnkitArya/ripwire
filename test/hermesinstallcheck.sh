@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# hermesinstallcheck.sh — the Hermes installer target gate.
-# Pins that skills/install.sh --hermes and scripts/install.sh's Hermes activation block wire ripwire
-# skills into the Hermes agent home exactly like the Claude (~/.claude) / Codex (~/.agents) paths, and
-# that each target is hermetic: installing for one agent never touches another agent's home.
+# hermesinstallcheck.sh — the Hermes installer target gate for skills/install.sh --hermes.
+# Pins that --hermes wires ripwire skills into the Hermes agent home exactly like the Claude
+# (~/.claude) / Codex (~/.agents) paths, and that each target is hermetic: installing for one
+# agent never touches another agent's home.
+# The scripts/install.sh release-installer half (its Hermes activation block) is pinned by
+# test/releaseinstallcheck.sh arm E7, not here.
 # All against TEMP homes + the repo tree, so it is CI-runnable and never touches the real ~/.hermes,
 # ~/.claude or ~/.agents.  HERMES_HOME is ALWAYS exported (not just a shell var) so the child
 # bash processes inherit the temporary home and can never fall back to the real $HOME/.hermes.
@@ -22,20 +24,38 @@ no(){ echo "  FAIL  $1"; fail=1; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HERMES_HOME="$TMP/hermes-home"; rm -rf "$HERMES_HOME"; mkdir -p "$HERMES_HOME"
 
-shippedAll=$( ls -d "$SK"/ripwire-*/ 2>/dev/null | wc -l | tr -d ' ' )
-contributorSkills=$( grep -l '^audience: contributor' "$SK"/ripwire-*/SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
-shipped=$(( shippedAll - contributorSkills ))
-
-# helper: the sorted set of user-facing skill NAMES (contributor-only excluded) shipped in the repo
+# helper: the sorted set of user-facing skill NAMES (contributor-only excluded) shipped in the repo —
+# the flat Agent-Skills-standard set plus the Hermes-native set under skills/hermes/ (both deploy via
+# --hermes; a flat dir of the same name wins and the native one is skipped, mirroring install.sh).
 shipped_names() {
-    for d in "$SK"/ripwire-*/; do
+    for d in "$SK"/ripwire-*/ "$SK"/hermes/*/; do
         [ -d "$d" ] || continue
         name="$( basename "$d" )"
         [ -f "$d/SKILL.md" ] || continue
+        case "$d" in
+            "$SK"/hermes/*) [ -d "$SK/$name" ] && continue ;;
+        esac
         grep -q '^audience: contributor' "$d/SKILL.md" 2>/dev/null && continue
         echo "$name"
-    done | sort
+    done | sort -u
 }
+
+# helper: the sorted set of contributor-only skill NAMES (shipped but never activated by default)
+contributor_names() {
+    for d in "$SK"/ripwire-*/ "$SK"/hermes/*/; do
+        [ -d "$d" ] || continue
+        name="$( basename "$d" )"
+        [ -f "$d/SKILL.md" ] || continue
+        case "$d" in
+            "$SK"/hermes/*) [ -d "$SK/$name" ] && continue ;;
+        esac
+        grep -q '^audience: contributor' "$d/SKILL.md" 2>/dev/null || continue
+        echo "$name"
+    done | sort -u
+}
+
+shipped=$( shipped_names | wc -l | tr -d ' ' )
+contributorSkills=$( contributor_names | wc -l | tr -d ' ' )
 
 # ---- 1) --hermes installs every user-facing shipped skill under ${HERMES_HOME}/skills ----
 bash "$SK/install.sh" --hermes >/dev/null 2>&1
@@ -54,6 +74,19 @@ if [ "$manifest_set" != "$wanted_set" ]; then
 else
     ok "--hermes manifest declares exactly the linked user-facing set ($(printf '%s\n' "$manifest_set" | wc -l | tr -d ' ') skills)"
 fi
+
+# ---- 1c) every Hermes-native skill (skills/hermes/*) deploys next to the flat set ----
+for nd in "$SK"/hermes/*/; do
+    [ -d "$nd" ] || continue
+    [ -f "$nd/SKILL.md" ] || continue
+    nname="$( basename "$nd" )"
+    grep -q '^audience: contributor' "$nd/SKILL.md" 2>/dev/null && continue
+    if [ -L "$HERMES_HOME/skills/$nname" ] && [ -f "$HERMES_HOME/skills/$nname/SKILL.md" ]; then
+        ok "--hermes deploys the Hermes-native $nname skill next to the flat set"
+    else
+        no "--hermes did not deploy skills/hermes/$nname (native skill needs a manual cp again)"
+    fi
+done
 
 # ---- 2) --hermes is hermetic: never touches ~/.claude or the cross-agent ~/.agents ----
 FALLBACK_HOME="$TMP/fallback-home"; rm -rf "$FALLBACK_HOME"; mkdir -p "$FALLBACK_HOME"
@@ -79,11 +112,11 @@ RE_RUN=$( bash "$SK/install.sh" --hermes 2>&1 | grep -c "pruned stale" || true )
     && ok "--hermes re-run prunes nothing (idempotent)" \
     || no "--hermes re-run pruned $RE_RUN skills (drift: shipped set changed between runs)"
 
-# ---- 5) --hermes --hook is refused with EXIT STATUS 2 (Hermes has no Claude/Codex hook slot) ----
+# ---- 5) --hermes --hook is refused with EXIT STATUS 2 (the hook port has not landed yet) ----
 bash "$SK/install.sh" --hermes --hook >/dev/null 2>&1
 HOOK_STATUS=$?
 { [ "$HOOK_STATUS" -eq 2 ]; } \
-    && ok "--hermes --hook fails with exit status 2 (hook not supported for the Hermes target)" \
+    && ok "--hermes --hook fails with exit status 2 (hook not ported to the Hermes target yet)" \
     || no "--hermes --hook exited $HOOK_STATUS, expected 2 — or it succeeded, which is wrong"
 
 [ "$fail" -eq 0 ] && echo "hermesinstallcheck: ALL PASS" || { echo "hermesinstallcheck: FAILURES"; exit 1; }

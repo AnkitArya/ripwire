@@ -3,8 +3,9 @@
 # edits here take effect immediately). Default: Claude. Codex: skills/install.sh --codex installs to the
 # current cross-agent ~/.agents/skills discovery root; --codex-legacy retains the older CODEX_HOME/skills
 # destination. Hermes: skills/install.sh --hermes installs to ${HERMES_HOME:-~/.hermes}/skills (the same
-# Agent-Skills-standard SKILL.md files Hermes loads natively; no `--hook` support there — Hermes has no
-# Claude/Codex-style PreToolUse hook file). An explicit path remains supported for CI and other clients:
+# Agent-Skills-standard SKILL.md files Hermes loads natively, plus the Hermes-native skills under
+# skills/hermes/; no `--hook` support there yet — Hermes exposes hooks: pre_tool_call in config.yaml
+# but hooks/ripwire-nudge.sh still switches on Claude tool names, so the port has not landed). An explicit path remains supported for CI and other clients:
 # skills/install.sh PATH.
 # Add --hook explicitly to install the advisory PreToolUse + SessionStart hook for the selected client:
 # skills/install.sh --hook (Claude) or skills/install.sh --codex --hook (Codex). --openclaw installs to
@@ -324,6 +325,12 @@ for existing in "$dst"/ripwire-*; do
     [ -e "$existing" ] || [ -L "$existing" ] || continue      # skip the literal glob when nothing matches
     name="$( basename "$existing" )"
     if [ ! -d "$src/$name" ]; then
+        # Hermes-native skills live at skills/hermes/<name>, not skills/<name>: a linked one is still
+        # shipped, so it is kept — unless it stopped being wanted (contributor-only without
+        # --contributor), in which case it is pruned like any other.
+        if [ "$mode" = "hermes" ] && [ -d "$src/hermes/$name" ] && wanted_skill "$src/hermes/$name"; then
+            continue
+        fi
         rm -f "$existing"
         echo "pruned stale $name (no longer shipped)"
         pruned=$(( pruned + 1 ))
@@ -348,6 +355,26 @@ for d in "$src"/ripwire-*/; do
     count=$(( count + 1 ))
 done
 
+# Hermes loads the flat Agent-Skills-standard set AND Hermes-native skills (skills/hermes/*, e.g. the
+# ripwire-repo-map skill purpose-built for Hermes) side by side out of one directory — verified live:
+# both formats index together, so --hermes deploys both and no prefer/fallback logic is needed.
+if [ "$mode" = "hermes" ]; then
+    for nd in "$src"/hermes/*/; do
+        [ -d "$nd" ] || continue                                  # skip the literal glob when nothing matches
+        [ -f "$nd/SKILL.md" ] || continue                        # a Hermes-native skill is a dir with SKILL.md
+        nname="$( basename "$nd" )"
+        [ -d "$src/$nname" ] && continue                         # flat set already linked it above; one link wins
+        if ! wanted_skill "$nd"; then
+            echo "skipped $nname (contributor-only: about working on ripwire itself; pass --contributor to activate it)"
+            skipped=$(( skipped + 1 ))
+            continue
+        fi
+        ln -sfn "$nd" "$dst/$nname"
+        echo "installed $nname -> $dst/$nname (Hermes-native skill)"
+        count=$(( count + 1 ))
+    done
+fi
+
 # The active skill directory is an agent-facing API surface, not a bag of best-effort links. Record the
 # exact shipped set only after every link succeeds so `ripwire --doctor --agent=codex` can distinguish a
 # complete install from a stale/missing/extra skill without trusting the checkout it came from.
@@ -357,6 +384,15 @@ manifestTmp="$( mktemp "$dst/.ripwire-manifest-v1.tmp.XXXXXX" )"
     for d in "$src"/ripwire-*/; do
         wanted_skill "$d" && echo "skill=$( basename "$d" )"
     done
+    if [ "$mode" = "hermes" ]; then
+        for nd in "$src"/hermes/*/; do
+            [ -d "$nd" ] || continue
+            [ -f "$nd/SKILL.md" ] || continue
+            nname="$( basename "$nd" )"
+            [ -d "$src/$nname" ] && continue
+            wanted_skill "$nd" && echo "skill=$nname"
+        done
+    fi
 } >"$manifestTmp"
 mv "$manifestTmp" "$dst/.ripwire-manifest-v1"
 echo "done. $count ripwire skills active in every session (${pruned} pruned, ${skipped} contributor-only skipped) — every ripwire-* installed above."
@@ -365,7 +401,8 @@ if [ "$wantHook" -eq 1 ]; then
     case "$mode" in
         codex|codex-legacy) install_codex_hook ;;
         claude) install_claude_hook ;;
-                hermes) echo "skills/install.sh: --hook is not supported for the Hermes target (Hermes has no Claude/Codex-style PreToolUse hook file); ripwire works via the CLI/MCP server there." >&2; exit 2 ;;
+                hermes) echo "skills/install.sh: --hook is not ported to the Hermes target yet (Hermes exposes hooks: pre_tool_call in config.yaml, but hooks/ripwire-nudge.sh still switches on Claude tool names); ripwire works via the CLI/MCP server there." >&2; exit 2 ;;
+        openclaw) echo "skills/install.sh: --hook is not supported for the openclaw target (openclaw's before_tool_call is a plugin API, not a shell hook slot); ripwire works via the CLI/MCP server there." >&2; exit 2 ;;
         path) echo "skills/install.sh: --hook needs --claude or --codex, not an explicit skill path" >&2; exit 2 ;;
     esac
 fi

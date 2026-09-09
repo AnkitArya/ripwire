@@ -124,9 +124,11 @@ run_install()
 {
     # run_install HOMEDIR PREFIXDIR [extra env assignments...] -> stdout in $TMP/e.out, rc in $E_RC
     _h="$1"; _p="$2"; shift 2
-    env "$@" HOME="$_h" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" \
+    # HERMES_HOME= comes FIRST so an explicit HERMES_HOME from "$@" (as E7 passes) wins; env applies
+    # assignments left to right, and a trailing default would silently clobber the override — leaving
+    # E7 green via the $HOME/.hermes fallback instead of the override it claims to test.
+    env HERMES_HOME= "$@" HOME="$_h" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" \
         ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
-        HERMES_HOME= \
         RIPWIRE_REPO=redhat-et/ripwire RIPWIRE_VERSION=v0.3.6 RIPWIRE_INSTALL_PREFIX="$_p" RIPWIRE_INSTALL_YES=1 \
         bash "$INSTALL" >"$TMP/e.out" 2>"$TMP/e.err"; E_RC=$?
 }
@@ -190,13 +192,18 @@ run_install "$EH1" "$TMP/prefix-e1"
 # (E7) Hermes present -> its skills are ACTIVE via $HERMES_HOME (the install block's detection signal).
 # Mirrors (E1)/(E2): Hermes home created in an isolated HOME, the release installer must activate the
 # ripwire skills there, and must NOT invent a Claude dir for an agent that is not installed.
-EH7="$TMP/home-hermes"; mkdir -p "$EH7/.hermes"
-run_install "$EH7" "$TMP/prefix-e7" HERMES_HOME="$EH7/.hermes"
-[ "$E_RC" -eq 0 ] && ok "(E7) install succeeds with Hermes present (HERMES_HOME=$EH7/.hermes)" \
+# The Hermes home is deliberately NOT $HOME/.hermes: that split proves run_install's explicit
+# HERMES_HOME override reaches the installer, rather than the arm passing via the $HOME fallback.
+EH7="$TMP/home-hermes"; EH7H="$EH7/custom-hermes"; mkdir -p "$EH7H"
+run_install "$EH7" "$TMP/prefix-e7" HERMES_HOME="$EH7H"
+[ "$E_RC" -eq 0 ] && ok "(E7) install succeeds with Hermes present (HERMES_HOME=$EH7H)" \
     || no "(E7) install failed with Hermes present: $( tail -1 "$TMP/e.err" )"
-[ -e "$EH7/.hermes/skills/ripwire-router" ] \
+[ -e "$EH7H/skills/ripwire-router" ] \
     && ok "(E7) Hermes skills are ACTIVE after the one-liner, not merely staged" \
     || no "(E7) Hermes was detected but its skills were left staged"
+[ ! -e "$EH7/.hermes" ] \
+    && ok "(E7) the installer honoured HERMES_HOME instead of inventing $HOME/.hermes" \
+    || no "(E7) the installer fell back to $HOME/.hermes — the explicit HERMES_HOME never arrived"
 grep -qi 'Hermes' "$TMP/e.out" \
     && ok "(E7) the run reports the Hermes activation on the receipt line" \
     || no "(E7) the run did not print a Hermes activation receipt"
