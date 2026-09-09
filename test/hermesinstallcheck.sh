@@ -13,21 +13,19 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 SK="$ROOT/skills"
-INSTALL="$ROOT/scripts/install.sh"
 fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -f "$SK/install.sh" ] || { echo "no skills/install.sh"; exit 2; }
-[ -f "$INSTALL" ] || { echo "no scripts/install.sh"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HERMES_HOME="$TMP/hermes-home"; rm -rf "$HERMES_HOME"; mkdir -p "$HERMES_HOME"
 
-# helper: the sorted set of user-facing skill NAMES (contributor-only excluded) shipped in the repo —
-# the flat Agent-Skills-standard set plus the Hermes-native set under skills/hermes/ (both deploy via
-# --hermes; a flat dir of the same name wins and the native one is skipped, mirroring install.sh).
-shipped_names() {
+# helper: skill NAMES shipped in the repo — the flat Agent-Skills-standard set plus the Hermes-native
+# set under skills/hermes/ (both deploy via --hermes; a flat dir of the same name wins and the native
+# one is skipped, mirroring install.sh). $1 selects the set: user (activated by default) or contributor.
+skill_names() {
     for d in "$SK"/ripwire-*/ "$SK"/hermes/*/; do
         [ -d "$d" ] || continue
         name="$( basename "$d" )"
@@ -35,27 +33,17 @@ shipped_names() {
         case "$d" in
             "$SK"/hermes/*) [ -d "$SK/$name" ] && continue ;;
         esac
-        grep -q '^audience: contributor' "$d/SKILL.md" 2>/dev/null && continue
+        if [ "${1:-user}" = "contributor" ]; then
+            grep -q '^audience: contributor' "$d/SKILL.md" 2>/dev/null || continue
+        else
+            grep -q '^audience: contributor' "$d/SKILL.md" 2>/dev/null && continue
+        fi
         echo "$name"
     done | sort -u
 }
 
-# helper: the sorted set of contributor-only skill NAMES (shipped but never activated by default)
-contributor_names() {
-    for d in "$SK"/ripwire-*/ "$SK"/hermes/*/; do
-        [ -d "$d" ] || continue
-        name="$( basename "$d" )"
-        [ -f "$d/SKILL.md" ] || continue
-        case "$d" in
-            "$SK"/hermes/*) [ -d "$SK/$name" ] && continue ;;
-        esac
-        grep -q '^audience: contributor' "$d/SKILL.md" 2>/dev/null || continue
-        echo "$name"
-    done | sort -u
-}
-
-shipped=$( shipped_names | wc -l | tr -d ' ' )
-contributorSkills=$( contributor_names | wc -l | tr -d ' ' )
+shipped=$( skill_names user | wc -l | tr -d ' ' )
+contributorSkills=$( skill_names contributor | wc -l | tr -d ' ' )
 
 # ---- 1) --hermes installs every user-facing shipped skill under ${HERMES_HOME}/skills ----
 bash "$SK/install.sh" --hermes >/dev/null 2>&1
@@ -67,26 +55,13 @@ H_FOUND=$( find -L "$HERMES_HOME/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 
 # ---- 1b) the manifest names EXACTLY the linked user-facing set (no contributor-only, nothing omitted) ----
 MANIFEST="$HERMES_HOME/skills/.ripwire-manifest-v1"
 manifest_set=$( grep '^skill=' "$MANIFEST" 2>/dev/null | sed 's/^skill=//' | sort )
-wanted_set=$( shipped_names )
+wanted_set=$( skill_names user )
 if [ "$manifest_set" != "$wanted_set" ]; then
     no "--hermes manifest set differs from the shipped user-facing set
         (manifest has $(printf '%s\n' "$manifest_set" | wc -l | tr -d ' ') entries, wanted $(printf '%s\n' "$wanted_set" | wc -l | tr -d ' '))"
 else
     ok "--hermes manifest declares exactly the linked user-facing set ($(printf '%s\n' "$manifest_set" | wc -l | tr -d ' ') skills)"
 fi
-
-# ---- 1c) every Hermes-native skill (skills/hermes/*) deploys next to the flat set ----
-for nd in "$SK"/hermes/*/; do
-    [ -d "$nd" ] || continue
-    [ -f "$nd/SKILL.md" ] || continue
-    nname="$( basename "$nd" )"
-    grep -q '^audience: contributor' "$nd/SKILL.md" 2>/dev/null && continue
-    if [ -L "$HERMES_HOME/skills/$nname" ] && [ -f "$HERMES_HOME/skills/$nname/SKILL.md" ]; then
-        ok "--hermes deploys the Hermes-native $nname skill next to the flat set"
-    else
-        no "--hermes did not deploy skills/hermes/$nname (native skill needs a manual cp again)"
-    fi
-done
 
 # ---- 2) --hermes is hermetic: never touches ~/.claude or the cross-agent ~/.agents ----
 FALLBACK_HOME="$TMP/fallback-home"; rm -rf "$FALLBACK_HOME"; mkdir -p "$FALLBACK_HOME"
