@@ -15,6 +15,7 @@
 
 #include "ingest.h"   // rw::kDefaultMaxFileBytes — the canonical crawl size ceiling (--max-file-size)
 #include "version.h"  // configure-generated kRipwireVersion + short build info (--version)
+#include "infra/emit.h" // rw::emitTo + kEmitterName — --version discloses the emitter that compiled in (emit=)
 
 namespace rw
 {
@@ -1085,6 +1086,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               A shell harness carries harness=script: subprocess coverage is unmodelled, so reaches=0\n"
         "                               there is a stated limit, not a measurement (the inverse of script_gates_unmodelled).\n"
         "    --situ[=F1,F2]             situational awareness for a change: blast radius + tests + co-change (default = git diff)\n"
+        "                               Its co-change section is the check for Fowler's SHOTGUN SURGERY: the files this change\n"
+        "                               usually lands in but did not. Backtested on two histories (EVALS.md): a named partner is\n"
+        "                               edited within the next 3 commits in 56%% / 32%% of alarms, against a 1-2%% chance baseline\n"
         "    --handoff                  continuation packet for the NEXT session: <verified> disk truth (branch/sha, changed files+symbols,\n"
         "                               blast radius, tests-to-run) + <heuristic> labeled suggestions (co-change partners, committed notes,\n"
         "                               plan/design doc pointers via a branch+commit-subject query). Empty diff is fine — the packet still\n"
@@ -1349,6 +1353,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               (which checks whether a markdown CLAIM is stale) with comment CONTENT, over a disjoint input —\n"
         "                               neither verb duplicates the other. Pages with limit=N (offset=M); default 40 rows.\n"
         "    --cochange[=FILE]          files that change together in git (hidden coupling; the rows' own legend defines surprising=)\n"
+        "                               = Fowler's SHOTGUN SURGERY in its measurable, historical form: change coupling (Gall 1998,\n"
+        "                               Zimmermann 2005). The static form — callers spread over many files (Lanza & Marinescu\n"
+        "                               2006) — was measured on two corpora and does NOT predict it, so it is not a flag (EVALS.md)\n"
         "    --cochange-recur=K         (with --cochange) report only pairs whose co-change RECURS in K or more of the mined\n"
         "                               window's sub-windows, so a one-off refactor sprint stops reading like an eighteen-month\n"
         "                               structural defect (Clio, ICSE 2011). Every row carries recur= with or without this flag;\n"
@@ -4230,8 +4237,11 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // H) — labelled the same way here rather than left as a bare "git <sha>" a reader could
             // mistake for the tree's current HEAD (that is --doctor's separate at=, which moves the
             // moment you commit without rebuilding; this one does not, until the next build).
-            std::printf( "ripwire %s (%s, %s %s, built_from=%s)\n", kRipwireVersion, kRipwireBuildType,
-                         kRipwireCompilerId, kRipwireCompilerVer, kRipwireGitStamp );
+            // emit= names the formatted-output path this binary compiled in (infra/emit.h; test/versioncheck.sh
+            // #6, and asserted per CI leg). It precedes built_from= on purpose: test/doctorcheck.sh arm (H)
+            // reads built_from= as everything up to the closing paren, so the sha stays the LAST token.
+            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, built_from={})\n", kRipwireVersion, kRipwireBuildType,
+                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, kRipwireGitStamp );
             std::exit( 0 );
         }
 

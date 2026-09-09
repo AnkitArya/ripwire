@@ -284,6 +284,37 @@ already knew about the others, several while fixing one. So the rule is mechanic
   a caller-owned arena.
 - **Symmetric bare scopes** for deterministic RAII teardown.
 
+### Output: `std::print`, feature-tested and disclosed — never a new printf-family site
+
+- **Emit through `rw::emitTo` (`src/infra/emit.h`)**, or a same-shaped wrapper such as `lintPrintOut` /
+  `lintPrintErr` in `src/verbs_lint.h`. That header is the ONE place the emitter is chosen: `std::print`
+  where the standard library defines `__cpp_lib_print`, `std::format` rendered and written with
+  `std::fputs` where it does not. The tree is printf-family by history, not by preference — ~1,500
+  `fprintf`/`printf`/`snprintf` sites, 0 `std::cout` — and it is being converted; **no new printf-family
+  call site** (rule landed 2026-09-08). Do not vendor `fmt`: the standard library has the feature, so a
+  vendored copy is a G3 regression.
+- **Why a feature test and not a bare `#include <print>`.** `<print>` is libstdc++ 14+; on libc++ it exists
+  only at a macOS 14+ deployment target, and libc++ defines the feature macro only when the target admits
+  it (measured 2026-09-08). Testing the macro means every toolchain BUILDS — which is why the choice is
+  DISCLOSED: `--version` prints `emit=std::print` or `emit=std::format+fputs` (`test/versioncheck.sh` #6),
+  every CI and release leg asserts `std::print` (gcc-14 on the ubuntu legs, gcc-toolset-14 on RHEL and the
+  manylinux containers, Xcode 16.2 on macOS), and the `fallback-emitter` job builds the fallback arm with
+  the stock ubuntu g++ 13 on purpose and proves it emits the same bytes. A silent fallback is the failure
+  this whole arrangement exists to make impossible.
+- **A conversion is byte-parity-fenced, not reviewed by eye.** `test/printffmtparitycheck.sh` hashes
+  stdout and stderr per verb against `test/printf_parity.manifest`; a moved byte is a FAIL naming the verb
+  and the stream. The trap it exists for is float rendering — `%g` prints six significant digits, `{}`
+  prints the shortest round-trip (`0.3` versus `0.30000000000000004`) — so a per-specifier swap is never
+  mechanical. Every emitted byte feeds G4, the determinism gate, and the stored captures.
+- **`std::print` throws on a failed write where `fputs` returns EOF.** `emitTo` catches that one
+  `std::system_error` so both arms keep the contract every emitting site always had — a failed write is
+  silent — rather than a `std::terminate` the fallback arm could never produce (§3 "Self-check, don't
+  throw": a recoverable runtime error is a degrade, never a throw that escapes).
+- **Until a string is converted it is a printf FORMAT, not text.** The `--help` table in `src/cli.h` is one:
+  a literal `%` in a help line is a conversion (`% /`, `% o` and `% c` all parse), and the generated
+  `docs/COMMANDS.md` then carries garbage where the number was. Write `%%` there, and treat the regeneration
+  arm (`test/docscommandscheck.sh` arm G) as the fence for that surface.
+
 ### Tests
 
 - **Float comparisons assert a tolerance band, never bit-exactness.** Fast-math and threaded
