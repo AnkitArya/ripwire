@@ -218,6 +218,11 @@ already knew about the others, several while fixing one. So the rule is mechanic
    is not the thing that runs.
 4. **Prefer an arm that has been observed RED.** An arm that has only ever been green has not been
    shown to have a failing state at all.
+5. **When you fix an instance, remove the shape that produced it.** `test/prbudgetcheck.sh`'s Wave-45
+   fix moved its diff into a scratch repo and left `ROOT` rebound to that fixture, so a line reading
+   `( cd "$ROOT" && git checkout -- src/mod4.cpp )` stayed correct while looking exactly like the one
+   that would revert a developer's working tree; two readers later took it for a writer (issue #71).
+   A fix that leaves the shape leaves the next instance free.
 
 ---
 
