@@ -1850,6 +1850,7 @@ ripwire wrap claude      # CLI-first: the CLI call, then `claude mcp add` as the
 ripwire wrap codex       # CLI-first: optional MCP restricted to audit/health verbs in Codex TOML
 ripwire wrap opencode    # CLI-first: the AGENTS.md wiring; its "mcp" stanza offered as the alternative
 ripwire wrap openclaw    # CLI-first: same ~/.agents/skills root Codex uses; no shell hook slot
+ripwire wrap hermes      # CLI-first: hermes mcp add as the warm-index alternative; hook port pending
 ripwire wrap cursor      # MCP:       the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
 ripwire wrap windsurf    # MCP:       that client's stanza
 ripwire wrap gemini      # MCP:       that client's stanza

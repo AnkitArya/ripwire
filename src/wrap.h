@@ -129,7 +129,7 @@ inline constexpr AgentTarget kAgentTargets[] = {
     // but hooks/ripwire-nudge.sh is not ported yet, so hookSlot stays false until that port lands -
     // emitting a --hook line today would print a command the installer honestly refuses.
     { "hermes",   "Hermes",       "AGENTS.md",                   "",
-      "~/.hermes",           "${HERMES_HOME:-~/.hermes}/skills", " --hermes",   false, WrapPrimary::Cli,     McpForm::CliAdd,     "hermes mcp add ripwire --command ",   " --args --mcp\n",    "hermes has hooks:pre_tool_call in config.yaml - same shape as Claude Code's PreToolUse (fail_closed accepted as failClosed) - but ripwire's nudge hook is not ported; skills/install.sh --hermes --hook refuses with exit 2 until it is" },
+      "~/.hermes",           "${HERMES_HOME:-~/.hermes}/skills", " --hermes",   false, WrapPrimary::Cli,     McpForm::CliAdd,     "hermes mcp add ripwire --command ",   " --args --mcp\n",    "hermes exposes hooks:pre_tool_call in config.yaml (PreToolUse-shaped) but ripwire's nudge hook is not ported yet: the hook install line stays off until that port lands" },
     { "aider",    "aider",        "CONVENTIONS.md",              "",
       "",                    "",                                 "",            false, WrapPrimary::RepoMap, McpForm::None,       "",                                    "",                    "" },
 };
