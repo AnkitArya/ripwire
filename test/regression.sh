@@ -200,13 +200,17 @@ if RIPWIRE_BIN="$BIN" bash "$ROOT/test/handoffcheck.sh" >/dev/null 2>&1; then ok
 #     length, which docs/EVALS.md §8 quotes verbatim (owned by a different thread this round).
 if RIPWIRE_BIN="$BIN" bash "$ROOT/test/printffmtparitycheck.sh" >/dev/null 2>&1; then ok "printf/fmt parity gate (test/printffmtparitycheck.sh)"; else no "printf/fmt parity gate (test/printffmtparitycheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/printffmtparitycheck.sh" 2>&1 | grep -i fail | head -8; fi
 
-# Delivery contract is kept separate because it does not need the binary under test: it drives the
-# curl installer with a sealed local release fixture and inspects the release workflow itself.
-if bash "$ROOT/test/releaseinstallcheck.sh" >/dev/null 2>&1; then
+# Delivery contract is kept separate because it drives the curl installer with a sealed local release
+# fixture and inspects the release workflow itself. It USED to need no binary under test; since it gained
+# the installer-isolation helper it nests skillinstallcheck, which does. RIPWIRE_BIN is therefore passed
+# explicitly: without it the nested gate silently runs ./build/ripwire even under
+# `RIPWIRE_BIN=asan/ripwire test/regression.sh`, i.e. it would test a different binary than the one
+# named and report a pass for it.
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/releaseinstallcheck.sh" >/dev/null 2>&1; then
     ok "release install gate (test/releaseinstallcheck.sh)"
 else
     no "release install gate (test/releaseinstallcheck.sh failed)"
-    bash "$ROOT/test/releaseinstallcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
+    RIPWIRE_BIN="$BIN" bash "$ROOT/test/releaseinstallcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
 # Source-build delivery is a separate contract from release archives: the binary, skills and hooks
