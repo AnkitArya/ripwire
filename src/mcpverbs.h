@@ -2149,7 +2149,7 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     std::fprintf( mem, "%s%s. %s%s%s%s%s%s-->", kImpactLegendOpen, kPageRaiseCapClause, kImpactImportTierLegend,
                   kTestedRowLegend, kImpactTestedPartitionLegend,   // A6
                   kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
-                  graphCountDisclosure().c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
+                  graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,
     // same meaning as the CLI --impact — the two surfaces must not diverge on an honesty marker.
@@ -2413,7 +2413,7 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
                        "%s%s-->%s", kUsesLegendOpen,
                   capLegendClause( computePageDisclosure( upageRows, sites.size(), upw.end,
                                                           page.limit, page.offset, usDiscloseCap ).active ),
-                  graphCountDisclosure().c_str(),
+                  graphCountDisclosure( ix.g.unindexedFiles > 0 ).c_str(),
                   rootRelPathsLegend( ing.realPaths.empty() ) );   // R-E fix: the CLI --uses legend carries the
                                                                    // identical clause — floormarkcheck (4) pins
                                                                    // the two disclosure tails byte-identical.
@@ -2490,7 +2490,7 @@ inline std::string pathText( const std::string& root, const std::string& from, c
     // verb has no legend of its own either, and the two dialects must not differ on what they explain.
     // H5: the same brief floor legend + marker the CLI --path prints (verbs_navigate.h) — one wording, two transports.
     std::fprintf( mem, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                       "graph holds none. %s-->%s", kGraphCountFloorBriefLegend, rootRelPathsLegend( ptSingleRoot ) );
+                       "graph holds none. %s-->%s", graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
     std::fprintf( mem, "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s%s",
                   ex( from ).c_str(), ex( to ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                   srcDefs.size(), dstDefs.size(),
@@ -2707,7 +2707,8 @@ inline constexpr char kConnectHeader[] =
 // BOUNDED rather than measured — a wide start-tag with every counter at five digits and truncated="paths"
 // present, plus the 10-byte close. Over-covering slightly is the safe direction: an estimate that
 // UNDER-reports is the defect being fixed here, one that over-reports merely trims a little earlier.
-inline constexpr std::size_t kConnectRootBytes = 260;   // H5/M15: + counts_floor="1" (17 B) + graph_ambiguous=/graph_unresolved= (≤ 59 B); A6: + hub_floor= (≤ 18 B).
+inline constexpr std::size_t kConnectRootBytes = 285;   // H5/M15: + counts_floor="1" (17 B) + graph_ambiguous=/graph_unresolved= (≤ 59 B); A6: + hub_floor= (≤ 18 B);
+                                                        // #66: + graph_unindexed= (≤ 25 B at five digits) — this bound may only ever be raised, per the note below.
                                                         // 200 was already short of the widest start tag it claims to bound (that spelling measures ~228 B
                                                         // before hub_floor=), and short is the ONE direction this constant may not be — re-derived by
                                                         // counting the wide spelling attribute by attribute, then rounded up for the next attribute's margin.
@@ -2957,7 +2958,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         estTokens = connectEstTokens( payload.size(), connectExtraBytes + std::strlen( connectOverAttr ) );
     }
-    std::fprintf( out, "%s%s", kConnectHeader, rootRelPathsLegend( !rootArg.empty() ) );
+    std::fprintf( out, "%s%s%s", kConnectHeader, graphUnindexedLegendComment( g.unindexedFiles > 0 ).c_str(), rootRelPathsLegend( !rootArg.empty() ) );
     std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\" hub_floor=\"%u\"%s%s%s%s%s>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens, hubFloor,
                   connectCeiling, connectOverAttr,

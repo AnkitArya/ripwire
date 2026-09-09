@@ -615,7 +615,7 @@ inline std::string prBudgetTail( std::size_t changedFiles, std::uint32_t skipped
 // this comment IS ~91% of that document. Same bytes in the same order; they are simply measured before
 // they are written, the way every other priced root measures itself (serialize.h §H7). File scope, beside
 // kPrEmptyDiffBody, so the emitter reads as the decisions it makes rather than as the prose it ships.
-inline std::string prLegendText( const std::string& baseEscaped )
+inline std::string prLegendText( const std::string& baseEscaped, bool hasUnindexed )
 {
     return std::string(
                  "<!-- ripwire pr-context: no-LLM review-evidence bundle per changed file — defined symbols, their callers, blast radius (transitive dependents), affected tests, co-change partners not in the diff, and owners. "
@@ -642,7 +642,7 @@ inline std::string prLegendText( const std::string& baseEscaped )
                  // from the in-edge CSR --callers reads, and <impact dependents=> is the same transitive reach
                  // --impact reports, so the same floor applies to hundreds of attributes in this one document.
                  // The shared constants, never a pr-context wording — that is the §B4 echo-site rule.
-                 + rw::graphCountDisclosure() + "-->";
+                 + rw::graphCountDisclosure( hasUnindexed ) + "-->";
 }
 
 inline constexpr std::string_view kPrEmptyDiffBody =
@@ -917,7 +917,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     }
     std::sort( changed.begin(), changed.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
 
-    const std::string legendText = prLegendText( escBase );
+    const std::string legendText = prLegendText( escBase, g.unindexedFiles > 0 );
     std::fwrite( legendText.data(), 1, legendText.size(), out );
 
     const std::string anchorNoteText = prAnchorNoteText( anchorAttr );

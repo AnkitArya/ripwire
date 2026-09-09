@@ -1127,8 +1127,8 @@ spot:
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="6" root="." hop_tested="0" hop_untested="6" counts_floor="1">
 <s t="fn" n="runEval" p="src/eval.h:169"/>
-<s t="fn" n="rankGraph" p="src/graph.h:2970"/>
-<s t="fn" n="anchoredLexicalRank" p="src/graph.h:3519"/>
+<s t="fn" n="rankGraph" p="src/graph.h:2984"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:3533"/>
 <s t="fn" n="churnRankedGraph" p="src/main.cpp:994"/>
 <s t="fn" n="runDefaultMap" p="src/main.cpp:1119"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:1104"/>
@@ -1797,9 +1797,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>561 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
+<summary><b>562 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
 
-`test/regression.sh` names **561 gate scripts** and is the authoritative list;
+`test/regression.sh` names **562 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a

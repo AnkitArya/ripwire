@@ -28,9 +28,11 @@ namespace
 // Named default declarations and local identifier exports use the same table. Anonymous expressions
 // have no symbol identity here and remain unresolved rather than borrowing a same-spelled function.
 // Type-only imports remain a known gap (recorded with an empty importedName, and refused, never sprayed).
+// #62: forwards to preprocdead.h's shared spelling (which adopted this function's null guard for the
+// purpose) rather than holding a third copy of the same strcmp - slice.h's sliceKindIs was the second.
 inline bool jsNodeIs( TSNode node, const char* kind )
 {
-    return !ts_node_is_null( node ) && std::strcmp( ts_node_type( node ), kind ) == 0;
+    return rw::preprocNodeKindIs( node, kind );
 }
 
 inline bool jsHasToken( TSNode node, const char* token )
