@@ -106,6 +106,13 @@ in the same commit that adds the gate**.
 Run your gates in the foreground. A suite left running in the background at the end of a work
 session is a suite nobody read.
 
+Gates share one checkout. **Never write into it**, not even for a moment: every stamped verb reads
+`git status --porcelain` from any crawl root inside the checkout for its `at="…+dirty"` bit, so a
+transient untracked file flips every determinism arm running beside you under `-j N`. Work in a
+`mktemp` dir; if a copy genuinely has to sit beside a real gate, give it a name `.gitignore` hides
+(`.gateprobe.*`). `test/pargates.py` samples that command while the suite runs and fails the run
+naming the gate in flight. It is a sampler, so a clean run there is "none found", never "none exists".
+
 ### The formatting gate — and the rule for when it disagrees with you
 
 ```bash
@@ -211,6 +218,11 @@ already knew about the others, several while fixing one. So the rule is mechanic
    is not the thing that runs.
 4. **Prefer an arm that has been observed RED.** An arm that has only ever been green has not been
    shown to have a failing state at all.
+5. **When you fix an instance, remove the shape that produced it.** `test/prbudgetcheck.sh`'s Wave-45
+   fix moved its diff into a scratch repo and left `ROOT` rebound to that fixture, so a line reading
+   `( cd "$ROOT" && git checkout -- src/mod4.cpp )` stayed correct while looking exactly like the one
+   that would revert a developer's working tree; two readers later took it for a writer (issue #71).
+   A fix that leaves the shape leaves the next instance free.
 
 ---
 

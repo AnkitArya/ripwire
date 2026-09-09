@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 root = os.path.abspath(sys.argv[1])
@@ -382,6 +383,8 @@ def run(g):
         limit = int(round(DEFAULT_TIMEOUT_SEC * budget_scale))
         scaled = "" if budget_scale == 1.0 else f", default {DEFAULT_TIMEOUT_SEC}s x --budget-scale {budget_scale:g}"
     t0 = time.time()
+    with running_lock:
+        running.add(g)          # the tree tripwire names whoever is in flight when it sees new dirt
     try:
         p = subprocess.run(
             ["bash", os.path.join(testdir, g)],
@@ -395,6 +398,9 @@ def run(g):
         # failing arm used to report ONLY the word TIMEOUT.
         partial = (e.stdout or b"").decode("utf-8", "replace") if isinstance(e.stdout, (bytes, bytearray)) else (e.stdout or "")
         rc, out = 124, partial + f"\nTIMEOUT after {limit}s (declared budget={limit}s{scaled})"
+    finally:
+        with running_lock:
+            running.discard(g)
     # A gate that SKIPS is not a gate that PASSED. argvdiffcheck skips without a RIPWIRE_BASE
     # reference binary, and reporting that as a pass is exactly the green-while-inert failure this
     # suite exists to catch elsewhere (the CI/NDEBUG blindness is the same family).
@@ -434,9 +440,78 @@ def _bin_fingerprint():
         return None
 
 
+# --- shared-tree tripwire ----------------------------------------------------------------------
+# The sibling of the binary tripwire above, for the OTHER thing every gate shares: the checkout. A
+# gate that writes a transient file anywhere under the repo root -- a probe copy beside the script
+# it copies, an appended function it then `git checkout`s away -- makes `git status --porcelain`
+# non-empty for as long as the file exists, and every stamped verb (--for, --pr-context,
+# --edit-check, --slice, --situ, --hotspots, --doctor, ...) reads exactly that command, from ANY
+# crawl root inside the checkout, for the `+dirty` half of its at="<sha>[+dirty]" anchor
+# (src/gitstamp.h stampAt). CI run 34298150602, macOS plain shard 2/2: tokenbudgetcheck's `--for`
+# determinism arm got est_tokens 3949 then 3947 -- the six bytes of "+dirty" at 2.5 B/tok -- while
+# gateexitcheck, three worker slots away, had test/gateexitfix/.gateprobe.*.sh on disk. The red
+# named an innocent gate on an innocent tree, and the issue thread named a third gate that had
+# never written outside its own mktemp at all.
+#
+# So: baseline `git status` before the run, sample it while the run is in flight, and report every
+# NEW line together with the gates that were running when it was seen. This is a SAMPLER (every
+# PARGATES_DIRT_POLL_SEC, default 0.25 s): a window shorter than the interval can be missed, so a
+# clean report is "none found", never "none exists" -- the floor rule the binary applies to its own
+# counts. A hit FAILS the run: a writer is a defect whether or not a determinism arm happened to be
+# reading in that window, and the same suite would only flake somewhere else next time.
+# `--no-optional-locks` keeps the sampler from ever taking the index lock a gate might need.
+DIRT_POLL_SEC = float(os.environ.get("PARGATES_DIRT_POLL_SEC", "0.25"))
+
+
+def _tree_dirt():
+    """The set of `git status --porcelain` lines for the shared checkout, or None when git cannot
+    answer (no git, not a repository, a lock held elsewhere) -- a skipped sample, never a false clean."""
+    try:
+        p = subprocess.run(["git", "--no-optional-locks", "-C", root, "status", "--porcelain", "--untracked-files=all"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if p.returncode != 0:
+        return None
+    return set(p.stdout.decode("utf-8", "replace").splitlines())
+
+
+running = set()                 # gates in flight right now; run() keeps it under running_lock
+running_lock = threading.Lock()
+dirt_baseline = _tree_dirt()    # None: git cannot see this root -- the tripwire is disarmed, and says so
+dirt_seen = {}                  # status line -> [first_t, last_t, samples, gates running when seen]
+dirt_stop = threading.Event()
+
+
+def _dirt_sample():
+    now = _tree_dirt()
+    if now is None:
+        return
+    new = now - dirt_baseline
+    if not new:
+        return
+    with running_lock:
+        snap = sorted(running)
+    t = round(time.time() - t0, 1)
+    for ln in new:
+        e = dirt_seen.setdefault(ln, [t, t, 0, set()])
+        e[1] = t
+        e[2] += 1
+        e[3].update(snap)
+
+
+def _dirt_watch():
+    while not dirt_stop.wait(DIRT_POLL_SEC):
+        _dirt_sample()
+
+
 bin_before = _bin_fingerprint()
 
 t0 = time.time()
+dirt_thread = None
+if dirt_baseline is not None:
+    dirt_thread = threading.Thread(target=_dirt_watch, name="tree-dirt-tripwire", daemon=True)
+    dirt_thread.start()
 results = []
 with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
     for r in ex.map(run, parallel_gates):
@@ -449,6 +524,10 @@ for g in exclusive_gates:
     sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
     sys.stderr.flush()
 sys.stderr.write("\n")
+if dirt_thread is not None:
+    dirt_stop.set()
+    dirt_thread.join()
+    _dirt_sample()          # one last look: a file a gate LEFT BEHIND is a hit with no gate in flight
 
 bin_after = _bin_fingerprint()
 bin_moved = bin_before != bin_after
@@ -485,13 +564,25 @@ for g, rc, dt, _out, _sk in results:
         tripwire.append((g, prev, dt))
 
 print(f"gates={len(results)} pass={len(results)-len(fails)-len(skips)} "
-      f"skip={len(skips)} fail={len(fails)} wall={round(time.time()-t0,1)}s jobs={jobs}")
+      f"skip={len(skips)} fail={len(fails)} wall={round(time.time()-t0,1)}s jobs={jobs}"
+      + (f" tree_writes={len(dirt_seen)}" if dirt_baseline is not None else " tree_writes=unwatched"))
 if bin_moved:
     print(f"\n*** THE BINARY UNDER TEST CHANGED WHILE THE SUITE RAN: {binp}")
     print(f"***   before={bin_before}  after={bin_after}")
     print("***   Some gate rebuilt it in place. Every gate that ran concurrently saw it missing")
     print("***   (rc=2) or busy (exit 126 / 'Permission denied'), so THOSE FAILURES ARE NOT REAL.")
     print("***   Find the gate that writes to the shared build tree and fix that first.")
+if dirt_baseline is None:
+    print("\ntree tripwire: DISARMED -- git cannot report status for this root, so a gate writing into the shared checkout goes unseen here")
+if dirt_seen:
+    print(f"\n*** A GATE WROTE INTO THE SHARED CHECKOUT WHILE THE SUITE RAN: {root}")
+    print(f"***   sampled every {DIRT_POLL_SEC:g}s -- a shorter window can be missed, so this list is a floor, not a total:")
+    for ln, (t_first, t_last, n, gs) in sorted(dirt_seen.items(), key=lambda kv: kv[1][0]):
+        who = ", ".join(sorted(gs)) if gs else "(no gate in flight -- left behind after the run)"
+        print(f"***   {ln}  seen {n}x, T+{t_first}s..T+{t_last}s; running then: {who}")
+    print("***   Every stamped verb reads `git status --porcelain` for its at=\"...+dirty\" bit from ANY crawl root")
+    print("***   inside this checkout, so a determinism arm that ran in that window can red with the tree innocent.")
+    print("***   Fix the writer first (work on a copy, or a gitignored name); only then triage the arms above.")
 if skips:
     print("\nSKIPPED (ran, but proved nothing — not counted as passing):")
     for g, rc, dt, out, _ in skips:
@@ -510,10 +601,12 @@ if fails:
     for g, rc, dt, report, _sk in fails:
         print(f"\n=== {g} (rc={rc}, {dt}s) ===")
         print("\n".join("    " + ln for ln in report.splitlines()))
+elif dirt_seen:
+    print("\nNO GATE FAILED, BUT THE SUITE IS NOT CLEAN -- a gate wrote into the shared checkout (see the tree tripwire above)")
 else:
     print("\nALL PASS")
 
 if jsonout:
     with open(jsonout, "w") as fh:
         json.dump({g: {"rc": rc, "sec": dt, "skipped": sk} for g, rc, dt, _, sk in results}, fh, indent=1)
-sys.exit(1 if fails else 0)
+sys.exit(1 if fails or dirt_seen else 0)
