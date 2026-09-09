@@ -129,8 +129,8 @@ the same commit — `test/manifestcheck.sh` fails otherwise.
 
 Allman braces, braces on every control-statement body (no braceless `if( x ) f();` — inline
 `{ … }` inside one-line lambdas), spaces inside parens (`f( x )`), ~160–200 column wraps, index-vs-count naming,
-structured-binding returns, tolerance-band float tests. Output goes through `std::format` (the `lintPrintOut`
-shim shape in `src/verbs_lint.h`) now and `std::print` once every CI leg has libstdc++ 14 — never a new
-printf-family call site, and a not-yet-converted help/legend string is still a printf FORMAT, so a literal `%`
-in it must be `%%`. The full rules — with the reasoning — are in
+structured-binding returns, tolerance-band float tests. Output goes through `rw::emitTo` (`src/infra/emit.h`:
+`std::print`, falling back to `std::format`+`fputs` by feature test, and `--version` says which as `emit=`) —
+never a new printf-family call site; a not-yet-converted help/legend string is still a printf FORMAT, so a
+literal `%` in it must be `%%`. The full rules — with the reasoning — are in
 **`CONTRIBUTING.md` §3**. Read that before writing C++ here; it is self-contained.

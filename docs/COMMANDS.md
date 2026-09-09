@@ -952,7 +952,7 @@ $ ./build/ripwire . --impact=rankGraphTeleport
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--uses`, `--metrics`, `--safe-delete`, `--slice-flow`, `--format`, `--legend`, `--json`, `--limit`
+**Shaped by:** `--uses`, `--metrics`, `--deps`, `--safe-delete`, `--slice-flow`, `--format`, `--legend`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -1733,7 +1733,7 @@ $ ./build/ripwire . --metrics --top-k=10
 
 **Answers:** file->file dependency graph (god-files, cycles — validated);
 
-its nccd (Lakos) is a design heuristic, not independently outcome-validated. instab= (Martin's I=Ce/(Ca+Ce)) counts project includes ONLY -- system/third-party headers are excluded from Ce, matching stabledeps' gap= so gap == consumer's instab - provider's instab always. <health>'s ccd/acd/nccd/shape are computed over dep_files= (files whose language has #include/import syntax) not files= (the raw corpus, incl. md/json/toml/yaml, which can't participate in the graph) -- --arch's propagation_cost uses the same N. <health dep_langs=> names that language set, which is what makes a dep_files=/ccd/ acd/nccd number comparable across builds: sh, rb, lua and ex joined it at parser version 81 and every one of those numbers moved on a corpus holding them
+its nccd (Lakos) is a design heuristic, not independently outcome-validated. instab= (Martin's I=Ce/(Ca+Ce)) counts project includes ONLY -- system/third-party headers are excluded from Ce, matching stabledeps' gap= so gap == consumer's instab - provider's instab always. <health>'s ccd/acd/nccd/shape are computed over dep_files= (files whose language has #include/import syntax) not files= (the raw corpus, incl. md/json/toml/yaml, which can't participate in the graph) -- --arch's propagation_cost uses the same N. <health dep_langs=> names that language set, which is what makes a dep_files=/ccd/ acd/nccd number comparable across builds: sh, rb, lua and ex joined it at parser version 81 and every one of those numbers moved on a corpus holding them. STRUCTURE vs USE (parser version 83): a LAZY edge -- every directive of the pair written inside a closure (Ruby method/lambda/block, TS/JS function body) or a Ruby autoload -- is a use, not a load-time dependency: it is in --impact's importer tier (lazy=1) and in the row's inc t= list, NOT in afferent/instab/transitive/godfiles/ stabledeps/cycles/ccd/acd/nccd/shape. <health lazy_edges=> counts the pairs left out, a row's lazy_edges= its own; both absent when 0
 
 **Try it**
 

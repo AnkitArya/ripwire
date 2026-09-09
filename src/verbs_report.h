@@ -351,7 +351,8 @@ std::optional<int> runArchViews( const MainDispatch& d )
     // first — the "why pull in 100 headers for something simple" detector.
     if( cfg.deps )
     {
-        const auto      adj    = resolveIncludeAdj( ing );   // the file→file dependency graph (forward = includes)
+        const StructuralIncludeAdj sa = resolveStructuralIncludeAdj( ing );   // the LOAD-TIME file→file graph (forward = includes);
+        const auto&     adj    = sa.adj;                     //   lazy pairs are out of it and counted (lazy_edges=), see graph.h
         const auto      cycles = sccCycles( adj );           // Lakos cardinal sin: cyclic physical deps
         const DepHealth h      = dependencyHealth( adj );    // per-file transitive cone (unrestricted BFS)
         // §P9.4: <health>'s ccd/acd/nccd are the RESTRICTED (dependency-capable-only) numbers — recomputed
@@ -368,7 +369,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
                 }
             }
         }
-        packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, cycles, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, cfg.pageLimit, cfg.pageOffset, avRootArg );
+        packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, cycles, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, sa.lazyEdgesByFile, sa.lazyEdges, cfg.pageLimit, cfg.pageOffset, avRootArg );
         return 0;
     }
 
@@ -2207,7 +2208,7 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
                  "shown=/capped= describe the member list printed here: this listing is fixed at the 5 top-ranked members and is NOT "
                  "widened by limit=/offset= (those page the MODULE rows). capped=1 means members were dropped; drill= names the verb "
                  "that pages the full member list of one module. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
-                 "%s%s-->%s", rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cmSingleRoot ) );
+                 "%s%s-->%s", rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cmSingleRoot ) );
     // §P11.6 drill=: the id= values below were the only identifiers this tool emitted that no verb took
     // back. The follow-up verb is named ON THE ROOT ELEMENT rather than in the doc comment, because an XML
     // comment may not contain a double hyphen (G4) and its entity escapes are NOT expanded — a caller would
@@ -2366,7 +2367,7 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
                  "other modules. size= is the module's TRUE member count; shown=/capped= are this page. partition= is the FULL label "
                  "space (every id 0..partition-1, incl. isolated singletons) — the range the id= argument ranges over; modules= counts "
                  "the NON-isolated communities (size>=2), the SAME predicate the communities-listing verb's modules= uses, so parent "
-                 "and child agree. %s%s-->%s", rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cdSingleRoot ) );
+                 "and child agree. %s%s-->%s", rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cdSingleRoot ) );
     std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s%s%s>",
                  want, std::size_t( mem.size() ), ex( presentation.directory[ want ] ).c_str(), ex( presentation.label[ want ] ).c_str(),
                  peers.size(), shownBridges, unsigned( shownBridges < peers.size() ), K, modulesNonIsolated,
@@ -2595,7 +2596,7 @@ std::optional<int> runZoom( const MainDispatch& d )
                      "levels_shown= is how many of the levels= this document prints from the top (default 2; the zoom-levels flag sets it, 0 = all): a module AT the cut "
                      "carries children= (its child modules, none printed) instead of nesting. The top-level module rows are a WINDOW (shown=/capped=/total=/next_offset=, "
                      "default 40 largest; limit=/offset= page it) and next= pastes the next page. %s%s-->",
-                     rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                     rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // §P15/§P16: top_modules= is a real, deterministically-ordered row list (size desc, id asc — the same
         // rule --communities' module listing uses) that used to print EVERY top module unconditionally, so a
         // repo with hundreds of top modules had no way to page it. --limit/--offset now window it like --uses
@@ -2796,7 +2797,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // situ.h's kTestGateLegend and flipimpact.h's writeFlipHeader). Each legend was locally honest,
         // which is precisely why a reader comparing two of the numbers is misled.
         std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). %s%s-->%s",
-                     rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( stSingleRoot ) );
+                     rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( stSingleRoot ) );
         // P2.1: two nested caps, neither previously marked — at most 20 seam PAIRS, and at most 5 example
         // EDGES inside each. Each <seam> gains shown= alongside its true untested= count.
         //

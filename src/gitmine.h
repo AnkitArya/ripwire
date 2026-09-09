@@ -2345,7 +2345,10 @@ inline const FileOwnership* ownershipForFile( const std::vector<FileOwnership>& 
 class StaticIncludeCoupling
 {
 public:
-    explicit StaticIncludeCoupling( const IngestResult& ing ) : files_( ing.files ), adj_( resolveIncludeAdj( ing ) )
+    // The FULL graph, lazy pairs included (buildPreciseIncludeAdj, not resolveIncludeAdj): the question here is
+    // "does a static reference explain this co-change?", and a `User.find` inside a method is such a reference.
+    // resolveIncludeAdj is the load-time STRUCTURE and leaves those out (graph.h::resolveStructuralIncludeAdj).
+    explicit StaticIncludeCoupling( const IngestResult& ing ) : files_( ing.files ), adj_( buildPreciseIncludeAdj( ing, /*dedup=*/false ) )
     {
         for( const Include& inc : ing.includes )
         { // §P9.1 fallback index

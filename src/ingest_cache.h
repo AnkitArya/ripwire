@@ -116,7 +116,14 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 17;           // 17: Include gains `bool isSymbolic` + `u32 byte` (Ruby constant
+constexpr std::uint32_t kCacheVersion = 18;           // 18: #62 — call refs inside a preprocessor-DECIDED-dead region
+                                                      //    (`#if 0`, the `#else` of `#if 1`) are no longer captured. The
+                                                      //    record SHAPE is unchanged, but a v17 blob holds refs this build
+                                                      //    would not produce, and replaying them warm would resurrect the
+                                                      //    over-count on exactly the corpora most likely to be cached →
+                                                      //    reject v17 blobs. (A CONTENT-only bump, the 38/39 precedent's
+                                                      //    mirror image: shape-stable but semantically stale.)
+                                                      // 17: Include gains `bool isSymbolic` + `u32 byte` (Ruby constant
                                                       //    directives, parser version 82) and the per-file record gains a
                                                       //    ConstOpen family (Ruby class/module opens, model.h) after
                                                       //    routeUses — a FORMAT change → reject v16 blobs.
@@ -196,7 +203,14 @@ constexpr std::uint32_t kCacheVersion = 17;           // 17: Include gains `bool
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 83;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 84;           // bump on any grammar/.scm/extraction change
+                                                      // 84 = 2026-09-08 (test/rubyrecvcheck.sh): a Ruby constant
+                                                      //    RECEIVER (`User.find`, `App::Mailer.deliver`) is a
+                                                      //    symbolic directive, one per (file, innermost open,
+                                                      //    written name), lazy inside a closure; the Ruby walk
+                                                      //    descends every node. Record shape unchanged (format 17).
+                                                      //    Renumbered from 83 on merge: main had already spent 83
+                                                      //    on the JS/TS default-import facts below.
                                                       // 83 = 2026-09-08 (test/tsimportprecisecheck.sh): JS/TS
                                                       //    DEFAULT imports and local default-export facts —
                                                       //    `import save from './storage.js'` now resolves by the

@@ -659,7 +659,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // splices. It is load-bearing HERE more than anywhere: callers="1" on a symbol with an unmodelled second
     // caller is the exact shape §H4 measured, and this legend's own "the tree as it stands" paragraph reads
     // as if the caller SET were complete.
-    out += graphCountDisclosure();
+    out += graphCountDisclosure( g.unindexedFiles > 0 );
     out += "-->";
     // §B14 — composed on std::string, NOT snprintf'd into a fixed buffer. `ex()` has already escaped the name
     // and the path, so a truncating snprintf here would cut the ESCAPED form: mid-entity, mid-attribute-name or

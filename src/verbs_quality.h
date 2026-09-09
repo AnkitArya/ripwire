@@ -1889,7 +1889,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "config-warnings= counts two DISCLOSED .ripwire_config problems, each also written to stderr — an "
                      "unrecognized key, and a register_macros= name matching no indexed symbol — never gating, present "
                      "only when non-zero. "
-                     "Graph evidence is local to the indexed tree; verify before deleting. %s-->", rw::kGraphCountFloorBriefLegend );
+                     "Graph evidence is local to the indexed tree; verify before deleting. %s-->", rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str() );
         // §P15/§P16: candidates is already deterministically sorted (path asc, line asc, name asc) and used to
         // print every candidate unconditionally — completeness was the whole contract, matching --uses' shape,
         // so it pages the same way: no historic display cap, discloseCap=false (un-paginated tag byte-identical).

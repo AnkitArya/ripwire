@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 561 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 563 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -310,10 +310,36 @@ ripwire 0, GitNexus **8/48** (an ambiguity gate that fires on two structural pat
 model — a C/C++ declaration/definition pair, and a directory whose name equals the symbol's).
 Blast-radius calls returning an empty radius for a symbol with real callers: ripwire 0, GitNexus
 **1**, and that one is labelled low-risk and epistemically exact, which is a wrong answer wearing a
-correctness label. Malformed output as consumed: ripwire 0 (48/48 clean under `xmllint --noout`),
+correctness label. **That ripwire 0 is a result of these 48 questions, not a property of the tool —
+see the scoping note below, added after an outside report showed the sentence being read as the
+latter.** Malformed output as consumed: ripwire 0 (48/48 clean under `xmllint --noout`),
 GitNexus **7/48 through a pipe** — its content-bearing query truncates at about 64 KB mid-string and
 emits invalid JSON, while the same command redirected to a file is complete and valid. **The
 published numbers above use the file-redirected form, which is the configuration favourable to it.**
+
+**Scope of ripwire's zero above, corrected 2026-09-08 (issue #63).** The 0 is an accurate record of
+what these 48 answers did. It is not evidence that ripwire cannot return an empty radius, and the
+sentence as originally written invited exactly that reading — a reporter cited it, correctly, as the
+claim their finding contradicted. [#63](https://github.com/redhat-et/ripwire/issues/63)
+(@mariadb-KyleHutchinson) found `--impact`/`--callers` answering `reaches="0"` / `count="0"` for a C++
+method selected through the header that *declares* it, on `mariadb-columnstore-engine` at
+`db1594e12` — a genuine empty radius for a symbol with seven real callers, and the failure class this
+row counts.
+
+**This sweep could not have found it, and that is the honest reason it reported 0.** Of the three
+corpora, `django` is Python and `webpack` is JavaScript: neither language has a separate declaration
+to select, so the construct does not exist in them. The only C++ corpus is this repository, whose
+`src/` holds 130 headers carrying 2,926 `inline` definitions against 5 `.cpp` files — the
+declaration-in-header / definition-in-`.cpp` split the failure requires is essentially absent here.
+A header-heavy project benchmarking itself did not exercise the standard C++ layout, which is the
+kind of blind spot a corpus list should be read for.
+
+The defect is fixed (the `file:name` selector now follows a bodyless declaration through to the
+same-`(scope, name)` definitions) and gated by `test/blindspotcheck.sh` arm (C). The measurement
+above is left exactly as measured; this paragraph is the scope it should always have carried. The
+residual case is disclosed rather than papered over: a pure-virtual base method whose name is defined
+only in its overrides still reports zero reach, because the overrides are a different scope and
+answering with them would be a dynamic-dispatch claim this resolver cannot make.
 
 **What GitNexus does better, stated plainly.**
 
@@ -5553,7 +5579,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **561 gate scripts**, all of which exist on disk.
+naming **563 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -6465,7 +6491,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 561. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 563. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a

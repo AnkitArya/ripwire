@@ -95,6 +95,15 @@ struct Graph
                                             // full-oracle precision on astropy). serialize: lpin="K" / locality_pinned=N,
                                             // both absent when 0. NOT folded into ambOut: a split nothing decided and a
                                             // pin a prior decided are different facts (docs/EVALS.md "Phase 4").
+    // #66 (2026-09-08, @snrmwg): how many files the crawl could not index AT ALL — the map header's
+    // `unindexed=` roll-up, summed to files. THE POINT IS THE ZERO: a verb answering count="0" off this
+    // graph cannot otherwise be told apart from a symbol with genuinely no callers, and the reporter
+    // measured 114 of 172 exported functions answering "0" on a tree whose callers all lived in .astro.
+    // A whole-corpus GAUGE in the same family as ambOut/unresolvedOut, read the same way and folded by the
+    // same code path (graphlegend.h graphGaugeAttrXml) — deliberately NOT a per-answer claim that these
+    // files call THIS symbol, which nothing in the pipeline can support. Asset extensions never enter it
+    // (ingest.h's withheld list), so a .png is not disclosed as a language ripwire failed to read.
+    std::size_t                unindexedFiles = 0;
     std::size_t                externalCalls = 0;   // Phase 5 (docs/EVALS.md "Phase 5"): call sites the external-name
                                                      // VETO refused — a bare name or receiver provably bound OUTSIDE the
                                                      // indexed tree (a builtin/stdlib name with no in-repo evidence, an
@@ -1268,6 +1277,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     g.locPinOut.assign( N, 0u );   // counted in the resolve loop: calls the S6-C locality tie-break alone pinned to one def
     g.unresolvedOut.assign( N, 0u );   // counted in the resolve loop: calls whose in-repo defs were all lang-filtered
     if( scip ) { g.scipDocsSeen = scip->documentsSeen; g.scipEdgesPinned = scip->edgesPinned; }
+    // #66: carry the crawl's own unindexed-extension roll-up onto the graph, so the verbs that answer off
+    // this CSR can disclose the same gap the map header already prints. Summed HERE, from the identical
+    // vector the header reads (ing.crawlSkips.unindexedExts), because a second traversal elsewhere is
+    // exactly the two-derivations-of-one-number defect M15 fixed for the gauge pair.
+    for( const UnindexedExt& ue : ing.crawlSkips.unindexedExts ) { g.unindexedFiles += ue.files; }
 
     // S6-C canonical ids: `path::scope::name` per symbol (bare name when no scope). Computed once here so the
     // resolution locality tie-break (below) and serialize's `id=` attribute share one definition. Deterministic.
@@ -3665,6 +3679,81 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
 // unlike --around's single-target ego-graph. A bare "name" (no colon) is BYTE-IDENTICAL to the existing
 // resolveAllByName( ing, name ) — every symbol with that name, across every file — so this is purely
 // additive: no existing unqualified query changes behavior.
+// #63 (2026-09-08, @mariadb-KyleHutchinson) — DECL-TO-DEF FOLLOW-THROUGH.
+//
+// A C++ method selected through the HEADER that declares it resolved to the declaration nodes alone.
+// Those carry no in-edges (buildGraph's decl/def collapse, ~350 lines up, makes the BODIED defs the only
+// resolution targets for a name), so every verb reading the CSR off this selection answered count="0" /
+// reaches="0" — for a symbol with seven real callers. The header is the file a signature-changing diff
+// actually touches, so that zero read as "safe to change" at exactly the moment it was not.
+//
+// The data was never missing and the selector was never ambiguous: `Scope::name` and the bare name both
+// answered correctly on the same corpus, because both select the decls AND the defs. Only the file: tier
+// narrows to one file, and a header holds only decls. So the fix is to widen the SELECTION to the
+// definitions the declaration stands for — not to disclose a blind spot, because there is none.
+//
+// THE NARROW RULE, and why each clause is load-bearing:
+//   * Only when the file tier actually narrowed (`!file.empty()`) — a bare name already unions both.
+//   * Only when EVERY selected symbol is bodyless. One bodied def in the set means the selector already
+//     found the implementation and nothing needs widening.
+//   * Targets must match on (scope, name), never on name alone. Name alone would turn `Foo.h:size` into
+//     every free `size` in the repository — an over-count inside an honesty fix, which is strictly worse
+//     than the silence it replaces. A method's scope is its class, so this is exactly as specific as the
+//     `Scope::name` tier the reporter showed already working.
+//   * Bodied only, via the house predicate (`endByte > sigEndByte` — shared verbatim with the decl/def
+//     collapse and arch.h's pure-interface detection), and langCompatible with the declaration, so a
+//     Python `putObject` never answers for a C++ header.
+//   * The declarations are KEPT alongside the definitions, not replaced. `--uses` counts reference sites
+//     against the decl too (a `Type::method` mention in another header), and dropping them would trade
+//     this silent zero for a smaller one.
+//
+// A pure-virtual base whose name is defined ONLY in its overrides (CloudStorage::putObject) finds no
+// same-scope body and is deliberately left at zero: the overrides are a DIFFERENT scope, and answering
+// with them would be a dynamic-dispatch claim this resolver cannot make. That residue is disclosed, not
+// guessed at — see the bodyless_defs= note in graphlegend.h. Gate: test/blindspotcheck.sh arm (C).
+//
+// #63's follow-through, as its own function: inlined it cost resolveAllByNameQualified cx 14 -> 49 and
+// nesting 2 -> 5 (ripwire's own --quality-delta said so), for a rule that is one self-contained question.
+// `sel` is the file-tier selection, widened IN PLACE; empty `file` or a selection that already holds a
+// definition leaves it byte-identical. See the contract note at the call site.
+inline void declToDefFollowThrough( const IngestResult& ing, std::string_view file, std::string_view name,
+                                    std::vector<NodeId>& sel )
+{
+    if( file.empty() || sel.empty() )
+    {
+        return;
+    }
+    const auto hasBody = [ & ]( NodeId id ) noexcept
+    { return ing.symbols[id].endByte > ing.symbols[id].sigEndByte; };
+
+    for( NodeId id : sel )
+    {
+        if( hasBody( id ) )
+        {
+            return;   // the selector already found an implementation - nothing to widen
+        }
+    }
+
+    std::vector<NodeId> defs;
+    for( NodeId declId : sel )
+    {
+        const Symbol& d = ing.symbols[ declId ];
+        for( const Symbol& s : ing.symbols )
+        {
+            const bool sameContract = s.name == name && s.scope == d.scope && hasBody( s.id );
+            if( sameContract && langCompatible( s.lang, d.lang ) && std::find( defs.begin(), defs.end(), s.id ) == defs.end() )
+            {
+                defs.push_back( s.id );
+            }
+        }
+    }
+    for( NodeId id : defs )
+    {
+        sel.push_back( id );   // KEEP the decls - see the fifth clause of the call site's note
+    }
+    std::sort( sel.begin(), sel.end() );   // NodeId order - the contract every caller of this already relies on
+}
+
 inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec )
 {
     if( !spec.empty() && spec.front() == '@' )
@@ -3706,6 +3795,10 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
             out.push_back( s.id );
         }
     }
+
+    // #63: a header-qualified selector resolves to DECLARATIONS, which carry no call-graph edges.
+    // Widen to the definitions they stand for. Full contract and its limits: declToDefFollowThrough above.
+    declToDefFollowThrough( ing, file, name, out );
     return out;
 }
 
@@ -4499,9 +4592,63 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 // UN-deduped (dedup=false): one entry per include OCCURRENCE, preserving the occurrence-count semantics the
 // weakest-link cutrefs metric and afferent counts depend on — the ONLY change vs the old basename resolver
 // is the string→fileId step (basename → precise), so those metrics stay byte-identical absent a collision.
+// STRUCTURE vs USE (parser version 83, test/rubyrecvcheck.sh §5). The adjacency --deps/--arch/--report measure is
+// the LOAD-TIME structure: a (from,to) pair every one of whose directives is LAZY — written inside a closure
+// (Ruby method/lambda/block, TS/JS function body), or a Ruby `autoload` — is a USE of `to`, not a dependency
+// the loading of `from` incurs, and it is left out here. It stays everywhere use is the question: --impact's
+// importer tier (lazy="1"), the file's own <inc t=> rows, call-resolution narrowing (buildGraph's
+// fileIncludes), --expand's siblings, --cochange's static-coupling test. Why the cut: under runtime constant
+// references a Rails application is one strongly-connected core — measured on a 3532-file app, ccd went
+// 12 740 → 1 407 232 and every Ruby corpus read "tangled" — and a lens that reads the same everywhere is not
+// a lens. The cut is disclosed where it is made: `lazyEdges` (→ <health lazy_edges=>) counts the DISTINCT
+// pairs left out, `lazyEdgesByFile[f]` (→ <f lazy_edges=>) the pairs left out of f's own row. recordLazyPair's
+// rule decides laziness: one load-time directive for the pair makes the whole pair load-time.
+struct StructuralIncludeAdj
+{
+    std::vector<std::vector<std::uint32_t>> adj;               // UN-deduped occurrences, minus the all-lazy pairs
+    std::vector<std::uint32_t>              lazyEdgesByFile;   // distinct (f, to) pairs left out, per f
+    std::uint64_t                           lazyEdges = 0;     // Σ lazyEdgesByFile
+};
+
+inline StructuralIncludeAdj resolveStructuralIncludeAdj( const IngestResult& ing )
+{
+    HashMap<std::uint64_t, char> lazyPairs;
+    StructuralIncludeAdj         out;
+    out.adj = buildPreciseIncludeAdj( ing, /*dedup=*/false, &lazyPairs );
+    out.lazyEdgesByFile.assign( out.adj.size(), 0 );
+    if( lazyPairs.empty() )
+    {
+        return out;   // no lazy directive anywhere: the structure IS the full graph, byte-identical to before
+    }
+    for( std::uint32_t f = 0; f < out.adj.size(); ++f )
+    {
+        std::vector<std::uint32_t>& outs = out.adj[f];
+        std::uint32_t               kept = 0;
+        std::uint32_t               lastDropped = std::numeric_limits<std::uint32_t>::max();
+        for( std::uint32_t j = 0; j < outs.size(); ++j )
+        {
+            const std::uint32_t to  = outs[j];
+            const auto          it  = lazyPairs.find( ( std::uint64_t( f ) << 32 ) | std::uint64_t( to ) );
+            if( it != lazyPairs.end() && it->second != 0 )
+            {
+                if( to != lastDropped )   // outs is sorted (buildPreciseIncludeAdj), so equal ids are adjacent: count the PAIR once
+                {
+                    ++out.lazyEdgesByFile[f];
+                    lastDropped = to;
+                }
+                continue;
+            }
+            outs[kept++] = to;
+        }
+        outs.resize( kept );
+        out.lazyEdges += out.lazyEdgesByFile[f];
+    }
+    return out;
+}
+
 inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestResult& ing )
 {
-    return buildPreciseIncludeAdj( ing, /*dedup=*/false );
+    return resolveStructuralIncludeAdj( ing ).adj;
 }
 
 // ── LB-H (r10 GitNexus round) — IMPORT REACH, the second and much weaker kind of blast radius ────────────
@@ -5773,15 +5920,17 @@ inline ZoomHierarchy multiLevelCommunities( const Graph& g, std::uint32_t maxTop
 
 
 // M15 (capture-audit 2026-09-04): the GAUGE + MARKER a graph-floored root splices — one call, so the pair and
-// the floor can never land separately. graph_ambiguous=/graph_unresolved= are the whole graph's ambOut /
+// the floor can never land separately. #66 (2026-09-08) made the pair a TRIO by adding g.unindexedFiles here
+// rather than at ~40 emit sites: every root that already carried the floor now discloses the unread-file gap
+// too, and no verb can be added that carries one and not the other. graph_ambiguous=/graph_unresolved= are the whole graph's ambOut /
 // unresolvedOut totals (the map header's ambiguous=/unresolved=, same fold); counts_floor="1" stays LAST.
 inline std::string graphCountFloorAttrXml( const Graph& g )
 {
-    return graphGaugeAttrXml( g.ambOut, g.unresolvedOut ) + kGraphCountFloorAttrXml;
+    return graphGaugeAttrXml( g.ambOut, g.unresolvedOut, g.unindexedFiles ) + kGraphCountFloorAttrXml;
 }
 inline std::string graphCountFloorAttrJson( const Graph& g )
 {
-    return graphGaugeAttrJson( g.ambOut, g.unresolvedOut ) + kGraphCountFloorAttrJson;
+    return graphGaugeAttrJson( g.ambOut, g.unresolvedOut, g.unindexedFiles ) + kGraphCountFloorAttrJson;
 }
 
 }   // namespace rw

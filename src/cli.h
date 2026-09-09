@@ -15,6 +15,7 @@
 
 #include "ingest.h"   // rw::kDefaultMaxFileBytes — the canonical crawl size ceiling (--max-file-size)
 #include "version.h"  // configure-generated kRipwireVersion + short build info (--version)
+#include "infra/emit.h" // rw::emitTo + kEmitterName — --version discloses the emitter that compiled in (emit=)
 
 namespace rw
 {
@@ -1239,7 +1240,13 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               which can't participate in the graph) -- --arch's propagation_cost uses the same N.\n"
         "                               <health dep_langs=> names that language set, which is what makes a dep_files=/ccd/\n"
         "                               acd/nccd number comparable across builds: sh, rb, lua and ex joined it at parser\n"
-        "                               version 81 and every one of those numbers moved on a corpus holding them\n"
+        "                               version 81 and every one of those numbers moved on a corpus holding them.\n"
+        "                               STRUCTURE vs USE (parser version 83): a LAZY edge -- every directive of the pair\n"
+        "                               written inside a closure (Ruby method/lambda/block, TS/JS function body) or a Ruby\n"
+        "                               autoload -- is a use, not a load-time dependency: it is in --impact's importer tier\n"
+        "                               (lazy=1) and in the row's inc t= list, NOT in afferent/instab/transitive/godfiles/\n"
+        "                               stabledeps/cycles/ccd/acd/nccd/shape. <health lazy_edges=> counts the pairs left out,\n"
+        "                               a row's lazy_edges= its own; both absent when 0\n"
         "    --hotspots                 complexity x recent git churn (maintenance pain); each row's top= is the worst function's\n"
         "                               BARE name, top_ccx= its cognitive complexity, top_l= its source line (build an --expand\n"
         "                               selector from p=/top_l=/top=, not from top= alone — it no longer carries a :line suffix)\n"
@@ -4241,8 +4248,11 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // H) — labelled the same way here rather than left as a bare "git <sha>" a reader could
             // mistake for the tree's current HEAD (that is --doctor's separate at=, which moves the
             // moment you commit without rebuilding; this one does not, until the next build).
-            std::printf( "ripwire %s (%s, %s %s, built_from=%s)\n", kRipwireVersion, kRipwireBuildType,
-                         kRipwireCompilerId, kRipwireCompilerVer, kRipwireGitStamp );
+            // emit= names the formatted-output path this binary compiled in (infra/emit.h; test/versioncheck.sh
+            // #6, and asserted per CI leg). It precedes built_from= on purpose: test/doctorcheck.sh arm (H)
+            // reads built_from= as everything up to the closing paren, so the sha stays the LAST token.
+            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, built_from={})\n", kRipwireVersion, kRipwireBuildType,
+                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, kRipwireGitStamp );
             std::exit( 0 );
         }
 

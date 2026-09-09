@@ -138,7 +138,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             std::printf( "%s%s%s-->%s%s", rw::callHierarchyLegendOpen( wantCallers ).c_str(),
                          rw::capLegendClause( rw::computePageDisclosure( pw.end - pw.begin, result.size(), pw.end,
                                                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap ).active ),
-                         rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( chSingleRoot ),
+                         rw::graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), rw::rootRelPathsLegend( chSingleRoot ),
                          rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
         }
 
@@ -285,7 +285,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         std::printf( "<!-- ripwire graph-query: a fixed-operator node-set query over the call graph (sources "
                      "name/all; filters kind/cx/fanin/file/layer; bounded closure callers/callees; joins and/or/not), "
                      "ranked by importance + capped at the top-k limit (default 200); narrow the query or raise top-k for more. NOT Datalog. "
-                     "%s%s-->", rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                     "%s%s-->", rw::graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY): count= is the true total and
         // shown= the --top-k slice, but capped= was missing — so a caller reading a 200-row answer had to
         // know the default top-k to tell a complete result from a truncated one. Rule 3: the bit is always
@@ -582,7 +582,7 @@ std::optional<int> runUses( const MainDispatch& d )
                      "%s%s-->%s%s", rw::kUsesLegendOpen,
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
-                     rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( usSingleRoot ),
+                     rw::graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), rw::rootRelPathsLegend( usSingleRoot ),
                      // M12: same multi-root roots-table disclosure --callers/--callees gained.
                      rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
         char              upab[ kPageDisclosureCap ];
@@ -661,7 +661,7 @@ std::optional<int> runUses( const MainDispatch& d )
 // §G4: an XML comment may never contain the literal byte pair "--", so every sibling-verb mention below is
 // spelled WITHOUT its leading flag dashes (impact/uses/callers/dead-code) — the one departure from how this
 // file's prose comments spell them elsewhere.
-inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t ambiguousCallers, std::string_view risk, bool singleRoot )
+inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t ambiguousCallers, std::string_view risk, bool singleRoot, bool hasUnindexed )
 {
     std::printf( "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
                 "— never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers "
@@ -699,7 +699,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t ambiguousCal
                   : risk == "untested-radius"
                       ? "untested-radius: callers or uses exist, and NONE of the transitive blast radius is test-covered. "
                       : "uses-exist: callers or uses exist, and at least part of the radius is test-covered. ",
-                rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( singleRoot ) );
+                rw::graphCountDisclosure( hasUnindexed ).c_str(), rw::rootRelPathsLegend( singleRoot ) );
 }
 
 // risk= NAMES what was found, never a go/no-go verdict: "none-found" (zero 1-hop callers AND zero use
@@ -862,7 +862,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // shared graphCountDisclosure() tail is untouched, byte for byte: test/floormarkcheck.sh pins it across
     // seven other verbs and a private shorter copy here would be exactly the dialect divergence it exists
     // to catch.
-    emitSafeDeleteLegend( defs.size(), ambiguousCallers, risk, sdSingleRoot );
+    emitSafeDeleteLegend( defs.size(), ambiguousCallers, risk, sdSingleRoot, g.unindexedFiles > 0 );
 
     const Symbol&      lead = ing.symbols[ defs[0] ];   // resolveAllByNameQualified walks ascending id — defs[0] is the
                                                         // lowest, same convention --impact/--uses/--callers's of=/defs=
@@ -1863,7 +1863,7 @@ std::optional<int> runPath( const MainDispatch& d )
         // same question --verify=calls(A,B) answers `not-established` + counts_floor="1" for. Same marker,
         // same brief sentence, on both transports (mcpverbs.h path_between mirrors this line).
         std::printf( "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                     "graph holds none. %s-->%s", rw::kGraphCountFloorBriefLegend, rw::rootRelPathsLegend( pthSingleRoot ) );
+                     "graph holds none. %s-->%s", rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::rootRelPathsLegend( pthSingleRoot ) );
         std::printf( "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s%s",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                      srcDefs.size(), dstDefs.size(),
@@ -2154,7 +2154,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                          cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend,
                          rw::kTestedRowLegend, rw::kImpactTestedPartitionLegend,   // A6
                          rw::kTestedLensBlindSpotLegend,                           // F-02: rides with the partition
-                         rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                         rw::graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         }
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact; pageDisclosure emits the ` shown= capped=` bytes this verb used to hand-roll
